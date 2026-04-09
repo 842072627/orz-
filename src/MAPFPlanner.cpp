@@ -64,8 +64,8 @@ void MAPFPlanner::plan(int time_limit, Plan & plan)
     // - 更多步 = 更长的规划时间，可能超时
     // - 更少步 = 动作不够，机器人到下轮 planning 前会原地等待
     // - 这个公式刚好平衡两者
-    int min_plan_steps = (int)(env->min_planner_communication_time 
-                       / (env->action_time * env->max_counter)) + 1;
+    int min_plan_steps = std::max(1, (int)(env->min_planner_communication_time 
+                       / (env->action_time * env->max_counter)));
 
     DefaultPlanner::plan(limit, plan.actions, env, min_plan_steps);
 }
