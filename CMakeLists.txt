@@ -33,7 +33,7 @@ file(GLOB DEFAULT_PLANNER_SOURCES "default_planner/*.cpp")
 
 
 # Find Boost
-ADD_DEFINITIONS(-DBOOST_LOG_DYN_LINK)
+ADD_DEFINITIONS(-DBOOST_LOG_NO_LIB)
 #SET(Boost_USE_STATIC_LIBS ON)
 find_package( Boost 1.49.0 REQUIRED COMPONENTS program_options system filesystem log log_setup)
 
