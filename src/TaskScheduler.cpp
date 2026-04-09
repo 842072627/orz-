@@ -169,7 +169,7 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule)
     if (do_sampling) {
         // 大规模模式：每个空闲机器人只评估最近的 K 个任务
         // 用曼哈顿距离快速筛选，避免对每个对都调用 get_h
-        const int K = std::min(20, n_tasks);
+        const int K = std::min(12, n_tasks);
         std::vector<std::pair<int,int>> task_dists; // (manhattan_dist, task_id)
 
         for (int ag : free_agents) {
@@ -302,7 +302,7 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule)
             int swap_dist2 = compute_task_dist(env->curr_states[r2.agent].location, it1->second, env);
             int swap_cost = swap_dist1 + swap_dist2;
 
-            if (swap_cost < curr_cost - 2) {
+            if (swap_cost < curr_cost - 1) {
                 proposed_schedule[r1.agent] = r2.task;
                 proposed_schedule[r2.agent] = r1.task;
                 env->task_pool[r1.task].agent_assigned = r2.agent;
