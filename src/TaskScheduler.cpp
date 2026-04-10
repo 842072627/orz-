@@ -206,8 +206,9 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule)
                 int wait = std::max(0, env->curr_timestep - task.t_revealed);
                 int remaining = (int)task.locations.size() - task.idx_next_loc;
 
-                // ARCH-B: Throughput-First scoring
-                int score = wait * 50 + remaining * 150 - dist - turn * 2 - cong * 30;
+                // ARCH-B R2: Short-task priority (反转 remaining 系数)
+                // 优先短链任务：减少任务堆积，提高单位时间完成任务数
+                int score = wait * 50 - remaining * 200 - dist - turn * 2 - cong * 30;
                 assignments.push_back({ag, t_id, -score});
             }
         }
@@ -233,8 +234,8 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule)
                 int dist = compute_task_dist(agent_loc, task, env);
                 int turn = get_turn_count(agent_ori, agent_loc, first_loc, env);
 
-                // ARCH-B: Throughput-First scoring
-                int score = wait * 50 + remaining * 150 - dist - turn * 2 - cong * 30;
+                // ARCH-B R2: Short-task priority
+                int score = wait * 50 - remaining * 200 - dist - turn * 2 - cong * 30;
                 assignments.push_back({ag, t_id, -score});
             }
         }
@@ -269,7 +270,8 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule)
         int cong = get_congestion(first_loc, env, cong_map);
         int wait = std::max(0, env->curr_timestep - t_it->second.t_revealed);
         int remaining = (int)t_it->second.locations.size() - t_it->second.idx_next_loc;
-        int tp_score = wait * 50 + remaining * 150 - dist - turn * 2 - cong * 30;
+        // ARCH-B R2: Short-task priority
+        int tp_score = wait * 50 - remaining * 200 - dist - turn * 2 - cong * 30;
         this_round.push_back({a.agent, a.task, tp_score});
     }
 
@@ -321,13 +323,13 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule)
             int c1 = get_congestion(t2_first, env, cong_map);
             int w1 = std::max(0, env->curr_timestep - it2->second.t_revealed);
             int rem1 = (int)it2->second.locations.size() - it2->second.idx_next_loc;
-            int swap_score1 = w1 * 50 + rem1 * 150 - d1 - t1 * 2 - c1 * 30;
+            int swap_score1 = w1 * 50 - rem1 * 200 - d1 - t1 * 2 - c1 * 30;
             int d2 = compute_task_dist(ag2_loc, it1->second, env);
             int t2 = get_turn_count(ag2_ori, ag2_loc, t1_first, env);
             int c2 = get_congestion(t1_first, env, cong_map);
             int w2 = std::max(0, env->curr_timestep - it1->second.t_revealed);
             int rem2 = (int)it1->second.locations.size() - it1->second.idx_next_loc;
-            int swap_score2 = w2 * 50 + rem2 * 150 - d2 - t2 * 2 - c2 * 30;
+            int swap_score2 = w2 * 50 - rem2 * 200 - d2 - t2 * 2 - c2 * 30;
             int swap_score = swap_score1 + swap_score2;
 
             if (swap_score > curr_score + 50) { // require meaningful improvement
