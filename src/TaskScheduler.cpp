@@ -24,7 +24,7 @@ struct Assignment {
 struct AssignRecord {
     int agent;
     int task;
-    int throughput_score; // ARCH-B: higher is better
+    int raw_dist;
 };
 
 // 旋转次数：从当前朝向转到面向 to_loc 的方向需要几次旋转
@@ -206,10 +206,8 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule)
                 int wait = std::max(0, env->curr_timestep - task.t_revealed);
                 int remaining = (int)task.locations.size() - task.idx_next_loc;
 
-                // ARCH-B R3: Space-filling — spread agents to low-density zones
-                // Heavy congestion penalty pushes assignments toward empty areas
-                int score = wait * 30 + remaining * 50 - dist - turn * 2 - cong * 80;
-                assignments.push_back({ag, t_id, -score});
+                int cost = dist + turn + cong * 3 - wait / 3 + remaining / 2;
+                assignments.push_back({ag, t_id, cost});
             }
         }
     } else {
@@ -234,9 +232,8 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule)
                 int dist = compute_task_dist(agent_loc, task, env);
                 int turn = get_turn_count(agent_ori, agent_loc, first_loc, env);
 
-                // ARCH-B R3: Space-filling
-                int score = wait * 30 + remaining * 50 - dist - turn * 2 - cong * 80;
-                assignments.push_back({ag, t_id, -score});
+                int cost = dist + turn + cong * 3 - wait / 3 + remaining / 2;
+                assignments.push_back({ag, t_id, cost});
             }
         }
     }
@@ -261,18 +258,8 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule)
         assigned_agents.insert(a.agent);
         env->task_pool[a.task].agent_assigned = a.agent;
 
-        // ARCH-B: compute throughput score at assignment time
-        int agent_loc = env->curr_states.at(a.agent).location;
-        int agent_ori = env->curr_states.at(a.agent).orientation;
-        int first_loc = t_it->second.locations.at(t_it->second.idx_next_loc);
-        int dist = compute_task_dist(agent_loc, t_it->second, env);
-        int turn = get_turn_count(agent_ori, agent_loc, first_loc, env);
-        int cong = get_congestion(first_loc, env, cong_map);
-        int wait = std::max(0, env->curr_timestep - t_it->second.t_revealed);
-        int remaining = (int)t_it->second.locations.size() - t_it->second.idx_next_loc;
-        // ARCH-B R3: Space-filling
-        int tp_score = wait * 30 + remaining * 50 - dist - turn * 2 - cong * 80;
-        this_round.push_back({a.agent, a.task, tp_score});
+        int raw_dist = compute_task_dist(env->curr_states[a.agent].location, t_it->second, env);
+        this_round.push_back({a.agent, a.task, raw_dist});
     }
 
     // 清理 free 集合
@@ -305,40 +292,23 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule)
             auto& r1 = this_round[i1];
             auto& r2 = this_round[i2];
 
-            // ARCH-B: swap if it improves total throughput score
-            int curr_score = r1.throughput_score + r2.throughput_score;
+            int curr_cost = r1.raw_dist + r2.raw_dist;
 
             auto it1 = env->task_pool.find(r1.task);
             auto it2 = env->task_pool.find(r2.task);
             if (it1 == env->task_pool.end() || it2 == env->task_pool.end()) continue;
 
-            int ag1_loc = env->curr_states[r1.agent].location;
-            int ag1_ori = env->curr_states[r1.agent].orientation;
-            int ag2_loc = env->curr_states[r2.agent].location;
-            int ag2_ori = env->curr_states[r2.agent].orientation;
-            int t1_first = it1->second.locations.at(it1->second.idx_next_loc);
-            int t2_first = it2->second.locations.at(it2->second.idx_next_loc);
-            int d1 = compute_task_dist(ag1_loc, it2->second, env);
-            int t1 = get_turn_count(ag1_ori, ag1_loc, t2_first, env);
-            int c1 = get_congestion(t2_first, env, cong_map);
-            int w1 = std::max(0, env->curr_timestep - it2->second.t_revealed);
-            int rem1 = (int)it2->second.locations.size() - it2->second.idx_next_loc;
-            int swap_score1 = w1 * 30 + rem1 * 50 - d1 - t1 * 2 - c1 * 80;
-            int d2 = compute_task_dist(ag2_loc, it1->second, env);
-            int t2 = get_turn_count(ag2_ori, ag2_loc, t1_first, env);
-            int c2 = get_congestion(t1_first, env, cong_map);
-            int w2 = std::max(0, env->curr_timestep - it1->second.t_revealed);
-            int rem2 = (int)it1->second.locations.size() - it1->second.idx_next_loc;
-            int swap_score2 = w2 * 30 + rem2 * 50 - d2 - t2 * 2 - c2 * 80;
-            int swap_score = swap_score1 + swap_score2;
+            int swap_dist1 = compute_task_dist(env->curr_states[r1.agent].location, it2->second, env);
+            int swap_dist2 = compute_task_dist(env->curr_states[r2.agent].location, it1->second, env);
+            int swap_cost = swap_dist1 + swap_dist2;
 
-            if (swap_score > curr_score + 50) { // require meaningful improvement
+            if (swap_cost < curr_cost - 1) {
                 proposed_schedule[r1.agent] = r2.task;
                 proposed_schedule[r2.agent] = r1.task;
                 env->task_pool[r1.task].agent_assigned = r2.agent;
                 env->task_pool[r2.task].agent_assigned = r1.agent;
-                r1.throughput_score = swap_score1;
-                r2.throughput_score = swap_score2;
+                r1.raw_dist = swap_dist1;
+                r2.raw_dist = swap_dist2;
                 std::swap(r1.task, r2.task);
             }
         }
