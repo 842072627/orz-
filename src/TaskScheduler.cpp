@@ -171,7 +171,7 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule)
 
     std::vector<Assignment> bids; // (agent, best_task, eagerness)
 
-    const int K = std::min(12, n_tasks);
+    const int K = std::min(16, n_tasks); // R15: increase from 12 to 16
     std::vector<std::pair<int,int>> task_dists;
 
     for (int ag : free_agents) {
