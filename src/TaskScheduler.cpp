@@ -210,12 +210,13 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule)
             int wait = std::max(0, env->curr_timestep - task.t_revealed);
             int remaining = (int)task.locations.size() - task.idx_next_loc;
 
-            // ARCH-C R3: Ratio-based eagerness
-            // Eagerness = (remaining*100 + wait*5) * 1000 / (dist+1) - turn*2 - cong*30
-            // remaining*100 normalizes to waypoint units, wait*5 converts timestep->waypoint equiv
-            // Ratio form rewards: high remaining waypoints, urgent wait, close distance
+            // ARCH-C R7: Adaptive congestion penalty
+            // Only penalize congestion when cong > 3 (threshold-based)
+            // For open maps (paris/brc202d), naturally low congestion = no penalty
+            // For warehouse maps, high congestion triggers stronger avoidance
             int ratio = (remaining * 100 + wait * 5) * 1000 / (dist + 1);
-            int eagerness = ratio - turn * 2 - cong * 30;
+            int cong_penalty = (cong > 3) ? (cong - 3) * 50 : 0; // threshold 3, penalty 50 per level
+            int eagerness = ratio - turn * 2 - cong_penalty;
 
             if (eagerness > best_eagerness) {
                 best_eagerness = eagerness;
