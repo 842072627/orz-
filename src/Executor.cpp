@@ -135,11 +135,14 @@ void Executor::next_command(int exec_time_limit, std::vector<ExecutionCommand> &
         if (!decided[i])
             mcp(i, decided, agent_command);
     }
-    
+
 }
 
 bool Executor::mcp(int agent_id, vector<bool> & curr_decision, std::vector<ExecutionCommand> & agent_command)
 {
+    // R300: Priority-based MCP with goal-distance priority
+    // Agents closer to their goal get priority to move
+    
     // cout<<"mcp for "<<agent_id<<endl;
     if (env->staged_actions[agent_id].empty())
     {
@@ -175,54 +178,64 @@ bool Executor::mcp(int agent_id, vector<bool> & curr_decision, std::vector<Execu
         }
         else
         {
-            // //try to go by recursion
-            // int blocking_agent_id = temp_tpg[next_location].front();
-
-            // cout<<"agent "<<agent_id<<" next loc "<<next_location<<" tpg blocking agent "<<blocking_agent_id<<endl;
-
-            // int next_id=-1;
-            // auto it = temp_tpg[next_location].begin();
-            // if (it != temp_tpg[next_location].end()) 
-            // {
-            //     auto it2 = std::next(it);
-            //     if (it2 != temp_tpg[next_location].end()) 
-            //     {
-            //         // *it2 is the second element
-            //         next_id = *it2;
-            //     }
-            // }
-
-            // assert(next_id != -1); 
+            // R300: Check if the blocking agent has lower priority
+            int blocking_agent_id = tpg[next_location].front();
             
-            // if (curr_decision[blocking_agent_id] || next_id != agent_id)
-            // {                
-            //     //the blocking agent has already made the decision or current agent is not on the second order, so we cannot go
-            //     agent_command[agent_id] = ExecutionCommand::STOP;
-            //     curr_decision[agent_id] = true;
-            //     return false;       
-            // }
-
-            // //try to simulate to see if the agent can go by pushing blocking agent
-            // curr_decision[agent_id] = true;
-            // if (!temp_tpg[curr_location].empty())
-            //     temp_tpg[curr_location].pop_front(); //temporarily pop the current agent from temp_tpg to simulate the move
-
-            // if (mcp(blocking_agent_id, curr_decision, agent_command) && temp_tpg[next_location].front() == agent_id)
-            // {
-
-            //     //now agent can go and clear the tpg order
-            //     agent_command[agent_id] = ExecutionCommand::GO;
-            //     cout<<"mcp true, agent "<<agent_id<<" decided to move to "<<next_location<<endl;
-            //     // curr_decision[agent_id] = true;
-            //     return true;
-            // }
-            // else
-            // {
-                //the blocking agent cannot go, so we cannot go
-                agent_command[agent_id] = ExecutionCommand::STOP;
+            // R301/303: Reversed priority - FURTHER from goal has priority to clear congestion
+            // Agents that are further from their goal get priority to move
+            int agent_goal_dist = 0;
+            int blocking_goal_dist = 0;
+            
+            if (agent_id < (int)env->goal_locations.size() && !env->goal_locations[agent_id].empty()) {
+                int goal = env->goal_locations[agent_id].front().first;
+                agent_goal_dist = std::abs(curr_location - goal) + std::abs(next_location - goal);
+            }
+            if (blocking_agent_id < (int)env->goal_locations.size() && !env->goal_locations[blocking_agent_id].empty()) {
+                int goal = env->goal_locations[blocking_agent_id].front().first;
+                int blocking_loc = env->system_states[blocking_agent_id].location;
+                blocking_goal_dist = std::abs(blocking_loc - goal);
+            }
+            
+            // R301: If we have HIGHER priority (HIGHER distance to goal), push through
+            // This helps clear congested areas by letting agents that are far from goal move first
+            // R304: Also consider remaining distance to next sub-goal (waypoint)
+            int agent_next_waypoint_dist = 0;
+            int blocking_next_waypoint_dist = 0;
+            
+            if (agent_id < (int)env->goal_locations.size() && !env->goal_locations[agent_id].empty()) {
+                // Distance from next_location to the next sub-goal in the task chain
+                int next_subgoal = env->goal_locations[agent_id].front().first;
+                agent_next_waypoint_dist = std::abs(next_location - next_subgoal);
+            }
+            if (blocking_agent_id < (int)env->goal_locations.size() && !env->goal_locations[blocking_agent_id].empty()) {
+                int blocking_loc = env->system_states[blocking_agent_id].location;
+                int blocking_next_subgoal = env->goal_locations[blocking_agent_id].front().first;
+                blocking_next_waypoint_dist = std::abs(blocking_loc - blocking_next_subgoal);
+            }
+            
+            // R304: Combined priority: goal_distance + next_waypoint_distance
+            // Agent with larger combined distance has priority
+            int agent_priority = agent_goal_dist + agent_next_waypoint_dist;
+            int blocking_priority = blocking_goal_dist + blocking_next_waypoint_dist;
+            
+            if (agent_priority > blocking_priority && !curr_decision[blocking_agent_id]) {
+                // We have higher priority - try to push the blocking agent
                 curr_decision[agent_id] = true;
-                return false;
-            // }
+                
+                // Recursively try MCP for blocking agent
+                bool blocking_can_go = mcp(blocking_agent_id, curr_decision, agent_command);
+                
+                if (blocking_can_go && tpg[next_location].front() == agent_id) {
+                    // Blocking agent yielded and we now have priority
+                    agent_command[agent_id] = ExecutionCommand::GO;
+                    return true;
+                }
+            }
+            
+            //the blocking agent cannot go, so we cannot go
+            agent_command[agent_id] = ExecutionCommand::STOP;
+            curr_decision[agent_id] = true;
+            return false;
         }
     }
     
