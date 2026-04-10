@@ -189,16 +189,7 @@ bool Executor::mcp(int agent_id, vector<bool> & curr_decision, std::vector<Execu
                 blocking_goal_dist = std::abs(blocking_loc - goal);
             }
 
-            // R306: Higher distance = higher priority = push through
-            if (agent_goal_dist > blocking_goal_dist && !curr_decision[blocking_agent_id]) {
-                curr_decision[agent_id] = true;
-                bool blocking_can_go = mcp(blocking_agent_id, curr_decision, agent_command);
-                if (blocking_can_go && tpg[next_location].front() == agent_id) {
-                    agent_command[agent_id] = ExecutionCommand::GO;
-                    return true;
-                }
-            }
-
+            // FIFO: no priority, first-come-first-served
             agent_command[agent_id] = ExecutionCommand::STOP;
             curr_decision[agent_id] = true;
             return false;
