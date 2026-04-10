@@ -27,7 +27,7 @@ struct AssignRecord {
     int raw_dist;
 };
 
-// 旋转次数：从当前朝向转到面向 to_loc 的方向需要几次旋转
+// 旋转次数
 inline int get_turn_count(int curr_ori, int from_loc, int to_loc, const SharedEnvironment* env)
 {
     if (from_loc == to_loc) return 0;
@@ -114,7 +114,6 @@ void clean_free_agents(const std::vector<int>& proposed_schedule)
 
 void TaskScheduler::initialize(int preprocess_time_limit)
 {
-    // 20% 给 scheduler，80% 给 planner
     int limit = preprocess_time_limit / 5 - DefaultPlanner::SCHEDULER_TIMELIMIT_TOLERANCE;
     if (limit < 10) limit = 10;
     DefaultPlanner::schedule_initialize(limit, env);
@@ -123,11 +122,16 @@ void TaskScheduler::initialize(int preprocess_time_limit)
 
 void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule)
 {
-    // ===== 累积增量信息 =====
+    // ARCH-C R1: Auction-based task assignment
+    // Each agent bids on tasks. The task goes to the highest bidder.
+    // Bid = eagerness score = (cost_benefit / distance) * urgency_multiplier
+    // This is fundamentally different from greedy which picks lowest cost.
+    // Greedy: "which agent should do this task?" (agent-centric)
+    // Auction: "which task should this agent do?" (task-centric, reversed)
+
     free_agents.insert(env->new_freeagents.begin(), env->new_freeagents.end());
     free_tasks.insert(env->new_tasks.begin(), env->new_tasks.end());
 
-    // 清理过期条目
     clean_free_tasks(env);
     clean_free_agents(proposed_schedule);
 
@@ -137,14 +141,10 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule)
         return;
     }
 
-    // ===== 时间管理 =====
     int n_free = (int)free_agents.size();
     int n_tasks = (int)free_tasks.size();
     int pairs = n_free * n_tasks;
 
-    // 大地图限制：如果候选对太多，只采样一部分
-    // 原因：warehouse_large_5000 上可能有上千空闲机器人×上千任务=百万对
-    //        全部计算代价太大，采样足够得到好的匹配
     bool do_sampling = (pairs > 50000);
     int max_pairs_to_eval = do_sampling ? 20000 : pairs;
 
@@ -153,113 +153,104 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule)
     if (limit < 5) limit = 5;
     if (limit > time_limit * 35 / 100) limit = time_limit * 35 / 100;
 
-    int greedy_ms = limit * 70 / 100;
-    TimePoint greedy_end = std::chrono::steady_clock::now() + std::chrono::milliseconds(greedy_ms);
-    TimePoint swap_end   = std::chrono::steady_clock::now() + std::chrono::milliseconds(limit);
+    TimePoint time_end = std::chrono::steady_clock::now() + std::chrono::milliseconds(limit);
 
-    // ===== 拥堵热力图 =====
+    // 拥堵热力图
     std::unordered_map<int, int> cong_map;
     build_congestion_map(env, cong_map);
 
     // ====================================================================
-    // 第一阶段：构建候选对 + 计算增强代价
+    // Auction Phase: Each agent bids on its best task
+    // Each agent computes the "eagerness" to do each candidate task
+    // Higher eagerness = more likely to get the task
     // ====================================================================
-    std::vector<Assignment> assignments;
+    // Eagerness = base_eagerness / (dist + 1) * urgency
+    // base_eagerness = reward for taking a task = wait_time + remaining_waypoints * 10
+    // dist = path distance to task
+    // urgency = how old/important the task is
 
-    if (do_sampling) {
-        // 大规模模式：每个空闲机器人只评估最近的 K 个任务
-        // 用曼哈顿距离快速筛选，避免对每个对都调用 get_h
-        const int K = std::min(12, n_tasks);
-        std::vector<std::pair<int,int>> task_dists; // (manhattan_dist, task_id)
+    std::vector<Assignment> bids; // (agent, best_task, eagerness)
 
-        for (int ag : free_agents) {
-            if (std::chrono::steady_clock::now() > greedy_end) break;
-            int agent_loc = env->curr_states.at(ag).location;
-            int agent_ori = env->curr_states.at(ag).orientation;
+    const int K = std::min(12, n_tasks);
+    std::vector<std::pair<int,int>> task_dists;
 
-            // 快速用曼哈顿距离筛选最近的 K 个任务
-            task_dists.clear();
-            for (int t_id : free_tasks) {
-                auto t_it = env->task_pool.find(t_id);
-                if (t_it == env->task_pool.end() || t_it->second.agent_assigned != -1 || t_it->second.is_finished()) continue;
-                int first_loc = t_it->second.locations.at(t_it->second.idx_next_loc);
-                int md = DefaultPlanner::manhattanDistance(agent_loc, first_loc, env);
-                task_dists.push_back({md, t_id});
-            }
-            // 部分排序：只取前 K 个
-            if ((int)task_dists.size() > K) {
-                std::nth_element(task_dists.begin(), task_dists.begin() + K, task_dists.end());
-                task_dists.resize(K);
-            }
+    for (int ag : free_agents) {
+        if (std::chrono::steady_clock::now() > time_end) break;
 
-            for (auto& [md, t_id] : task_dists) {
-                if (std::chrono::steady_clock::now() > greedy_end) break;
-                auto t_it = env->task_pool.find(t_id);
-                if (t_it == env->task_pool.end()) continue;
-                auto& task = t_it->second;
-                if (task.agent_assigned != -1 || task.is_finished()) continue;
+        int agent_loc = env->curr_states.at(ag).location;
+        int agent_ori = env->curr_states.at(ag).orientation;
 
-                int first_loc = task.locations.at(task.idx_next_loc);
-                int dist = compute_task_dist(agent_loc, task, env);
-                int turn = get_turn_count(agent_ori, agent_loc, first_loc, env);
-                int cong = get_congestion(first_loc, env, cong_map);
-                int wait = std::max(0, env->curr_timestep - task.t_revealed);
-                int remaining = (int)task.locations.size() - task.idx_next_loc;
-
-                int cost = dist + turn + cong * 3 - wait / 3 + remaining / 2;
-                assignments.push_back({ag, t_id, cost});
-            }
-        }
-    } else {
-        // 小规模模式：评估所有对
+        // Find K nearest tasks (by Manhattan distance for speed)
+        task_dists.clear();
         for (int t_id : free_tasks) {
-            if (std::chrono::steady_clock::now() > greedy_end) break;
             auto t_it = env->task_pool.find(t_id);
-            if (t_it == env->task_pool.end()) continue;
+            if (t_it == env->task_pool.end() || t_it->second.agent_assigned != -1 || t_it->second.is_finished()) continue;
+            int first_loc = t_it->second.locations.at(t_it->second.idx_next_loc);
+            int md = DefaultPlanner::manhattanDistance(agent_loc, first_loc, env);
+            task_dists.push_back({md, t_id});
+        }
+
+        if ((int)task_dists.size() > K) {
+            std::nth_element(task_dists.begin(), task_dists.begin() + K, task_dists.end());
+            task_dists.resize(K);
+        }
+
+        int best_task = -1;
+        int best_eagerness = -999999;
+
+        for (auto& [md, t_id] : task_dists) {
+            auto t_it = env->task_pool.find(t_id);
+            if (t_it == env->task_pool.end() || t_it->second.agent_assigned != -1) continue;
             auto& task = t_it->second;
-            if (task.agent_assigned != -1 || task.is_finished()) continue;
 
             int first_loc = task.locations.at(task.idx_next_loc);
+            int dist = compute_task_dist(agent_loc, task, env);
+            int turn = get_turn_count(agent_ori, agent_loc, first_loc, env);
             int cong = get_congestion(first_loc, env, cong_map);
             int wait = std::max(0, env->curr_timestep - task.t_revealed);
             int remaining = (int)task.locations.size() - task.idx_next_loc;
 
-            for (int ag : free_agents) {
-                if (std::chrono::steady_clock::now() > greedy_end) break;
-                int agent_loc = env->curr_states.at(ag).location;
-                int agent_ori = env->curr_states.at(ag).orientation;
+            // Auction bid = eagerness
+            // Higher when: task is urgent (high wait), has many waypoints (high remaining),
+            //              agent is close (low dist), low congestion
+            // ARCH-C: eagerness = wait*50 + remaining*100 - dist - turn*2 - cong*30
+            // This rewards agents that are close to important tasks
+            int eagerness = wait * 50 + remaining * 100 - dist - turn * 2 - cong * 30;
 
-                int dist = compute_task_dist(agent_loc, task, env);
-                int turn = get_turn_count(agent_ori, agent_loc, first_loc, env);
-
-                int cost = dist + turn + cong * 3 - wait / 3 + remaining / 2;
-                assignments.push_back({ag, t_id, cost});
+            if (eagerness > best_eagerness) {
+                best_eagerness = eagerness;
+                best_task = t_id;
             }
+        }
+
+        if (best_task != -1) {
+            bids.push_back({ag, best_task, best_eagerness});
         }
     }
 
     // ====================================================================
-    // 第二阶段：贪心匹配
+    // Allocation Phase: Each task goes to the highest bidder
+    // Sort bids by eagerness (descending), allocate greedily
     // ====================================================================
-    std::sort(assignments.begin(), assignments.end(),
-        [](const Assignment& a, const Assignment& b) { return a.cost < b.cost; });
+    std::sort(bids.begin(), bids.end(),
+        [](const Assignment& a, const Assignment& b) { return a.cost > b.cost; });
 
     std::vector<AssignRecord> this_round;
     std::unordered_set<int> assigned_tasks;
     std::unordered_set<int> assigned_agents;
 
-    for (auto& a : assignments) {
-        if (assigned_tasks.count(a.task) || assigned_agents.count(a.agent)) continue;
-        auto t_it = env->task_pool.find(a.task);
+    for (auto& b : bids) {
+        if (assigned_tasks.count(b.task) || assigned_agents.count(b.agent)) continue;
+        auto t_it = env->task_pool.find(b.task);
         if (t_it == env->task_pool.end() || t_it->second.agent_assigned != -1) continue;
 
-        proposed_schedule[a.agent] = a.task;
-        assigned_tasks.insert(a.task);
-        assigned_agents.insert(a.agent);
-        env->task_pool[a.task].agent_assigned = a.agent;
+        proposed_schedule[b.agent] = b.task;
+        assigned_tasks.insert(b.task);
+        assigned_agents.insert(b.agent);
+        env->task_pool[b.task].agent_assigned = b.agent;
 
-        int raw_dist = compute_task_dist(env->curr_states[a.agent].location, t_it->second, env);
-        this_round.push_back({a.agent, a.task, raw_dist});
+        int raw_dist = compute_task_dist(env->curr_states[b.agent].location, t_it->second, env);
+        this_round.push_back({b.agent, b.task, raw_dist});
     }
 
     // 清理 free 集合
@@ -272,15 +263,14 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule)
     }
 
     // ====================================================================
-    // 第三阶段：迭代优化 swap（LNS 简化版）
+    // Swap optimization phase (same as R7)
     // ====================================================================
-    // 只在分配数量合理时做 swap，大地图减少迭代次数
     if (this_round.size() >= 2) {
         int max_swaps = std::min((int)this_round.size() * 5, 800);
-        // 大地图进一步减少
         if (env->num_of_agents > 1000) max_swaps = std::min(max_swaps, 200);
-        
+
         std::uniform_int_distribution<int> rand_idx(0, (int)this_round.size() - 1);
+        TimePoint swap_end = std::chrono::steady_clock::now() + std::chrono::milliseconds(limit);
 
         for (int iter = 0; iter < max_swaps; iter++) {
             if (std::chrono::steady_clock::now() > swap_end) break;
