@@ -210,12 +210,9 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule)
             int wait = std::max(0, env->curr_timestep - task.t_revealed);
             int remaining = (int)task.locations.size() - task.idx_next_loc;
 
-            // ARCH-C R55: log(1+dist) instead of linear dist for softer distance penalty
-            // Linear dist means going from 10 to 20 adds 30 to denominator
-            // log(1+dist) means going from 10 to 20 adds only ~3.5
-            // This makes medium-distance tasks relatively more attractive
+            // ARCH-C R59: wait*12 (higher than wait*8) with log formula
             int log_dist = (int)(std::log(1.0 + dist) * 10.0); // scaled log
-            int ratio = (remaining * 100 + wait * 8) * 1000 / (log_dist + 1 + cong * 3);
+            int ratio = (remaining * 100 + wait * 12) * 1000 / (log_dist + 1 + cong * 3);
             int cong_penalty = (cong > 3) ? (cong - 3) * 50 : 0;
             int eagerness = ratio - turn * 2 - cong_penalty;
 
