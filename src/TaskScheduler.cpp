@@ -210,12 +210,12 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule)
             int wait = std::max(0, env->curr_timestep - task.t_revealed);
             int remaining = (int)task.locations.size() - task.idx_next_loc;
 
-            // ARCH-C R7: Adaptive congestion penalty
-            // Only penalize congestion when cong > 3 (threshold-based)
-            // For open maps (paris/brc202d), naturally low congestion = no penalty
-            // For warehouse maps, high congestion triggers stronger avoidance
-            int ratio = (remaining * 100 + wait * 5) * 1000 / (dist + 1);
-            int cong_penalty = (cong > 3) ? (cong - 3) * 50 : 0; // threshold 3, penalty 50 per level
+            // ARCH-C R35: Include congestion in distance denominator
+            // Congestion makes a destination effectively farther
+            // This is "congestion-aware bidding" - agents prefer less congested destinations
+            // Factor of 5 means cong=5 adds equivalent of 25 extra distance units
+            int ratio = (remaining * 100 + wait * 5) * 1000 / (dist + 1 + cong * 5);
+            int cong_penalty = (cong > 3) ? (cong - 3) * 50 : 0; // keep adaptive penalty too
             int eagerness = ratio - turn * 2 - cong_penalty;
 
             if (eagerness > best_eagerness) {
