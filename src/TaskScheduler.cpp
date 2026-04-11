@@ -217,9 +217,9 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule)
             // ARCH-C R83: higher penalty for high congestion (only >5 gets extra penalty)
             int log_dist = (int)(std::log(1.0 + dist) * 10.0); // scaled log
             int ratio = (remaining * 100 + wait * 16) * 1000 / (log_dist + 1 + cong * 7); // R129: try cong*7
-            int cong_penalty = (cong > 3) ? (cong - 3) * 50 : 0;
+            int cong_penalty = (cong > 3) ? (cong - 3) * 60 : 0; // R131: increase penalty 50->60
             // Extra penalty for very high congestion (>5)
-            if (cong > 5) cong_penalty += (cong - 5) * 30;
+            if (cong > 5) cong_penalty += (cong - 5) * 36; // R131: increase extra penalty 30->36
             int eagerness = ratio - turn * 2 - cong_penalty;
 
             // R101: distance tie-break — prefer closer task when eagerness similar
