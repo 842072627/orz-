@@ -180,14 +180,17 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule)
         int agent_loc = env->curr_states.at(ag).location;
         int agent_ori = env->curr_states.at(ag).orientation;
 
-        // Find K nearest tasks (by Manhattan distance for speed)
+        // R120: K selection prefers low-congestion areas even if slightly farther
+        // Use composite score: md + cong*5 (congestion penalty during selection)
         task_dists.clear();
         for (int t_id : free_tasks) {
             auto t_it = env->task_pool.find(t_id);
             if (t_it == env->task_pool.end() || t_it->second.agent_assigned != -1 || t_it->second.is_finished()) continue;
             int first_loc = t_it->second.locations.at(t_it->second.idx_next_loc);
             int md = DefaultPlanner::manhattanDistance(agent_loc, first_loc, env);
-            task_dists.push_back({md, t_id});
+            int cong = get_congestion(first_loc, env, cong_map);
+            int composite = md + cong * 5; // prefer low-congestion areas
+            task_dists.push_back({composite, t_id});
         }
 
         if ((int)task_dists.size() > K) {
