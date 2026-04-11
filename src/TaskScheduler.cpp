@@ -189,7 +189,7 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule)
             int first_loc = t_it->second.locations.at(t_it->second.idx_next_loc);
             int md = DefaultPlanner::manhattanDistance(agent_loc, first_loc, env);
             int cong = get_congestion(first_loc, env, cong_map);
-            int composite = md + cong * 5; // prefer low-congestion areas
+            int composite = md + cong * 6; // R128: also increase K-selection weight to match
             task_dists.push_back({composite, t_id});
         }
 
@@ -216,7 +216,7 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule)
 
             // ARCH-C R83: higher penalty for high congestion (only >5 gets extra penalty)
             int log_dist = (int)(std::log(1.0 + dist) * 10.0); // scaled log
-            int ratio = (remaining * 100 + wait * 16) * 1000 / (log_dist + 1 + cong * 5);
+            int ratio = (remaining * 100 + wait * 16) * 1000 / (log_dist + 1 + cong * 6); // R128: slightly higher congestion weight in eagerness
             int cong_penalty = (cong > 3) ? (cong - 3) * 50 : 0;
             // Extra penalty for very high congestion (>5)
             if (cong > 5) cong_penalty += (cong - 5) * 30;
