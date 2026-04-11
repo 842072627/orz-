@@ -197,6 +197,7 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule)
 
         int best_task = -1;
         int best_eagerness = -999999;
+        int best_dist = INT_MAX;
 
         for (auto& [md, t_id] : task_dists) {
             auto t_it = env->task_pool.find(t_id);
@@ -218,9 +219,13 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule)
             if (cong > 5) cong_penalty += (cong - 5) * 30;
             int eagerness = ratio - turn * 2 - cong_penalty;
 
-            if (eagerness > best_eagerness) {
+            // R101: distance tie-break — prefer closer task when eagerness similar
+            // This helps agents complete tasks faster, reducing makespan
+            if (eagerness > best_eagerness || 
+                (eagerness == best_eagerness && dist < best_dist)) {
                 best_eagerness = eagerness;
                 best_task = t_id;
+                best_dist = dist;
             }
         }
 
