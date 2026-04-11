@@ -210,9 +210,9 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule)
             int wait = std::max(0, env->curr_timestep - task.t_revealed);
             int remaining = (int)task.locations.size() - task.idx_next_loc;
 
-            // ARCH-C R59: wait*12 (higher than wait*8) with log formula
+            // ARCH-C R60: wait*16 (higher than wait*12) with log formula
             int log_dist = (int)(std::log(1.0 + dist) * 10.0); // scaled log
-            int ratio = (remaining * 100 + wait * 12) * 1000 / (log_dist + 1 + cong * 3);
+            int ratio = (remaining * 100 + wait * 16) * 1000 / (log_dist + 1 + cong * 3);
             int cong_penalty = (cong > 3) ? (cong - 3) * 50 : 0;
             int eagerness = ratio - turn * 2 - cong_penalty;
 
