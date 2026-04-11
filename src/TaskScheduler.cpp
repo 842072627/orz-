@@ -210,10 +210,12 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule)
             int wait = std::max(0, env->curr_timestep - task.t_revealed);
             int remaining = (int)task.locations.size() - task.idx_next_loc;
 
-            // ARCH-C R64: factor=5 with log + wait*16
+            // ARCH-C R83: higher penalty for high congestion (only >5 gets extra penalty)
             int log_dist = (int)(std::log(1.0 + dist) * 10.0); // scaled log
             int ratio = (remaining * 100 + wait * 16) * 1000 / (log_dist + 1 + cong * 5);
             int cong_penalty = (cong > 3) ? (cong - 3) * 50 : 0;
+            // Extra penalty for very high congestion (>5)
+            if (cong > 5) cong_penalty += (cong - 5) * 30;
             int eagerness = ratio - turn * 2 - cong_penalty;
 
             if (eagerness > best_eagerness) {
