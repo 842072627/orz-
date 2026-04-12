@@ -250,8 +250,8 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule)
     // Swap optimization
     // ====================================================================
     if (this_round.size() >= 2) {
-        int max_swaps = std::min((int)this_round.size() * 12, 1500);  // R17: 12x swaps
-        if (env->num_of_agents > 1000) max_swaps = std::min(max_swaps, 360);
+        int max_swaps = std::min((int)this_round.size() * 20, 2200);  // R25: 20x swaps vs 18x
+        if (env->num_of_agents > 1000) max_swaps = std::min(max_swaps, 550);
 
         std::uniform_int_distribution<int> rand_idx(0, (int)this_round.size() - 1);
         TimePoint swap_end = std::chrono::steady_clock::now() + std::chrono::milliseconds(limit);
