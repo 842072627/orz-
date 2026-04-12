@@ -133,7 +133,7 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule)
     bool do_sampling = (pairs > 50000);
     int max_pairs_to_eval = do_sampling ? 20000 : pairs;
 
-    int sched_pct = (pairs > 10000) ? 28 : 25;  // R21: back to 28%
+    int sched_pct = (pairs > 10000) ? 28 : 25;  // R31: back to 28%
     int limit = time_limit * sched_pct / 100 - DefaultPlanner::SCHEDULER_TIMELIMIT_TOLERANCE;
     if (limit < 5) limit = 5;
     if (limit > time_limit * 35 / 100) limit = time_limit * 35 / 100;
@@ -198,7 +198,7 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule)
 
             // R8: Back to factor=7 with distance tie-break (R101)
             int log_dist = (int)(std::log(1.0 + dist) * 10.0);
-            int ratio = (remaining * 80 + wait * 16) * 1000 / (log_dist + 1 + cong * 7);  // R12: remaining*80 vs *100
+            int ratio = (remaining * 100 + wait * 16) * 1000 / (log_dist + 1 + cong * 7);
             int eagerness = ratio - turn * 2 - cong_penalty;
 
             // Tie-break: prefer shorter distance
@@ -250,8 +250,8 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule)
     // Swap optimization
     // ====================================================================
     if (this_round.size() >= 2) {
-        int max_swaps = std::min((int)this_round.size() * 20, 2200);  // R25: 20x swaps vs 18x
-        if (env->num_of_agents > 1000) max_swaps = std::min(max_swaps, 550);
+        int max_swaps = std::min((int)this_round.size() * 15, 1800);  // R23: 15x swaps
+        if (env->num_of_agents > 1000) max_swaps = std::min(max_swaps, 450);
 
         std::uniform_int_distribution<int> rand_idx(0, (int)this_round.size() - 1);
         TimePoint swap_end = std::chrono::steady_clock::now() + std::chrono::milliseconds(limit);
