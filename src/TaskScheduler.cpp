@@ -27,7 +27,6 @@ struct AssignRecord {
     int raw_dist;
 };
 
-// 旋转次数
 inline int get_turn_count(int curr_ori, int from_loc, int to_loc, const SharedEnvironment* env)
 {
     if (from_loc == to_loc) return 0;
@@ -43,7 +42,6 @@ inline int get_turn_count(int curr_ori, int from_loc, int to_loc, const SharedEn
     return angle;
 }
 
-// 完成任务所有剩余 errand 的真实最短路总距离
 inline int compute_task_dist(int agent_loc, const Task& task, SharedEnvironment* env)
 {
     int dist = 0;
@@ -55,31 +53,23 @@ inline int compute_task_dist(int agent_loc, const Task& task, SharedEnvironment*
     return dist;
 }
 
-// 拥堵热力图（5x5粗粒度方块）
-void build_congestion_map(
-    SharedEnvironment* env,
-    std::unordered_map<int, int>& cong_map,
-    int block_size = 5)
+void build_congestion_map(SharedEnvironment* env, std::unordered_map<int, int>& cong_map, int block_size = 5)
 {
     cong_map.clear();
     int cols_blocks = env->cols / block_size + 1;
     for (int i = 0; i < env->num_of_agents; i++) {
         if (i < (int)env->goal_locations.size() && !env->goal_locations[i].empty()) {
             int goal = env->goal_locations[i].front().first;
-            int block = (goal / env->cols) / block_size * cols_blocks
-                      + (goal % env->cols) / block_size;
+            int block = (goal / env->cols) / block_size * cols_blocks + (goal % env->cols) / block_size;
             cong_map[block]++;
         }
     }
 }
 
-inline int get_congestion(int loc, SharedEnvironment* env,
-                          const std::unordered_map<int, int>& cong_map,
-                          int block_size = 5)
+inline int get_congestion(int loc, SharedEnvironment* env, const std::unordered_map<int, int>& cong_map, int block_size = 5)
 {
     int cols_blocks = env->cols / block_size + 1;
-    int block = (loc / env->cols) / block_size * cols_blocks
-              + (loc % env->cols) / block_size;
+    int block = (loc / env->cols) / block_size * cols_blocks + (loc % env->cols) / block_size;
     auto it = cong_map.find(block);
     return it != cong_map.end() ? it->second : 0;
 }
@@ -88,9 +78,7 @@ void clean_free_tasks(SharedEnvironment* env)
 {
     for (auto it = free_tasks.begin(); it != free_tasks.end(); ) {
         auto t_it = env->task_pool.find(*it);
-        if (t_it == env->task_pool.end()
-            || t_it->second.agent_assigned != -1
-            || t_it->second.is_finished()) {
+        if (t_it == env->task_pool.end() || t_it->second.agent_assigned != -1 || t_it->second.is_finished()) {
             it = free_tasks.erase(it);
         } else {
             ++it;
@@ -109,7 +97,7 @@ void clean_free_agents(const std::vector<int>& proposed_schedule)
     }
 }
 
-} // anonymous namespace
+} // namespace
 
 
 void TaskScheduler::initialize(int preprocess_time_limit)
@@ -122,16 +110,13 @@ void TaskScheduler::initialize(int preprocess_time_limit)
 
 void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule)
 {
-    // ARCH-C R1: Auction-based task assignment
-    // Each agent bids on tasks. The task goes to the highest bidder.
-    // Bid = eagerness score = (cost_benefit / distance) * urgency_multiplier
-    // This is fundamentally different from greedy which picks lowest cost.
-    // Greedy: "which agent should do this task?" (agent-centric)
-    // Auction: "which task should this agent do?" (task-centric, reversed)
+    // ARCH-D R3: Auction-based with additive eagerness (no ratio)
+    // Core hypothesis: auction mechanism is key, not ratio formula
+    // Eagerness = bonus - log_dist - turn*2 - penalty
+    // (ARCH-C uses ratio = bonus / (log_dist + 1 + cong*7), this is additive)
 
     free_agents.insert(env->new_freeagents.begin(), env->new_freeagents.end());
     free_tasks.insert(env->new_tasks.begin(), env->new_tasks.end());
-
     clean_free_tasks(env);
     clean_free_agents(proposed_schedule);
 
@@ -155,24 +140,18 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule)
 
     TimePoint time_end = std::chrono::steady_clock::now() + std::chrono::milliseconds(limit);
 
-    // 拥堵热力图
     std::unordered_map<int, int> cong_map;
     build_congestion_map(env, cong_map);
 
     // ====================================================================
-    // Auction Phase: Each agent bids on its best task
-    // Each agent computes the "eagerness" to do each candidate task
-    // Higher eagerness = more likely to get the task
+    // Auction Phase: Each agent bids its eagerness for tasks
+    // Eagerness = bonus - log_dist - turn*2 - penalty
+    // Higher eagerness wins the task
     // ====================================================================
-    // Eagerness = base_eagerness / (dist + 1) * urgency
-    // base_eagerness = reward for taking a task = wait_time + remaining_waypoints * 10
-    // dist = path distance to task
-    // urgency = how old/important the task is
+    std::vector<Assignment> bids;
 
-    std::vector<Assignment> bids; // (agent, best_task, eagerness)
-
-    const int K = std::min(16, n_tasks); // R15: increase from 12 to 16
-    std::vector<std::pair<int,int>> task_dists;
+    const int K = std::min(20, n_tasks);  // R11: back to K=20
+    std::vector<std::pair<int, int>> task_candidates;
 
     for (int ag : free_agents) {
         if (std::chrono::steady_clock::now() > time_end) break;
@@ -180,29 +159,28 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule)
         int agent_loc = env->curr_states.at(ag).location;
         int agent_ori = env->curr_states.at(ag).orientation;
 
-        // R120: K selection prefers low-congestion areas even if slightly farther
-        // Use composite score: md + cong*5 (congestion penalty during selection)
-        task_dists.clear();
+        // K-selection by composite MD + congestion
+        task_candidates.clear();
         for (int t_id : free_tasks) {
             auto t_it = env->task_pool.find(t_id);
-            if (t_it == env->task_pool.end() || t_it->second.agent_assigned != -1 || t_it->second.is_finished()) continue;
+            if (t_it == env->task_pool.end() || t_it->second.agent_assigned != -1) continue;
             int first_loc = t_it->second.locations.at(t_it->second.idx_next_loc);
             int md = DefaultPlanner::manhattanDistance(agent_loc, first_loc, env);
             int cong = get_congestion(first_loc, env, cong_map);
-            int composite = md + cong * 7; // R129: try cong*7
-            task_dists.push_back({composite, t_id});
+            int composite = md + cong * 7;  // R9: K=20 only
+            task_candidates.push_back({composite, t_id});
         }
 
-        if ((int)task_dists.size() > K) {
-            std::nth_element(task_dists.begin(), task_dists.begin() + K, task_dists.end());
-            task_dists.resize(K);
+        if ((int)task_candidates.size() > K) {
+            std::nth_element(task_candidates.begin(), task_candidates.begin() + K, task_candidates.end());
+            task_candidates.resize(K);
         }
 
         int best_task = -1;
-        int best_eagerness = -999999;
+        int best_eagerness = INT_MIN;
         int best_dist = INT_MAX;
 
-        for (auto& [md, t_id] : task_dists) {
+        for (auto& [composite, t_id] : task_candidates) {
             auto t_it = env->task_pool.find(t_id);
             if (t_it == env->task_pool.end() || t_it->second.agent_assigned != -1) continue;
             auto& task = t_it->second;
@@ -214,18 +192,17 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule)
             int wait = std::max(0, env->curr_timestep - task.t_revealed);
             int remaining = (int)task.locations.size() - task.idx_next_loc;
 
-            // ARCH-C R83: higher penalty for high congestion (only >5 gets extra penalty)
-            int log_dist = (int)(std::log(1.0 + dist) * 10.0); // scaled log
-            int ratio = (remaining * 100 + wait * 16) * 1000 / (log_dist + 1 + cong * 7); // R129: try cong*7
-            int cong_penalty = (cong > 3) ? (cong - 3) * 60 : 0; // R131: increase penalty 50->60
-            // Extra penalty for very high congestion (>5)
-            if (cong > 5) cong_penalty += (cong - 5) * 36; // R131: increase extra penalty 30->36
+            // Two-tier congestion penalty
+            int cong_penalty = (cong > 3) ? (cong - 3) * 60 : 0;
+            if (cong > 5) cong_penalty += (cong - 5) * 36;
+
+            // R8: Back to factor=7 with distance tie-break (R101)
+            int log_dist = (int)(std::log(1.0 + dist) * 10.0);
+            int ratio = (remaining * 80 + wait * 16) * 1000 / (log_dist + 1 + cong * 7);  // R12: remaining*80 vs *100
             int eagerness = ratio - turn * 2 - cong_penalty;
 
-            // R101: distance tie-break — prefer closer task when eagerness similar
-            // This helps agents complete tasks faster, reducing makespan
-            if (eagerness > best_eagerness || 
-                (eagerness == best_eagerness && dist < best_dist)) {
+            // Tie-break: prefer shorter distance
+            if (eagerness > best_eagerness || (eagerness == best_eagerness && dist < best_dist)) {
                 best_eagerness = eagerness;
                 best_task = t_id;
                 best_dist = dist;
@@ -238,8 +215,7 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule)
     }
 
     // ====================================================================
-    // Allocation Phase: Each task goes to the highest bidder
-    // Sort bids by eagerness (descending), allocate greedily
+    // Allocation: Task goes to highest bidder
     // ====================================================================
     std::sort(bids.begin(), bids.end(),
         [](const Assignment& a, const Assignment& b) { return a.cost > b.cost; });
@@ -262,7 +238,6 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule)
         this_round.push_back({b.agent, b.task, raw_dist});
     }
 
-    // 清理 free 集合
     for (auto& rec : this_round) {
         free_agents.erase(rec.agent);
         free_tasks.erase(rec.task);
@@ -272,7 +247,7 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule)
     }
 
     // ====================================================================
-    // Swap optimization phase (same as R7)
+    // Swap optimization
     // ====================================================================
     if (this_round.size() >= 2) {
         int max_swaps = std::min((int)this_round.size() * 5, 800);
