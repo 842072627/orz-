@@ -167,7 +167,7 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule)
             int first_loc = t_it->second.locations.at(t_it->second.idx_next_loc);
             int md = DefaultPlanner::manhattanDistance(agent_loc, first_loc, env);
             int cong = get_congestion(first_loc, env, cong_map);
-            int composite = md + cong * 7;  // R9: K=20 only
+            int composite = md + cong * 7;  // R14: revert to R9
             task_candidates.push_back({composite, t_id});
         }
 
@@ -250,8 +250,8 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule)
     // Swap optimization
     // ====================================================================
     if (this_round.size() >= 2) {
-        int max_swaps = std::min((int)this_round.size() * 5, 800);
-        if (env->num_of_agents > 1000) max_swaps = std::min(max_swaps, 200);
+        int max_swaps = std::min((int)this_round.size() * 12, 1500);  // R17: 12x swaps
+        if (env->num_of_agents > 1000) max_swaps = std::min(max_swaps, 360);
 
         std::uniform_int_distribution<int> rand_idx(0, (int)this_round.size() - 1);
         TimePoint swap_end = std::chrono::steady_clock::now() + std::chrono::milliseconds(limit);
@@ -276,7 +276,7 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule)
             int swap_dist2 = compute_task_dist(env->curr_states[r2.agent].location, it1->second, env);
             int swap_cost = swap_dist1 + swap_dist2;
 
-            if (swap_cost < curr_cost - 1) {
+            if (swap_cost < curr_cost) {  // R17: any improvement
                 proposed_schedule[r1.agent] = r2.task;
                 proposed_schedule[r2.agent] = r1.task;
                 env->task_pool[r1.task].agent_assigned = r2.agent;
