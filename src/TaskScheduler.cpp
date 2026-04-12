@@ -133,7 +133,7 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule)
     bool do_sampling = (pairs > 50000);
     int max_pairs_to_eval = do_sampling ? 20000 : pairs;
 
-    int sched_pct = (pairs > 10000) ? 28 : 25;  // R21: 28% vs 30%
+    int sched_pct = (pairs > 10000) ? 28 : 25;  // R21: back to 28%
     int limit = time_limit * sched_pct / 100 - DefaultPlanner::SCHEDULER_TIMELIMIT_TOLERANCE;
     if (limit < 5) limit = 5;
     if (limit > time_limit * 35 / 100) limit = time_limit * 35 / 100;
