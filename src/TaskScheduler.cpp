@@ -192,9 +192,8 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule)
             int wait = std::max(0, env->curr_timestep - task.t_revealed);
             int remaining = (int)task.locations.size() - task.idx_next_loc;
 
-            // Two-tier congestion penalty
-            int cong_penalty = (cong > 3) ? (cong - 3) * 60 : 0;
-            if (cong > 5) cong_penalty += (cong - 5) * 36;
+            // S1: Single-tier linear congestion penalty
+            int cong_penalty = cong * 45;
 
             // R8: Back to factor=7 with distance tie-break (R101)
             int log_dist = (int)(std::log(1.0 + dist) * 10.0);
