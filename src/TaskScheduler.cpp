@@ -141,7 +141,7 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule)
     TimePoint time_end = std::chrono::steady_clock::now() + std::chrono::milliseconds(limit);
 
     std::unordered_map<int, int> cong_map;
-    build_congestion_map(env, cong_map);
+    build_congestion_map(env, cong_map, 5);  // R38: restore
 
     // ====================================================================
     // Auction Phase: Each agent bids its eagerness for tasks
@@ -150,7 +150,7 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule)
     // ====================================================================
     std::vector<Assignment> bids;
 
-    const int K = std::min(20, n_tasks);  // R11: back to K=20
+    const int K = std::min(19, n_tasks);  // R38: K=19 vs K=20
     std::vector<std::pair<int, int>> task_candidates;
 
     for (int ag : free_agents) {
