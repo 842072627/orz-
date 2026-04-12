@@ -150,7 +150,7 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule)
     // ====================================================================
     std::vector<Assignment> bids;
 
-    const int K = std::min(19, n_tasks);  // R38: K=19 vs K=20
+    const int K = std::min(20, n_tasks);  // restore K=20
     std::vector<std::pair<int, int>> task_candidates;
 
     for (int ag : free_agents) {
@@ -250,8 +250,7 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule)
     // Swap optimization
     // ====================================================================
     if (this_round.size() >= 2) {
-        int max_swaps = std::min((int)this_round.size() * 15, 1800);  // R23: 15x swaps
-        if (env->num_of_agents > 1000) max_swaps = std::min(max_swaps, 450);
+        int max_swaps = std::min((int)this_round.size() * 15, 1800);  // R47: restore 15x
 
         std::uniform_int_distribution<int> rand_idx(0, (int)this_round.size() - 1);
         TimePoint swap_end = std::chrono::steady_clock::now() + std::chrono::milliseconds(limit);
