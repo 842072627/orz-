@@ -5,19 +5,18 @@
 #include "planner.h"
 #include "const.h"
 
-// ==================== MAPFPlanner::initialize ====================
-// 预处理阶段：初始化 default planner 的所有数据结构
-// 包括：启发式表、TrajLNS（轨迹+流优化）、PIBT 数据结构、优先级
+// ==================== ARCH-G 实验 ====================
+// 方向：基于拥堵感知的自适应规划步数
+// 灵感来自 No_Man_Sky 的 adaptive planning
+// 思路：
+//   - 当 free agents 多时（高并发），减少规划步数提高响应速度
+//   - 当 free agents 少时（低并发），增加规划步数减少规划开销
 //
-// 改进：更精确的时间计算
-// - 用 microseconds（不是 milliseconds）计算已用时间，减少误差
-// - 这确保 planner 不会因为时间计算不精确而超时
-// 灵感来自 Kitty Knight：他们也用 microseconds 来精确控制时间
+// ARCH-D S1 baseline: min_plan_steps = base * 1.2
+// ARCH-G G1: 自适应调整
+// ==================== MAPFPlanner::initialize ====================
 void MAPFPlanner::initialize(int preprocess_time_limit)
 {
-    // 用剩余的预处理时间（减去 scheduler 已经用掉的）初始化 planner
-    // - PLANNER_TIMELIMIT_TOLERANCE 是安全余量（10ms）
-    // - 用 microseconds 计算已过时间，比 milliseconds 精确1000倍
     int elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(
         std::chrono::steady_clock::now() - env->plan_start_time).count();
     int limit = preprocess_time_limit - elapsed_us / 1000 
@@ -28,45 +27,41 @@ void MAPFPlanner::initialize(int preprocess_time_limit)
 }
 
 // ==================== MAPFPlanner::plan ====================
-// 每个 planning episode 被调用一次
-// 核心工作交给 DefaultPlanner::plan，它做了三件事：
-//   1. 更新引导路径（guide path）+ Frank-Wolfe 流优化
-//   2. 多步 PIBT 规划（按优先级决定每个机器人的下一步）
-//   3. 动作后处理（处理旋转动作、移动检查）
-//
-// 我们的控制层主要做：
-// - 精确的时间管理（把尽可能多的时间给 default planner）
-// - 正确计算需要规划的步数
-//
-// 为什么不改 default planner 内部？
-// - default planner 的 Flow+PIBT 组合已经很强大
-// - No Man Sky 冠军队的 planner 也是类似的架构（引导路径 + PIBT）
-// - 真正拉开差距的是 scheduler 的质量（我们已经在 TaskScheduler 中大幅改进）
 void MAPFPlanner::plan(int time_limit, Plan & plan) 
 {
-    // 精确计算剩余时间
     int elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(
         std::chrono::steady_clock::now() - env->plan_start_time).count();
     int limit = time_limit - elapsed_us / 1000 
               - DefaultPlanner::PLANNER_TIMELIMIT_TOLERANCE;
     if (limit < 5) limit = 5;
 
-    // 计算本次需要规划多少步
-    // 公式：min_planner_communication_time / (action_time * max_counter) + 1
+    // ARCH-G G1: 基于并发度的自适应规划步数
     // 
-    // 例子：planCommTime=1000ms, action_time=1ms, max_counter=10
-    //   → 1000 / (1 * 10) + 1 = 101 步
-    //
-    // 含义：两次 planning 调用之间有 1000ms，每步执行需要 10 个 tick（1ms/tick），
-    //        所以需要 100 步动作来覆盖这段时间，+1 是安全余量
-    //
-    // 为什么不给更多步？
-    // - 更多步 = 更长的规划时间，可能超时
-    // - 更少步 = 动作不够，机器人到下轮 planning 前会原地等待
-    // - 这个公式刚好平衡两者
-    // R167: 20% more steps to reduce waiting
-    int min_plan_steps = std::max(1, (int)(env->min_planner_communication_time 
+    // 基础步数 (与 S1 相同)
+    int base_steps = std::max(1, (int)(env->min_planner_communication_time 
                        / (env->action_time * env->max_counter) * 1.2));
+    
+    // 计算当前并发度: free_agents / total_agents
+    // env->new_freeagents 是新释放的 agents，env->num_of_agents 是总数
+    int free_count = env->new_freeagents.size();
+    int total_agents = env->num_of_agents;
+    double concurrency_ratio = (total_agents > 0) ? (double)free_count / total_agents : 0.5;
+    
+    // 自适应调整因子:
+    // - 高并发(congestion)时，减少步数(更快速响应)
+    // - 低并发时，增加步数(减少规划频率)
+    // concurrency_ratio 范围 [0, 1]
+    // ratio > 0.3 → 高并发 → 乘以 0.9 (减少步数)
+    // ratio <= 0.3 → 低并发 → 乘以 1.0 (保持不变)
+    double adaptive_factor = (concurrency_ratio > 0.3) ? 0.9 : 1.0;
+    
+    int min_plan_steps = std::max(1, (int)(base_steps * adaptive_factor));
+    
+    // 调试输出
+    // std::cout << "[ARCH-G G1] free=" << free_count << "/" << total_agents
+    //           << " ratio=" << concurrency_ratio
+    //           << " factor=" << adaptive_factor
+    //           << " steps=" << min_plan_steps << std::endl;
 
     DefaultPlanner::plan(limit, plan.actions, env, min_plan_steps);
 }
