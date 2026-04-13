@@ -150,7 +150,7 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule)
     // ====================================================================
     std::vector<Assignment> bids;
 
-    const int K = std::min(20, n_tasks);  // J55: K=20 for comparison
+    const int K = std::min(25, n_tasks);  // J56: K=25 final
     std::vector<std::pair<int, int>> task_candidates;
 
     for (int ag : free_agents) {
