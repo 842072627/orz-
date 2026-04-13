@@ -35,17 +35,20 @@ void MAPFPlanner::plan(int time_limit, Plan & plan)
               - DefaultPlanner::PLANNER_TIMELIMIT_TOLERANCE;
     if (limit < 5) limit = 5;
 
-    // ========== ARCH-G G1: 随机化rand种子 ==========
+    // ========== ARCH-G G2: 增强随机化rand种子 ==========
     // 关键洞察：DefaultPlanner::initialize() 中 srand(0) 被设置为固定种子
     // 这导致每次运行的PIBTrand平局结果完全相同
-    // 我们在规划前重新设置随机种子
     // 
-    // 方案：基于当前时间戳 + curr_timestep 设置种子
-    // 这样不同时间调用会产生不同的随机序列
+    // 增强方案：使用更多熵源
+    // - 时间戳的多个部分
+    // - curr_timestep
+    // - num_of_agents (区分不同规模的实例)
     auto now = std::chrono::steady_clock::now().time_since_epoch().count();
     unsigned int random_seed = static_cast<unsigned int>(
-        (now & 0xFFFF) ^  // 低16位
-        (static_cast<unsigned int>(env->curr_timestep) << 16)  // 高16位是时间步
+        ((now >> 16) & 0xFFFF) ^  // 时间戳高16位
+        ((now << 8) & 0xFFFF0000) ^  // 时间戳低16位移位
+        (static_cast<unsigned int>(env->curr_timestep) * 31) ^  // 时间步
+        (static_cast<unsigned int>(env->num_of_agents) * 17)  // agent数量
     );
     srand(random_seed);
     
