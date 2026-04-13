@@ -191,7 +191,6 @@ bool Executor::mcp(int agent_id, vector<bool> & curr_decision, std::vector<Execu
 
             // ARCH-J J11: R306 Enhanced with Goal+Task Distance
             // Priority = goal_dist * 10 + task_remaining_dist
-            // Task remaining dist is estimated from agent's current location to next goal
             // This prefers agents that have both far goals AND significant task work remaining
             
             int agent_priority = agent_goal_dist * 10;
