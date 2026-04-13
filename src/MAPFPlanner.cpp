@@ -6,14 +6,14 @@
 #include "const.h"
 
 // ==================== ARCH-G 实验 ====================
-// 方向：基于拥堵感知的自适应规划步数
-// 灵感来自 No_Man_Sky 的 adaptive planning
-// 思路：
-//   - 当 free agents 多时（高并发），减少规划步数提高响应速度
-//   - 当 free agents 少时（低并发），增加规划步数减少规划开销
+// 方向：随机化PIBTrand种子，打破对称性
+// 灵感来自 No_Man_Sky 的 EPlanner: 多线程多次采样 + 选最优
+// 
+// 关键发现：pibt.cpp 中使用 rand() 打破平局
+// 我们在规划开始前设置基于时间的随机种子
 //
-// ARCH-D S1 baseline: min_plan_steps = base * 1.2
-// ARCH-G G1: 自适应调整
+// ARCH-D S1 baseline: srand(0) 每次相同
+// ARCH-G G1: 基于时间设置随机种子
 // ==================== MAPFPlanner::initialize ====================
 void MAPFPlanner::initialize(int preprocess_time_limit)
 {
@@ -35,32 +35,28 @@ void MAPFPlanner::plan(int time_limit, Plan & plan)
               - DefaultPlanner::PLANNER_TIMELIMIT_TOLERANCE;
     if (limit < 5) limit = 5;
 
-    // ARCH-G G1: 基于并发度的自适应规划步数
+    // ========== ARCH-G G1: 随机化rand种子 ==========
+    // 关键洞察：DefaultPlanner::initialize() 中 srand(0) 被设置为固定种子
+    // 这导致每次运行的PIBTrand平局结果完全相同
+    // 我们在规划前重新设置随机种子
     // 
-    // 基础步数 (与 S1 相同)
+    // 方案：基于当前时间戳 + curr_timestep 设置种子
+    // 这样不同时间调用会产生不同的随机序列
+    auto now = std::chrono::steady_clock::now().time_since_epoch().count();
+    unsigned int random_seed = static_cast<unsigned int>(
+        (now & 0xFFFF) ^  // 低16位
+        (static_cast<unsigned int>(env->curr_timestep) << 16)  // 高16位是时间步
+    );
+    srand(random_seed);
+    
+    // 计算规划步数
     int base_steps = std::max(1, (int)(env->min_planner_communication_time 
                        / (env->action_time * env->max_counter) * 1.2));
-    
-    // 计算当前并发度: free_agents / total_agents
-    // env->new_freeagents 是新释放的 agents，env->num_of_agents 是总数
-    int free_count = env->new_freeagents.size();
-    int total_agents = env->num_of_agents;
-    double concurrency_ratio = (total_agents > 0) ? (double)free_count / total_agents : 0.5;
-    
-    // 自适应调整因子:
-    // - 高并发(congestion)时，减少步数(更快速响应)
-    // - 低并发时，增加步数(减少规划频率)
-    // concurrency_ratio 范围 [0, 1]
-    // ratio > 0.3 → 高并发 → 乘以 0.9 (减少步数)
-    // ratio <= 0.3 → 低并发 → 乘以 1.0 (保持不变)
-    double adaptive_factor = (concurrency_ratio > 0.3) ? 0.9 : 1.0;
-    
-    int min_plan_steps = std::max(1, (int)(base_steps * adaptive_factor));
-    
-    // 调试输出
-    // std::cout << "[ARCH-G G1] free=" << free_count << "/" << total_agents
-    //           << " ratio=" << concurrency_ratio
-    //           << " factor=" << adaptive_factor
+    int min_plan_steps = std::max(1, (int)(base_steps));
+
+    // 调试输出（注释掉以减少输出）
+    // std::cout << "[ARCH-G G1] seed=" << random_seed 
+    //           << " timestep=" << env->curr_timestep
     //           << " steps=" << min_plan_steps << std::endl;
 
     DefaultPlanner::plan(limit, plan.actions, env, min_plan_steps);
