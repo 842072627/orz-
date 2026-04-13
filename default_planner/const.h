@@ -13,12 +13,11 @@ namespace DefaultPlanner
 
 
     // The default planner timelimit tolerance in ms.
-    // The MAPFPlanner will deduct this value from the time limit for default planner.
-    const int PLANNER_TIMELIMIT_TOLERANCE = 10;
+    // ARCH-J: Reduced from 10 to 5 for more planning time on large maps
+    const int PLANNER_TIMELIMIT_TOLERANCE = 5;
 
     // The default scheduler timelimit tolerance in ms.
-    // The TaskScheduler will deduct this value from the time limit for default scheduler.
-    const int SCHEDULER_TIMELIMIT_TOLERANCE = 10;
+    const int SCHEDULER_TIMELIMIT_TOLERANCE = 5;
 
 
 
