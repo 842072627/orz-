@@ -4,7 +4,8 @@
 namespace DefaultPlanner
 {
     // pibt runtime (ms) per 100 agents. 
-    const int PIBT_RUNTIME_PER_100_AGENTS = 1;
+    // ARCH-J: Increased from 1 to 5 for large-scale cloud maps (10000 agents)
+    const int PIBT_RUNTIME_PER_100_AGENTS = 5;
 
     // Traffic flow assignment end time tolerance in ms.
     // The default planner will end the traffic flow assignment phase this many milliseconds before traffic flow assignment end time.
