@@ -189,10 +189,19 @@ bool Executor::mcp(int agent_id, vector<bool> & curr_decision, std::vector<Execu
                 blocking_goal_dist = std::abs(blocking_loc - goal);
             }
 
-            // FIFO: no priority, first-come-first-served
-            agent_command[agent_id] = ExecutionCommand::STOP;
-            curr_decision[agent_id] = true;
-            return false;
+            // ARCH-J J7: R306 with tie-break and safety margin
+            // If current agent is significantly further from goal (>5 steps), let it go
+            // This prevents complete deadlock while still preferring distant agents
+            if (agent_goal_dist > blocking_goal_dist + 5) {
+                agent_command[agent_id] = ExecutionCommand::GO;
+                curr_decision[agent_id] = true;
+                return true;
+            } else {
+                // FIFO: no priority, first-come-first-served
+                agent_command[agent_id] = ExecutionCommand::STOP;
+                curr_decision[agent_id] = true;
+                return false;
+            }
         }
     }
 }
