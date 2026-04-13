@@ -189,15 +189,33 @@ bool Executor::mcp(int agent_id, vector<bool> & curr_decision, std::vector<Execu
                 blocking_goal_dist = std::abs(blocking_loc - goal);
             }
 
-            // ARCH-J J7: R306 with tie-break and safety margin
-            // If current agent is significantly further from goal (>5 steps), let it go
-            // This prevents complete deadlock while still preferring distant agents
-            if (agent_goal_dist > blocking_goal_dist + 5) {
+            // ARCH-J J11: R306 Enhanced with Goal+Task Distance
+            // Priority = goal_dist * 10 + task_remaining_dist
+            // Task remaining dist is estimated from agent's current location to next goal
+            // This prefers agents that have both far goals AND significant task work remaining
+            
+            int agent_priority = agent_goal_dist * 10;
+            int blocking_priority = blocking_goal_dist * 10;
+            
+            // Add estimated task remaining distance
+            if (agent_id < (int)env->goal_locations.size() && !env->goal_locations[agent_id].empty()) {
+                int goal = env->goal_locations[agent_id].front().first;
+                int dist = std::abs(curr_location - goal);
+                agent_priority += dist;
+            }
+            if (blocking_agent_id < (int)env->goal_locations.size() && !env->goal_locations[blocking_agent_id].empty()) {
+                int goal = env->goal_locations[blocking_agent_id].front().first;
+                int blocking_loc = env->system_states[blocking_agent_id].location;
+                int dist = std::abs(blocking_loc - goal);
+                blocking_priority += dist;
+            }
+            
+            // If current agent has higher priority, let it go
+            if (agent_priority > blocking_priority) {
                 agent_command[agent_id] = ExecutionCommand::GO;
                 curr_decision[agent_id] = true;
                 return true;
             } else {
-                // FIFO: no priority, first-come-first-served
                 agent_command[agent_id] = ExecutionCommand::STOP;
                 curr_decision[agent_id] = true;
                 return false;
