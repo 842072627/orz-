@@ -52,10 +52,22 @@ void MAPFPlanner::plan(int time_limit, Plan & plan)
     );
     srand(random_seed);
     
-    // 计算规划步数
+    // ========== ARCH-G G3: 自适应规划步数 ==========
+    // 基于并发度调整规划步数
+    // 当 free agents 多时（高并发），减少步数可以更快响应
+    // 当 free agents 少时（低并发），增加步数减少规划频率
     int base_steps = std::max(1, (int)(env->min_planner_communication_time 
                        / (env->action_time * env->max_counter) * 1.2));
-    int min_plan_steps = std::max(1, (int)(base_steps));
+    
+    // 计算并发度
+    int free_count = (int)env->new_freeagents.size();
+    int total_agents = env->num_of_agents;
+    double concurrency = (total_agents > 0) ? (double)free_count / total_agents : 0.0;
+    
+    // G3: concurrency > 0.2 → factor=0.9, else factor=1.0
+    double factor = (concurrency > 0.2) ? 0.9 : 1.0;
+    
+    int min_plan_steps = std::max(1, (int)(base_steps * factor));
 
     // 调试输出（注释掉以减少输出）
     // std::cout << "[ARCH-G G1] seed=" << random_seed 
