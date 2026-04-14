@@ -174,55 +174,25 @@ bool Executor::mcp(int agent_id, vector<bool> & curr_decision, std::vector<Execu
         {
             int blocking_agent_id = tpg[next_location].front();
 
-            // J57: Adaptive priority based on map size
-            // Large maps (>1000 agents): Use S1 FIFO to prevent congestion collapse
-            // Small maps (<=1000 agents): Use J11 priority (goal*10 + task_dist)
-            bool is_large_map = (env->num_of_agents > 1000);
-            
+            // R306: Reversed priority — agents FURTHER from goal get priority
+            // This clears congestion by letting distant agents push through first
             int agent_goal_dist = 0;
             int blocking_goal_dist = 0;
-            int agent_task_dist = 0;
-            int blocking_task_dist = 0;
 
             if (agent_id < (int)env->goal_locations.size() && !env->goal_locations[agent_id].empty()) {
                 int goal = env->goal_locations[agent_id].front().first;
                 agent_goal_dist = std::abs(next_location - goal);
-                agent_task_dist = std::abs(env->system_states[agent_id].location - goal);
             }
             if (blocking_agent_id < (int)env->goal_locations.size() && !env->goal_locations[blocking_agent_id].empty()) {
                 int goal = env->goal_locations[blocking_agent_id].front().first;
                 int blocking_loc = env->system_states[blocking_agent_id].location;
                 blocking_goal_dist = std::abs(blocking_loc - goal);
-                blocking_task_dist = std::abs(blocking_loc - goal);
             }
 
-            if (is_large_map) {
-                // J58: S1 FIFO with lite priority (only for large maps)
-                // Agent must be 20+ cells closer to goal than blocking agent to get priority
-                if (agent_goal_dist + 20 < blocking_goal_dist) {
-                    agent_command[agent_id] = ExecutionCommand::GO;
-                    curr_decision[agent_id] = true;
-                    return true;
-                } else {
-                    agent_command[agent_id] = ExecutionCommand::STOP;
-                    curr_decision[agent_id] = true;
-                    return false;
-                }
-            } else {
-                // J11 Priority for small maps: prefer agents closer to completing tasks
-                int agent_priority = agent_goal_dist * 10 + agent_task_dist;
-                int blocking_priority = blocking_goal_dist * 10 + blocking_task_dist;
-                
-                if (agent_priority > blocking_priority) {
-                    agent_command[agent_id] = ExecutionCommand::GO;
-                    curr_decision[agent_id] = true;
-                    return true;
-                } else {
-                    agent_command[agent_id] = ExecutionCommand::STOP;
-                    curr_decision[agent_id] = true;
-                    return false;
-                }
-            }
+            // FIFO: no priority, first-come-first-served
+            agent_command[agent_id] = ExecutionCommand::STOP;
+            curr_decision[agent_id] = true;
+            return false;
         }
     }
 }
