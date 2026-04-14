@@ -1,4 +1,4 @@
-﻿project(lifelong)
+project(lifelong)
 
 cmake_minimum_required(VERSION 3.16)
 set(CMAKE_CXX_STANDARD 17)
@@ -76,7 +76,7 @@ if(BUILD_TESTS)
     target_link_libraries(delay_generator_test ${Boost_LIBRARIES})
     add_test(NAME delay_generator_test COMMAND delay_generator_test)
 
-    # Python interface test ΓÇö needs all sources + bridge sources + pybind11::embed
+    # Python interface test ??? needs all sources + bridge sources + pybind11::embed
     # Exclude driver.cpp (has its own main)
     set(TEST_SOURCES ${SOURCES})
     list(FILTER TEST_SOURCES EXCLUDE REGEX ".*driver\\.cpp")
