@@ -28,8 +28,11 @@ find_package(pybind11 REQUIRED)
 include_directories("python/common")
 
 # Build the MAPF Python module (loadable .so for standalone Python scripts)
-pybind11_add_module(MAPF "./src/Grid.cpp" "./src/States.cpp" "./python/common/MAPFbinding.cpp")
-target_compile_definitions(MAPF PRIVATE MAPF_SHARED_MODULE)
+# Disabled on MSYS2/MinGW due to Python 3.14 + pybind11 3.0.2 linking incompatibility
+if(NOT MSYS2_BUILD)
+    pybind11_add_module(MAPF "./src/Grid.cpp" "./src/States.cpp" "./python/common/MAPFbinding.cpp")
+    target_compile_definitions(MAPF PRIVATE MAPF_SHARED_MODULE)
+endif()
 
 # Collect bridge source files (include MAPFbinding.cpp for embedded module registration)
 file(GLOB PY_BRIDGE_SOURCES "python/common/*.cpp")
