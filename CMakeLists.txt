@@ -28,11 +28,8 @@ find_package(pybind11 REQUIRED)
 include_directories("python/common")
 
 # Build the MAPF Python module (loadable .so for standalone Python scripts)
-# Disabled on MSYS2/MinGW due to Python 3.14 + pybind11 3.0.2 linking incompatibility
-if(NOT MSYS2_BUILD)
-    pybind11_add_module(MAPF "./src/Grid.cpp" "./src/States.cpp" "./python/common/MAPFbinding.cpp")
-    target_compile_definitions(MAPF PRIVATE MAPF_SHARED_MODULE)
-endif()
+pybind11_add_module(MAPF "./src/Grid.cpp" "./src/States.cpp" "./python/common/MAPFbinding.cpp")
+target_compile_definitions(MAPF PRIVATE MAPF_SHARED_MODULE)
 
 # Collect bridge source files (include MAPFbinding.cpp for embedded module registration)
 file(GLOB PY_BRIDGE_SOURCES "python/common/*.cpp")
@@ -79,7 +76,7 @@ if(BUILD_TESTS)
     target_link_libraries(delay_generator_test ${Boost_LIBRARIES})
     add_test(NAME delay_generator_test COMMAND delay_generator_test)
 
-    # Python interface test ??? needs all sources + bridge sources + pybind11::embed
+    # Python interface test — needs all sources + bridge sources + pybind11::embed
     # Exclude driver.cpp (has its own main)
     set(TEST_SOURCES ${SOURCES})
     list(FILTER TEST_SOURCES EXCLUDE REGEX ".*driver\\.cpp")
