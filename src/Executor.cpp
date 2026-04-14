@@ -197,10 +197,17 @@ bool Executor::mcp(int agent_id, vector<bool> & curr_decision, std::vector<Execu
             }
 
             if (is_large_map) {
-                // S1 FIFO: no priority for large maps (prevents congestion collapse)
-                agent_command[agent_id] = ExecutionCommand::STOP;
-                curr_decision[agent_id] = true;
-                return false;
+                // J58: S1 FIFO with lite priority (only for large maps)
+                // Agent must be 20+ cells closer to goal than blocking agent to get priority
+                if (agent_goal_dist + 20 < blocking_goal_dist) {
+                    agent_command[agent_id] = ExecutionCommand::GO;
+                    curr_decision[agent_id] = true;
+                    return true;
+                } else {
+                    agent_command[agent_id] = ExecutionCommand::STOP;
+                    curr_decision[agent_id] = true;
+                    return false;
+                }
             } else {
                 // J11 Priority for small maps: prefer agents closer to completing tasks
                 int agent_priority = agent_goal_dist * 10 + agent_task_dist;
