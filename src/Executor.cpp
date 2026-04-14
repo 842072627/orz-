@@ -1,4 +1,4 @@
-#include "Executor.h"
+﻿#include "Executor.h"
 
 void Executor::initialize(int preprocess_time_limit)
 {
@@ -174,7 +174,7 @@ bool Executor::mcp(int agent_id, vector<bool> & curr_decision, std::vector<Execu
         {
             int blocking_agent_id = tpg[next_location].front();
 
-            // R306: Reversed priority — agents FURTHER from goal get priority
+            // R306: Reversed priority ΓÇö agents FURTHER from goal get priority
             // This clears congestion by letting distant agents push through first
             int agent_goal_dist = 0;
             int blocking_goal_dist = 0;
