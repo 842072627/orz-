@@ -1,0 +1,2 @@
+架构分支,轮次,层级,方向大类,子方向,目标文件,状态,bos,fulfill-A,fulfill-B,fulfill-C,iron,maze-A,maze-B,orz,rand-A,room-A,room-B,备注
+ARCH-A,R49,EXP,参数,Scheduler K值,TaskScheduler.cpp,成功-无提升,0.325,0.079,FAIL,FAIL,,0.086,FAIL,0.381,0.526,0.146,,K=16 vs K=20: 轻微改善，可能是方差;3张FAIL是地图缺失
