@@ -4,22 +4,11 @@
 #include "const.h"
 
 // ============================================================
-// ARCH-B R2: Spatial Load Balancing v2 - Dual Region Penalty
-// Core idea: Penalize tasks in "hot" regions (BOTH pickup AND destination)
-// to spread agents out and reduce path congestion at BOTH ends.
-//
-// R1 had pickup-only penalty. R2 adds destination penalty:
-//   - Agents heading to same pickup area cause convoy effects
-//   - Agents heading to same destination area cause arrival congestion
-//   - Both pickup and destination regions should be balanced
-//
-// Key insight: R1 improved fulfill significantly but iron dropped slightly.
-// Iron might benefit from destination balancing since tasks are long-range.
-//
-// Parameters:
-//   - PICKUP_PENALTY = 4.0 (reduced from 5.0)
-//   - DEST_PENALTY = 3.0 (new - destination balancing)
-//   - DECAY = 0.95
+// ARCH-B R3: Spatial Load Balancing v3 - Balanced Dual Penalty
+// R2 had pickup=4.0, dest=3.0 but room dropped significantly.
+// R3 tries pickup=5.0, dest=2.0 to:
+//   - Restore pickup weight for room/maze
+//   - Reduce destination penalty for small maps
 // ============================================================
 
 namespace {
@@ -28,8 +17,8 @@ std::unordered_set<int> free_tasks;
 
 // ARCH-B: Spatial load balancing state
 constexpr int REGION_GRID_SIZE = 16;  // 16x16 regions
-constexpr double PICKUP_PENALTY = 4.0;  // Penalty for pickup region activity (reduced from 5.0)
-constexpr double DEST_PENALTY = 3.0;     // Penalty for destination region activity (NEW)
+constexpr double PICKUP_PENALTY = 5.0;  // Penalty for pickup region activity
+constexpr double DEST_PENALTY = 2.0;     // Reduced destination penalty for small maps
 constexpr double DECAY_FACTOR = 0.95;    // Exponential decay for activity tracking
 
 // Regional activity tracking
