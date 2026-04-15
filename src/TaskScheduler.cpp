@@ -4,23 +4,22 @@
 #include "const.h"
 
 // ============================================================
-// ARCH-B R1: Spatial Load Balancing Scheduler
-// Core idea: Penalize tasks in "hot" regions (recently active areas)
-// to spread agents out and reduce path congestion.
+// ARCH-B R2: Spatial Load Balancing v2 - Dual Region Penalty
+// Core idea: Penalize tasks in "hot" regions (BOTH pickup AND destination)
+// to spread agents out and reduce path congestion at BOTH ends.
 //
-// Key insight from ARCH-A:
-//   - min-Task-ID (R6) excelled at fulfill (0.640) but struggled at room/maze
-//   - reverse greedy excelled at room/maze but failed at fulfill
-//   - Neither handles spatial congestion properly
+// R1 had pickup-only penalty. R2 adds destination penalty:
+//   - Agents heading to same pickup area cause convoy effects
+//   - Agents heading to same destination area cause arrival congestion
+//   - Both pickup and destination regions should be balanced
 //
-// ARCH-B approach:
-//   - Divide map into a grid of regions
-//   - Track task assignments per region with exponential decay
-//   - Add congestion penalty to distance: effective_dist = dist + alpha * region_activity
-//   - This spreads agents geographically, reducing convoy effects
+// Key insight: R1 improved fulfill significantly but iron dropped slightly.
+// Iron might benefit from destination balancing since tasks are long-range.
 //
-// Map grid: 16x16 regions max (256 total)
-// Region size = ceil(map_size / 16)
+// Parameters:
+//   - PICKUP_PENALTY = 4.0 (reduced from 5.0)
+//   - DEST_PENALTY = 3.0 (new - destination balancing)
+//   - DECAY = 0.95
 // ============================================================
 
 namespace {
@@ -29,10 +28,11 @@ std::unordered_set<int> free_tasks;
 
 // ARCH-B: Spatial load balancing state
 constexpr int REGION_GRID_SIZE = 16;  // 16x16 regions
-constexpr double CONGESTION_PENALTY = 5.0;  // Penalty per unit of regional activity
-constexpr double DECAY_FACTOR = 0.95;  // Exponential decay for activity tracking
+constexpr double PICKUP_PENALTY = 4.0;  // Penalty for pickup region activity (reduced from 5.0)
+constexpr double DEST_PENALTY = 3.0;     // Penalty for destination region activity (NEW)
+constexpr double DECAY_FACTOR = 0.95;    // Exponential decay for activity tracking
 
-// Regional activity tracking (circular buffer of recent activity)
+// Regional activity tracking
 std::vector<double> region_activity;
 int num_regions = 0;
 int region_rows = 0;
@@ -65,21 +65,30 @@ void decay_regional_activity() {
     }
 }
 
-// Record task assignment in regional tracking
-void record_assignment(int task_location) {
-    int region = get_region_id(task_location);
-    if (region >= 0 && region < num_regions) {
-        region_activity[region] += 1.0;
+// Record assignment in regional tracking (for both pickup AND destination)
+void record_assignment(int pickup_loc, int dest_loc) {
+    int pickup_region = get_region_id(pickup_loc);
+    int dest_region = get_region_id(dest_loc);
+    if (pickup_region >= 0 && pickup_region < num_regions) {
+        region_activity[pickup_region] += 1.0;
+    }
+    if (dest_region >= 0 && dest_region < num_regions) {
+        region_activity[dest_region] += 1.0;
     }
 }
 
-// Get congestion penalty for a task location
-double get_congestion_penalty(int task_location) {
-    int region = get_region_id(task_location);
-    if (region >= 0 && region < num_regions) {
-        return CONGESTION_PENALTY * region_activity[region];
+// Get total congestion penalty for a task (pickup + destination)
+double get_task_congestion_penalty(int pickup_loc, int dest_loc) {
+    int pickup_region = get_region_id(pickup_loc);
+    int dest_region = get_region_id(dest_loc);
+    double penalty = 0.0;
+    if (pickup_region >= 0 && pickup_region < num_regions) {
+        penalty += PICKUP_PENALTY * region_activity[pickup_region];
     }
-    return 0.0;
+    if (dest_region >= 0 && dest_region < num_regions) {
+        penalty += DEST_PENALTY * region_activity[dest_region];
+    }
+    return penalty;
 }
 }
 
@@ -121,17 +130,19 @@ void TaskScheduler::plan(int time_limit, std::vector<int> & proposed_schedule)
 
             int dist = 0;
             int c_loc = env->curr_states.at(i).location;
-            for (int loc : env->task_pool[t_id].locations)
+            const auto& task_locs = env->task_pool[t_id].locations;
+            for (int loc : task_locs)
             {
                 dist += DefaultPlanner::get_h(env, c_loc, loc);
                 c_loc = loc;
             }
 
-            // Get the pickup location (first location in task)
-            int pickup_loc = env->task_pool[t_id].locations.empty() ? 0 : env->task_pool[t_id].locations[0];
+            // Get pickup and destination locations
+            int pickup_loc = task_locs.empty() ? 0 : task_locs[0];
+            int dest_loc = task_locs.empty() ? 0 : task_locs.back();
 
-            // Calculate effective distance with congestion penalty
-            double congestion_penalty = get_congestion_penalty(pickup_loc);
+            // Calculate effective distance with dual congestion penalty
+            double congestion_penalty = get_task_congestion_penalty(pickup_loc, dest_loc);
             double effective_dist = dist + congestion_penalty;
 
             if (effective_dist < min_effective_dist)
@@ -156,9 +167,11 @@ void TaskScheduler::plan(int time_limit, std::vector<int> & proposed_schedule)
         {
             proposed_schedule[i] = min_task_i;
 
-            // Record assignment for spatial tracking
-            int pickup_loc = env->task_pool[min_task_i].locations.empty() ? 0 : env->task_pool[min_task_i].locations[0];
-            record_assignment(pickup_loc);
+            // Record assignment for spatial tracking (both pickup and destination)
+            const auto& task_locs = env->task_pool[min_task_i].locations;
+            int pickup_loc = task_locs.empty() ? 0 : task_locs[0];
+            int dest_loc = task_locs.empty() ? 0 : task_locs.back();
+            record_assignment(pickup_loc, dest_loc);
 
             it = free_agents.erase(it);
             free_tasks.erase(min_task_i);
