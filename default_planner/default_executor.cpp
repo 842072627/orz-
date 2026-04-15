@@ -240,26 +240,11 @@ bool mcp(int agent_id, std::vector<ExecutionCommand> & agent_command, SharedEnvi
             // cout<<"mcp true, agent "<<agent_id<<" decided to move to "<<next_location<<endl;
             return true;
         }
-                else
+        else
         {
-            // R306: Reversed Priority - agent further from goal gets priority
-            int blocking_agent = tpg[next_location].front();
-
-            int my_dist = 0, block_dist = 0;
-            if (agent_id < (int)env->goal_locations.size() && !env->goal_locations[agent_id].empty()) {
-                my_dist = std::abs(next_location - env->goal_locations[agent_id].front().first);
-            }
-            if (blocking_agent < (int)env->goal_locations.size() && !env->goal_locations[blocking_agent].empty()) {
-                block_dist = std::abs(curr_location - env->goal_locations[blocking_agent].front().first);
-            }
-
-            if (my_dist > block_dist) {
-                agent_command[blocking_agent] = ExecutionCommand::STOP;
-                agent_command[agent_id] = ExecutionCommand::GO;
-            } else {
+                //the blocking agent cannot go, so we cannot go
                 agent_command[agent_id] = ExecutionCommand::STOP;
-            }
-            return false;
+                return false;
         }
     }
     
