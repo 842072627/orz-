@@ -9,6 +9,8 @@
 #include "utils.h"
 #include "scheduler.h"
 
+using namespace DefaultPlanner;
+
 #include <algorithm>
 #include <vector>
 #include <unordered_set>
