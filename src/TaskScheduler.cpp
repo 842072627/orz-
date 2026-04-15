@@ -4,11 +4,9 @@
 #include "const.h"
 
 // ============================================================
-// ARCH-B R4: Spatial Load Balancing v4 - Stronger Pickup Weight
-// R3 had pickup=5.0, dest=2.0 which worked well.
-// R4 tries pickup=6.0, dest=1.5 to:
-//   - Further strengthen pickup-based spatial balance
-//   - Reduce destination influence for better generalization
+// ARCH-B R5: Spatial Load Balancing v5 - Even Stronger Pickup
+// R4 had pickup=6.0, dest=1.5 with fulfill=0.791
+// R5 tries pickup=7.0, dest=1.0 to push fulfill higher
 // ============================================================
 
 namespace {
@@ -17,8 +15,8 @@ std::unordered_set<int> free_tasks;
 
 // ARCH-B: Spatial load balancing state
 constexpr int REGION_GRID_SIZE = 16;  // 16x16 regions
-constexpr double PICKUP_PENALTY = 6.0;  // Stronger pickup weight
-constexpr double DEST_PENALTY = 1.5;     // Further reduced destination penalty
+constexpr double PICKUP_PENALTY = 7.0;  // Even stronger pickup weight
+constexpr double DEST_PENALTY = 1.0;     // Minimal destination penalty
 constexpr double DECAY_FACTOR = 0.95;    // Exponential decay for activity tracking
 
 // Regional activity tracking
