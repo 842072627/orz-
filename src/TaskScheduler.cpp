@@ -7,6 +7,7 @@
 #include "const.h"
 #include "heuristics.h"
 #include "utils.h"
+#include "scheduler.h"
 
 #include <algorithm>
 #include <vector>
@@ -56,7 +57,7 @@ inline int compute_task_dist(int agent_loc, const Task& task, SharedEnvironment*
     int dist = 0;
     int c_loc = agent_loc;
     for (int j = task.idx_next_loc; j < (int)task.locations.size(); j++) {
-        dist += manhattanDistance(c_loc, task.locations[j], env);
+        dist += DefaultPlanner::manhattanDistance(c_loc, task.locations[j], env);
         c_loc = task.locations[j];
     }
     return dist;
@@ -173,7 +174,7 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule)
             auto t_it = env->task_pool.find(t_id);
             if (t_it == env->task_pool.end() || t_it->second.agent_assigned != -1) continue;
             int first_loc = t_it->second.locations.at(t_it->second.idx_next_loc);
-            int md = manhattanDistance(agent_loc, first_loc, env);
+            int md = DefaultPlanner::manhattanDistance(agent_loc, first_loc, env);
             int cong = get_congestion(first_loc, env, cong_map);
             int composite = md + cong * 7;
             task_candidates.push_back({composite, t_id});
