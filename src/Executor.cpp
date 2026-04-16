@@ -1,12 +1,8 @@
 #include "Executor.h"
 #include "default_executor.h"
 
-// ARCH-A R4: Keep baseline Executor (TPG coordination works correctly).
-// The default_executor TPG state (tpg, previous_locations, predicted_states)
-// is shared across default_executor.cpp. We must NOT re-declare it here.
-// Override only the 3 allowed virtual methods, delegating to DefaultPlanner.
-// This is the correct baseline — congestion-aware MCP requires more
-// careful integration with default_executor state that is out of scope for R4.
+// ARCH-L R3: Keep baseline Executor (TPG coordination works correctly).
+// Every Executor modification has crashed. Keep it simple.
 
 void Executor::initialize(int preprocess_time_limit)
 {
