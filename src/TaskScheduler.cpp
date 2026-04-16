@@ -4,10 +4,16 @@
 #include "const.h"
 
 // ============================================================
-// ARCH-J: Task-Length-Aware Scheduling (from ARCH-I best)
+// ARCH-K R1: Completion-Time-Aware Scheduling
 //
-// Best result: 2.678 with LENGTH=0.5, PICKUP=7.3, DEST=0.8
-// Pure LENGTH=0.5 without any experimental changes
+// Instead of LENGTH_WEIGHT which penalizes long tasks,
+// use estimated completion time as the primary metric.
+// This balances workload by considering when each agent will free up.
+//
+// Formula: completion_time = distance_to_pickup + task_steps + distance_to_final
+// Then add congestion penalty
+//
+// This should better distribute work across agents.
 // ============================================================
 
 namespace {
@@ -18,7 +24,7 @@ constexpr int REGION_GRID_SIZE = 16;
 constexpr double PICKUP_PENALTY = 7.3;
 constexpr double DEST_PENALTY = 0.8;
 constexpr double DECAY_FACTOR = 0.95;
-constexpr double LENGTH_WEIGHT = 0.5;  // KEY: Extra weight per location in task
+// No LENGTH_WEIGHT - use completion time instead
 
 std::vector<double> region_activity;
 int num_regions = 0;
@@ -72,6 +78,35 @@ double get_task_congestion_penalty(int pickup_loc, int dest_loc) {
     }
     return penalty;
 }
+
+// Compute completion time estimate for an agent-task pair
+// = distance to pickup + task length (num steps) + distance to final
+double estimate_completion_time(SharedEnvironment* e, int agent_id, int task_id) {
+    int c_loc = e->curr_states.at(agent_id).location;
+    const auto& task_locs = e->task_pool[task_id].locations;
+    
+    if (task_locs.empty()) return 0.0;
+    
+    // Distance from agent to first pickup
+    int dist_to_pickup = DefaultPlanner::get_h(e, c_loc, task_locs[0]);
+    
+    // Task length (number of waypoints to visit)
+    int task_length = task_locs.size();
+    
+    // Distance from last waypoint to... nowhere (task ends there)
+    // Actually, the last loc is already the final destination
+    int dist_within_task = 0;
+    int curr = task_locs[0];
+    for (size_t i = 1; i < task_locs.size(); i++) {
+        dist_within_task += DefaultPlanner::get_h(e, curr, task_locs[i]);
+        curr = task_locs[i];
+    }
+    
+    // Total: travel to pickup + task traversal
+    // Plus small factor for task complexity (prefer simpler tasks when congested)
+    double complexity_factor = task_length * 0.3; // Smaller than original LENGTH_WEIGHT=0.5
+    return dist_to_pickup + dist_within_task + complexity_factor;
+}
 }
 
 void TaskScheduler::initialize(int preprocess_time_limit)
@@ -99,7 +134,7 @@ void TaskScheduler::plan(int time_limit, std::vector<int> & proposed_schedule)
 
         int i = *it;
         int min_task_i = -1;
-        double min_effective_dist = 1e9;
+        double min_value = 1e9;
         int min_task_id = INT_MAX;
         int count = 0;
 
@@ -108,32 +143,26 @@ void TaskScheduler::plan(int time_limit, std::vector<int> & proposed_schedule)
             if (count % 10 == 0 && std::chrono::steady_clock::now() > endtime)
                 break;
 
-            int dist = 0;
-            int c_loc = env->curr_states.at(i).location;
+            // Calculate completion time instead of distance
+            double completion_time = estimate_completion_time(env, i, t_id);
+            
             const auto& task_locs = env->task_pool[t_id].locations;
-            int task_length = task_locs.size();
-            for (int loc : task_locs)
-            {
-                dist += DefaultPlanner::get_h(env, c_loc, loc);
-                c_loc = loc;
-            }
-
             int pickup_loc = task_locs.empty() ? 0 : task_locs[0];
             int dest_loc = task_locs.empty() ? 0 : task_locs.back();
+            
+            // Add congestion penalty
             double congestion_penalty = get_task_congestion_penalty(pickup_loc, dest_loc);
             
-            // KEY: Add task length penalty to prefer shorter tasks
-            double length_penalty = task_length * LENGTH_WEIGHT;
-            
-            double effective_dist = dist + congestion_penalty + length_penalty;
+            // Total value: completion time + congestion
+            double total_value = completion_time + congestion_penalty;
 
-            if (effective_dist < min_effective_dist)
+            if (total_value < min_value)
             {
-                min_effective_dist = effective_dist;
+                min_value = total_value;
                 min_task_i = t_id;
                 min_task_id = t_id;
             }
-            else if (effective_dist == min_effective_dist)
+            else if (total_value == min_value)
             {
                 if (t_id < min_task_id)
                 {
