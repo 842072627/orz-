@@ -4,20 +4,20 @@
 #include "const.h"
 
 // ============================================================
-// ARCH-B R5: Spatial Load Balancing v5 - Even Stronger Pickup
-// R4 had pickup=6.0, dest=1.5 with fulfill=0.791
-// R5 tries pickup=7.0, dest=1.0 to push fulfill higher
+// ARCH-E R3: Higher Pickup + Lower Dest (pickup=7.5, dest=0.8)
+// R1 multiplicative penalty FAILED (fulfill dropped to 0.666)
+// R2 tries: dest=0.8 (lower than R5's 1.0) to help agents complete destinations faster
 // ============================================================
 
 namespace {
 std::unordered_set<int> free_agents;
 std::unordered_set<int> free_tasks;
 
-// ARCH-B: Spatial load balancing state
-constexpr int REGION_GRID_SIZE = 16;  // 16x16 regions
-constexpr double PICKUP_PENALTY = 7.0;  // Even stronger pickup weight
-constexpr double DEST_PENALTY = 1.0;     // Minimal destination penalty
-constexpr double DECAY_FACTOR = 0.95;    // Exponential decay for activity tracking
+// ARCH-E: Spatial load balancing state
+constexpr int REGION_GRID_SIZE = 16;
+constexpr double PICKUP_PENALTY = 7.5;  // Slightly higher than R5's 7.0
+constexpr double DEST_PENALTY = 0.8;     // Lower than R5's 1.0
+constexpr double DECAY_FACTOR = 0.95;    // Keep best
 
 // Regional activity tracking
 std::vector<double> region_activity;
@@ -26,7 +26,6 @@ int region_rows = 0;
 int region_cols = 0;
 int map_cols = 0;
 
-// Get region ID for a location
 inline int get_region_id(int location) {
     if (num_regions == 0) return 0;
     int r = location / map_cols;
@@ -36,7 +35,6 @@ inline int get_region_id(int location) {
     return region_r * REGION_GRID_SIZE + region_c;
 }
 
-// Initialize regional tracking
 void init_spatial_tracking(int rows, int cols) {
     map_cols = cols;
     region_rows = std::max(1, (rows + REGION_GRID_SIZE - 1) / REGION_GRID_SIZE);
@@ -45,14 +43,12 @@ void init_spatial_tracking(int rows, int cols) {
     region_activity.assign(num_regions, 0.0);
 }
 
-// Decay all regional activity (call once per planning round)
 void decay_regional_activity() {
     for (auto& activity : region_activity) {
         activity *= DECAY_FACTOR;
     }
 }
 
-// Record assignment in regional tracking (for both pickup AND destination)
 void record_assignment(int pickup_loc, int dest_loc) {
     int pickup_region = get_region_id(pickup_loc);
     int dest_region = get_region_id(dest_loc);
@@ -64,7 +60,6 @@ void record_assignment(int pickup_loc, int dest_loc) {
     }
 }
 
-// Get total congestion penalty for a task (pickup + destination)
 double get_task_congestion_penalty(int pickup_loc, int dest_loc) {
     int pickup_region = get_region_id(pickup_loc);
     int dest_region = get_region_id(dest_loc);
@@ -84,7 +79,6 @@ void TaskScheduler::initialize(int preprocess_time_limit)
     int limit = preprocess_time_limit/2 - DefaultPlanner::SCHEDULER_TIMELIMIT_TOLERANCE;
     DefaultPlanner::schedule_initialize(limit, env);
 
-    // Initialize spatial tracking for this map
     init_spatial_tracking(env->rows, env->cols);
 }
 
@@ -95,7 +89,6 @@ void TaskScheduler::plan(int time_limit, std::vector<int> & proposed_schedule)
     free_agents.insert(env->new_freeagents.begin(), env->new_freeagents.end());
     free_tasks.insert(env->new_tasks.begin(), env->new_tasks.end());
 
-    // Decay regional activity at start of each planning round
     decay_regional_activity();
 
     std::unordered_set<int>::iterator it = free_agents.begin();
@@ -107,7 +100,7 @@ void TaskScheduler::plan(int time_limit, std::vector<int> & proposed_schedule)
         int i = *it;
         int min_task_i = -1;
         double min_effective_dist = 1e9;
-        int min_task_id = INT_MAX;  // deterministic tie-break: smallest task ID
+        int min_task_id = INT_MAX;
         int count = 0;
 
         for (int t_id : free_tasks)
@@ -124,11 +117,8 @@ void TaskScheduler::plan(int time_limit, std::vector<int> & proposed_schedule)
                 c_loc = loc;
             }
 
-            // Get pickup and destination locations
             int pickup_loc = task_locs.empty() ? 0 : task_locs[0];
             int dest_loc = task_locs.empty() ? 0 : task_locs.back();
-
-            // Calculate effective distance with dual congestion penalty
             double congestion_penalty = get_task_congestion_penalty(pickup_loc, dest_loc);
             double effective_dist = dist + congestion_penalty;
 
@@ -140,7 +130,6 @@ void TaskScheduler::plan(int time_limit, std::vector<int> & proposed_schedule)
             }
             else if (effective_dist == min_effective_dist)
             {
-                // Deterministic tie-break: pick smallest task ID
                 if (t_id < min_task_id)
                 {
                     min_task_id = t_id;
@@ -154,7 +143,6 @@ void TaskScheduler::plan(int time_limit, std::vector<int> & proposed_schedule)
         {
             proposed_schedule[i] = min_task_i;
 
-            // Record assignment for spatial tracking (both pickup and destination)
             const auto& task_locs = env->task_pool[min_task_i].locations;
             int pickup_loc = task_locs.empty() ? 0 : task_locs[0];
             int dest_loc = task_locs.empty() ? 0 : task_locs.back();
