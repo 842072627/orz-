@@ -4,9 +4,10 @@
 #include "const.h"
 
 // ============================================================
-// ARCH-B R5: Spatial Load Balancing v5 - Even Stronger Pickup
-// R4 had pickup=6.0, dest=1.5 with fulfill=0.791
-// R5 tries pickup=7.0, dest=1.0 to push fulfill higher
+// ARCH-B R9: Spatial Load Balancing v9
+// R5: pickup=7.0, dest=1.0 -> Total=2.696 (best)
+// R8: DECAY=0.90 -> Total=2.695 (same)
+// R9: Try REGION_GRID_SIZE=12 (coarser regions, larger coverage per region)
 // ============================================================
 
 namespace {
@@ -14,10 +15,10 @@ std::unordered_set<int> free_agents;
 std::unordered_set<int> free_tasks;
 
 // ARCH-B: Spatial load balancing state
-constexpr int REGION_GRID_SIZE = 16;  // 16x16 regions
-constexpr double PICKUP_PENALTY = 7.0;  // Even stronger pickup weight
-constexpr double DEST_PENALTY = 1.0;     // Minimal destination penalty
-constexpr double DECAY_FACTOR = 0.95;    // Exponential decay for activity tracking
+constexpr int REGION_GRID_SIZE = 12;  // 12x12 regions (was 16)
+constexpr double PICKUP_PENALTY = 7.0;  // Back to R5 optimal
+constexpr double DEST_PENALTY = 1.0;     // Back to R5 optimal
+constexpr double DECAY_FACTOR = 0.95;    // Back to R5 value
 
 // Regional activity tracking
 std::vector<double> region_activity;
