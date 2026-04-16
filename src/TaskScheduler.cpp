@@ -4,14 +4,10 @@
 #include "const.h"
 
 // ============================================================
-// ARCH-I R13: Task-Length-Aware Scheduling
+// ARCH-J: Task-Length-Aware Scheduling (from ARCH-I best)
 //
-// Problem: ARCH-E assigns tasks based on distance + congestion.
-// But tasks have different numbers of locations (length).
-// Completing many short tasks may be better than few long tasks.
-//
-// New: Add task_length_factor to prefer shorter tasks.
-// Formula: effective_dist += task_length * LENGTH_WEIGHT
+// Best result: 2.678 with LENGTH=0.5, PICKUP=7.3, DEST=0.8
+// Pure LENGTH=0.5 without any experimental changes
 // ============================================================
 
 namespace {
@@ -19,10 +15,10 @@ std::unordered_set<int> free_agents;
 std::unordered_set<int> free_tasks;
 
 constexpr int REGION_GRID_SIZE = 16;
-constexpr double PICKUP_PENALTY = 7.5;
+constexpr double PICKUP_PENALTY = 7.3;
 constexpr double DEST_PENALTY = 0.8;
 constexpr double DECAY_FACTOR = 0.95;
-constexpr double LENGTH_WEIGHT = 0.5;  // Extra weight per location in task (best)
+constexpr double LENGTH_WEIGHT = 0.5;  // KEY: Extra weight per location in task
 
 std::vector<double> region_activity;
 int num_regions = 0;
@@ -126,7 +122,7 @@ void TaskScheduler::plan(int time_limit, std::vector<int> & proposed_schedule)
             int dest_loc = task_locs.empty() ? 0 : task_locs.back();
             double congestion_penalty = get_task_congestion_penalty(pickup_loc, dest_loc);
             
-            // NEW: Add task length penalty to prefer shorter tasks
+            // KEY: Add task length penalty to prefer shorter tasks
             double length_penalty = task_length * LENGTH_WEIGHT;
             
             double effective_dist = dist + congestion_penalty + length_penalty;
