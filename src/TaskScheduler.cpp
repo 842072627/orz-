@@ -25,10 +25,10 @@ constexpr int REGION_GRID_SIZE = 16;
 constexpr double PICKUP_PENALTY = 7.3;
 constexpr double DEST_PENALTY = 0.8;
 constexpr double DECAY_FACTOR = 0.95;
-constexpr double LENGTH_WEIGHT = 0.5;  // From ARCH-I best
+constexpr double LENGTH_WEIGHT = 0.5;  // Best value
 
 // Age bonus parameters
-constexpr double AGE_BONUS_RATE = 0.15;  // Even stronger bonus
+constexpr double AGE_BONUS_RATE = 0.15;  // Re-enable
 constexpr double MAX_AGE_BONUS = 4.0;     // Cap the bonus
 
 std::vector<double> region_activity;
