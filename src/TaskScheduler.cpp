@@ -4,7 +4,7 @@
 #include "const.h"
 
 // ============================================================
-// ARCH-E R3: Higher Pickup + Lower Dest (pickup=7.5, dest=0.8)
+// ARCH-E R7: pickup=7.4, dest=0.8
 // R1 multiplicative penalty FAILED (fulfill dropped to 0.666)
 // R2 tries: dest=0.8 (lower than R5's 1.0) to help agents complete destinations faster
 // ============================================================
@@ -15,8 +15,8 @@ std::unordered_set<int> free_tasks;
 
 // ARCH-E: Spatial load balancing state
 constexpr int REGION_GRID_SIZE = 16;
-constexpr double PICKUP_PENALTY = 7.5;  // Slightly higher than R5's 7.0
-constexpr double DEST_PENALTY = 0.8;     // Lower than R5's 1.0
+constexpr double PICKUP_PENALTY = 7.4;  // Between R3(7.5) and R5(7.3)
+constexpr double DEST_PENALTY = 0.8;     // Keep low
 constexpr double DECAY_FACTOR = 0.95;    // Keep best
 
 // Regional activity tracking
