@@ -4,22 +4,26 @@
 #include "const.h"
 
 // ============================================================
-// ARCH-E R7: pickup=7.4, dest=0.8
-// R1 multiplicative penalty FAILED (fulfill dropped to 0.666)
-// R2 tries: dest=0.8 (lower than R5's 1.0) to help agents complete destinations faster
+// ARCH-I R13: Task-Length-Aware Scheduling
+//
+// Problem: ARCH-E assigns tasks based on distance + congestion.
+// But tasks have different numbers of locations (length).
+// Completing many short tasks may be better than few long tasks.
+//
+// New: Add task_length_factor to prefer shorter tasks.
+// Formula: effective_dist += task_length * LENGTH_WEIGHT
 // ============================================================
 
 namespace {
 std::unordered_set<int> free_agents;
 std::unordered_set<int> free_tasks;
 
-// ARCH-E: Spatial load balancing state
 constexpr int REGION_GRID_SIZE = 16;
-constexpr double PICKUP_PENALTY = 7.4;  // Between R3(7.5) and R5(7.3)
-constexpr double DEST_PENALTY = 0.8;     // Keep low
-constexpr double DECAY_FACTOR = 0.95;    // Keep best
+constexpr double PICKUP_PENALTY = 7.5;
+constexpr double DEST_PENALTY = 0.8;
+constexpr double DECAY_FACTOR = 0.95;
+constexpr double LENGTH_WEIGHT = 0.5;  // Extra weight per location in task (best)
 
-// Regional activity tracking
 std::vector<double> region_activity;
 int num_regions = 0;
 int region_rows = 0;
@@ -111,6 +115,7 @@ void TaskScheduler::plan(int time_limit, std::vector<int> & proposed_schedule)
             int dist = 0;
             int c_loc = env->curr_states.at(i).location;
             const auto& task_locs = env->task_pool[t_id].locations;
+            int task_length = task_locs.size();
             for (int loc : task_locs)
             {
                 dist += DefaultPlanner::get_h(env, c_loc, loc);
@@ -120,7 +125,11 @@ void TaskScheduler::plan(int time_limit, std::vector<int> & proposed_schedule)
             int pickup_loc = task_locs.empty() ? 0 : task_locs[0];
             int dest_loc = task_locs.empty() ? 0 : task_locs.back();
             double congestion_penalty = get_task_congestion_penalty(pickup_loc, dest_loc);
-            double effective_dist = dist + congestion_penalty;
+            
+            // NEW: Add task length penalty to prefer shorter tasks
+            double length_penalty = task_length * LENGTH_WEIGHT;
+            
+            double effective_dist = dist + congestion_penalty + length_penalty;
 
             if (effective_dist < min_effective_dist)
             {
