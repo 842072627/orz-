@@ -50,7 +50,7 @@ constexpr double MAX_AGE_BONUS = 4.0;     // Cap the bonus
 
 // Free agent proximity penalty weight
 // Count of free agents in the same region as pickup adds this penalty
-constexpr double FREE_AGENT_WEIGHT = 0.5;
+constexpr double FREE_AGENT_WEIGHT = 0.1;  // R2: reduced from 0.5 to minimize fulfill damage
 
 std::vector<double> region_activity;
 int num_regions = 0;
