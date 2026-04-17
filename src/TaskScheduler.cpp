@@ -11,16 +11,15 @@
 // - DEST_PENALTY = 1.0
 // - NO AGE_BONUS
 // - NO LENGTH_WEIGHT
-// ============================================================
 
 namespace {
 std::unordered_set<int> free_agents;
 std::unordered_set<int> free_tasks;
 
 constexpr int REGION_GRID_SIZE = 16;
+constexpr double DECAY_FACTOR = 0.95;
 constexpr double PICKUP_PENALTY = 7.0;
 constexpr double DEST_PENALTY = 1.0;
-constexpr double DECAY_FACTOR = 0.95;
 
 // No AGE_BONUS (same as ARCH-B R5)
 // No LENGTH_WEIGHT (same as ARCH-B R5)
