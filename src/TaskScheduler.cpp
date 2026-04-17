@@ -114,7 +114,6 @@ void TaskScheduler::plan(int time_limit, std::vector<int> & proposed_schedule)
             if (count % 10 == 0 && std::chrono::steady_clock::now() > endtime)
                 break;
 
-            // Calculate travel distance
             int dist = 0;
             int c_loc = env->curr_states.at(i).location;
             const auto& task_locs = env->task_pool[t_id].locations;
@@ -124,16 +123,13 @@ void TaskScheduler::plan(int time_limit, std::vector<int> & proposed_schedule)
                 c_loc = loc;
             }
 
-            // SPT: processing time = distance + SPT_WEIGHT * task_length
             int task_length = (int)task_locs.size();
             double processing_time = dist + SPT_WEIGHT * task_length;
 
-            // Spatial penalty
             int pickup_loc = task_locs.empty() ? 0 : task_locs[0];
             int dest_loc = task_locs.empty() ? 0 : task_locs.back();
             double spatial_penalty = get_spatial_penalty(pickup_loc, dest_loc);
             
-            // Combined score
             double score = processing_time + spatial_penalty;
 
             if (score < min_score)
