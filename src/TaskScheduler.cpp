@@ -4,17 +4,13 @@
 #include "const.h"
 
 // ============================================================
-// ARCH-L R4: Task-Age-Aware Scheduling
+// ARCH-O R5: Restore ARCH-B R5 Best Parameters
 //
-// Problem: Current scheduler always picks shortest distance.
-// This can cause "starvation" where long tasks are never assigned.
-//
-// Enhancement: Consider task AGE (how long it's been waiting).
-// Older tasks get a small priority boost to ensure fairness.
-//
-// Formula: effective_dist = distance + congestion + length_penalty
-//                              - age_bonus
-// Where age_bonus increases with task waiting time.
+// Based on best historical commit a9a0fd4 (ARCH-B R5):
+// - PICKUP_PENALTY = 7.0
+// - DEST_PENALTY = 1.0
+// - NO AGE_BONUS
+// - NO LENGTH_WEIGHT
 // ============================================================
 
 namespace {
@@ -22,14 +18,12 @@ std::unordered_set<int> free_agents;
 std::unordered_set<int> free_tasks;
 
 constexpr int REGION_GRID_SIZE = 16;
-constexpr double PICKUP_PENALTY = 7.3;
-constexpr double DEST_PENALTY = 0.8;
+constexpr double PICKUP_PENALTY = 7.0;
+constexpr double DEST_PENALTY = 1.0;
 constexpr double DECAY_FACTOR = 0.95;
-constexpr double LENGTH_WEIGHT = 0.5;  // Best value
 
-// Age bonus parameters
-constexpr double AGE_BONUS_RATE = 0.15;  // Re-enable
-constexpr double MAX_AGE_BONUS = 4.0;     // Cap the bonus
+// No AGE_BONUS (same as ARCH-B R5)
+// No LENGTH_WEIGHT (same as ARCH-B R5)
 
 std::vector<double> region_activity;
 int num_regions = 0;
@@ -83,19 +77,6 @@ double get_task_congestion_penalty(int pickup_loc, int dest_loc) {
     }
     return penalty;
 }
-
-// Calculate task age bonus
-// Older tasks (waiting longer) get a small priority boost
-double calc_age_bonus(SharedEnvironment* e, int task_id) {
-    const auto& task = e->task_pool[task_id];
-    // task.t_revealed is when the task was revealed
-    // Current timestep is env->curr_timestep
-    int age = e->curr_timestep - task.t_revealed;
-    if (age < 0) age = 0;  // Safety
-    
-    double bonus = age * AGE_BONUS_RATE;
-    return std::min(bonus, MAX_AGE_BONUS);
-}
 }
 
 void TaskScheduler::initialize(int preprocess_time_limit)
@@ -146,15 +127,8 @@ void TaskScheduler::plan(int time_limit, std::vector<int> & proposed_schedule)
             int dest_loc = task_locs.empty() ? 0 : task_locs.back();
             double congestion_penalty = get_task_congestion_penalty(pickup_loc, dest_loc);
             
-            // Task length penalty (from ARCH-I)
-            double length_penalty = task_length * LENGTH_WEIGHT;
-            
-            // Task age bonus (new - older tasks get priority)
-            double age_bonus = calc_age_bonus(env, t_id);
-            
-            // Effective distance = raw metrics - age bonus
-            // (Subtract because lower is better, age bonus increases priority)
-            double effective_dist = dist + congestion_penalty + length_penalty - age_bonus;
+            // Effective distance = dist + congestion penalty
+            double effective_dist = dist + congestion_penalty;
 
             if (effective_dist < min_effective_dist)
             {
