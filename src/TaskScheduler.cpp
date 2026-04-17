@@ -31,6 +31,27 @@ constexpr double LENGTH_WEIGHT = 0.5;  // Best value
 constexpr double AGE_BONUS_RATE = 0.15;  // Re-enable
 constexpr double MAX_AGE_BONUS = 4.0;     // Cap the bonus
 
+// ============================================================
+// ARCH-N R1: Free Agent Proximity Penalty
+//
+// Problem: region_activity only tracks HISTORICAL assignments.
+// It doesn't reflect where CURRENTLY FREE agents are located.
+// In room-A, many free agents cluster at doorways → path conflict.
+//
+// Enhancement: Count how many free agents are currently in/near
+// the pickup region, and add a proximity penalty.
+// This spreads agents away from crowded areas proactively.
+//
+// Formula: effective_dist = distance + congestion_penalty
+//                              + length_penalty - age_bonus
+//                              + proximity_penalty
+// Where proximity_penalty = FREE_AGENT_WEIGHT * count_free_near_pickup
+// ============================================================
+
+// Free agent proximity penalty weight
+// Count of free agents in the same region as pickup adds this penalty
+constexpr double FREE_AGENT_WEIGHT = 0.5;
+
 std::vector<double> region_activity;
 int num_regions = 0;
 int region_rows = 0;
@@ -71,7 +92,7 @@ void record_assignment(int pickup_loc, int dest_loc) {
     }
 }
 
-double get_task_congestion_penalty(int pickup_loc, int dest_loc) {
+double get_task_congestion_penalty(int pickup_loc, int dest_loc, const std::vector<int>& free_agent_region_counts) {
     int pickup_region = get_region_id(pickup_loc);
     int dest_region = get_region_id(dest_loc);
     double penalty = 0.0;
@@ -81,6 +102,13 @@ double get_task_congestion_penalty(int pickup_loc, int dest_loc) {
     if (dest_region >= 0 && dest_region < num_regions) {
         penalty += DEST_PENALTY * region_activity[dest_region];
     }
+
+    // Free Agent Proximity Penalty (ARCH-N): use precomputed region counts
+    // This proactively spreads agents away from crowded areas
+    if (pickup_region >= 0 && pickup_region < num_regions) {
+        penalty += FREE_AGENT_WEIGHT * free_agent_region_counts[pickup_region];
+    }
+
     return penalty;
 }
 
@@ -115,6 +143,18 @@ void TaskScheduler::plan(int time_limit, std::vector<int> & proposed_schedule)
 
     decay_regional_activity();
 
+    // Precompute free agent region counts (ARCH-N optimization)
+    // Count how many free agents are in each region — computed once, used for all task evaluations
+    std::vector<int> free_agent_region_counts(num_regions, 0);
+    for (int agent_id : free_agents) {
+        if (agent_id >= 0 && agent_id < (int)env->curr_states.size()) {
+            int agent_region = get_region_id(env->curr_states[agent_id].location);
+            if (agent_region >= 0 && agent_region < num_regions) {
+                free_agent_region_counts[agent_region]++;
+            }
+        }
+    }
+
     std::unordered_set<int>::iterator it = free_agents.begin();
     while (it != free_agents.end())
     {
@@ -144,7 +184,7 @@ void TaskScheduler::plan(int time_limit, std::vector<int> & proposed_schedule)
 
             int pickup_loc = task_locs.empty() ? 0 : task_locs[0];
             int dest_loc = task_locs.empty() ? 0 : task_locs.back();
-            double congestion_penalty = get_task_congestion_penalty(pickup_loc, dest_loc);
+            double congestion_penalty = get_task_congestion_penalty(pickup_loc, dest_loc, free_agent_region_counts);
             
             // Task length penalty (from ARCH-I)
             double length_penalty = task_length * LENGTH_WEIGHT;
