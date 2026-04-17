@@ -4,16 +4,17 @@
 #include "const.h"
 
 // ============================================================
-// ARCH-A R8: SPT + Balanced Spatial
+// ARCH-B R1: Spatial-First + SPT
 //
-// TRUE architecture change: Shortest Processing Time objective
-// Formula: score = (distance + 3.5 * task_length) + 7.5 * pickup + 1.2 * dest
+// NEW DIRECTION: Prioritize avoiding congested regions FIRST,
+// then use SPT within low-congestion regions.
 //
-// Results vs Start-Kit:
-// - random: 0.530 -> 0.512 (-0.018)
-// - bos: 0.176 -> 0.242 (+0.066)
-// - room: 0.163 -> 0.192 (+0.029)
-// - fulfill: 0.616 -> 0.831 (+0.215)
+// Architecture change:
+// - OLD: min(distance + spatial_penalty)
+// - NEW: min(spatial_penalty + SPT_component)
+//
+// The idea: If we avoid congestion first, agents won't block each other.
+// This should improve overall throughput.
 // ============================================================
 
 namespace {
@@ -22,9 +23,10 @@ std::unordered_set<int> free_tasks;
 
 constexpr int REGION_GRID_SIZE = 16;
 constexpr double DECAY_FACTOR = 0.95;
-constexpr double PICKUP_PENALTY = 7.5;
-constexpr double DEST_PENALTY = 1.2;
-constexpr double SPT_WEIGHT = 3.5;
+constexpr double PICKUP_PENALTY = 10.0;  // Higher spatial priority
+constexpr double DEST_PENALTY = 2.0;
+constexpr double SPT_WEIGHT = 2.0;  // Lower SPT weight
+constexpr double SPATIAL_FIRST_FACTOR = 2.0;  // Extra weight for spatial
 
 std::vector<double> region_activity;
 int num_regions = 0;
@@ -124,17 +126,17 @@ void TaskScheduler::plan(int time_limit, std::vector<int> & proposed_schedule)
                 c_loc = loc;
             }
 
-            // SPT: processing time = distance + SPT_WEIGHT * task_length
+            // SPT component
             int task_length = (int)task_locs.size();
-            double processing_time = dist + SPT_WEIGHT * task_length;
+            double spt_component = dist + SPT_WEIGHT * task_length;
 
-            // Spatial penalty
+            // Spatial penalty - with extra weight to prioritize it
             int pickup_loc = task_locs.empty() ? 0 : task_locs[0];
             int dest_loc = task_locs.empty() ? 0 : task_locs.back();
             double spatial_penalty = get_spatial_penalty(pickup_loc, dest_loc);
             
-            // Combined score
-            double score = processing_time + spatial_penalty;
+            // Combined score - spatial first (multiplied by factor)
+            double score = spatial_penalty * SPATIAL_FIRST_FACTOR + spt_component;
 
             if (score < min_score)
             {
