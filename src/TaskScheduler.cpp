@@ -4,13 +4,13 @@
 #include "const.h"
 
 // ============================================================
-// ARCH-O R5: Restore ARCH-B R5 Best Parameters
+// ARCH-A R8: SPT 3.5 + Balanced Spatial
 //
-// Based on best historical commit a9a0fd4 (ARCH-B R5):
-// - PICKUP_PENALTY = 7.0
-// - DEST_PENALTY = 1.0
-// - NO AGE_BONUS
-// - NO LENGTH_WEIGHT
+// ARCH-A R4 baseline: DECAY=0.95, PICKUP=8.0, DEST=1.5, SPT=3.0
+// This version: SPT=3.5, PICKUP=7.5, DEST=1.2
+//
+// Try slightly higher SPT weight with balanced spatial penalties
+// ============================================================
 
 namespace {
 std::unordered_set<int> free_agents;
@@ -18,11 +18,9 @@ std::unordered_set<int> free_tasks;
 
 constexpr int REGION_GRID_SIZE = 16;
 constexpr double DECAY_FACTOR = 0.95;
-constexpr double PICKUP_PENALTY = 7.0;
-constexpr double DEST_PENALTY = 1.0;
-
-// No AGE_BONUS (same as ARCH-B R5)
-// No LENGTH_WEIGHT (same as ARCH-B R5)
+constexpr double PICKUP_PENALTY = 7.5;
+constexpr double DEST_PENALTY = 1.2;
+constexpr double SPT_WEIGHT = 3.5;
 
 std::vector<double> region_activity;
 int num_regions = 0;
@@ -64,7 +62,7 @@ void record_assignment(int pickup_loc, int dest_loc) {
     }
 }
 
-double get_task_congestion_penalty(int pickup_loc, int dest_loc) {
+double get_spatial_penalty(int pickup_loc, int dest_loc) {
     int pickup_region = get_region_id(pickup_loc);
     int dest_region = get_region_id(dest_loc);
     double penalty = 0.0;
@@ -103,7 +101,7 @@ void TaskScheduler::plan(int time_limit, std::vector<int> & proposed_schedule)
 
         int i = *it;
         int min_task_i = -1;
-        double min_effective_dist = 1e9;
+        double min_score = 1e9;
         int min_task_id = INT_MAX;
         int count = 0;
 
@@ -112,30 +110,35 @@ void TaskScheduler::plan(int time_limit, std::vector<int> & proposed_schedule)
             if (count % 10 == 0 && std::chrono::steady_clock::now() > endtime)
                 break;
 
+            // Calculate travel distance
             int dist = 0;
             int c_loc = env->curr_states.at(i).location;
             const auto& task_locs = env->task_pool[t_id].locations;
-            int task_length = task_locs.size();
             for (int loc : task_locs)
             {
                 dist += DefaultPlanner::get_h(env, c_loc, loc);
                 c_loc = loc;
             }
 
+            // SPT: processing time = distance + SPT_WEIGHT * task_length
+            int task_length = (int)task_locs.size();
+            double processing_time = dist + SPT_WEIGHT * task_length;
+
+            // Spatial penalty
             int pickup_loc = task_locs.empty() ? 0 : task_locs[0];
             int dest_loc = task_locs.empty() ? 0 : task_locs.back();
-            double congestion_penalty = get_task_congestion_penalty(pickup_loc, dest_loc);
+            double spatial_penalty = get_spatial_penalty(pickup_loc, dest_loc);
             
-            // Effective distance = dist + congestion penalty
-            double effective_dist = dist + congestion_penalty;
+            // Combined score
+            double score = processing_time + spatial_penalty;
 
-            if (effective_dist < min_effective_dist)
+            if (score < min_score)
             {
-                min_effective_dist = effective_dist;
+                min_score = score;
                 min_task_i = t_id;
                 min_task_id = t_id;
             }
-            else if (effective_dist == min_effective_dist)
+            else if (score == min_score)
             {
                 if (t_id < min_task_id)
                 {
