@@ -200,7 +200,7 @@ namespace MyPlanner{
             }
             else{
                 trajLNS.tasks[i] = env->goal_locations[i].front().first;
-                local_priority[i] = local_priority[i] + 1;
+                // NOTE: removed +1 increment - Team_Kitty_Knight doesn't increment during refresh
             }
 
             assert(env->start_states[i].location >=0);
