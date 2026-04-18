@@ -21,13 +21,13 @@ void Entry::initialize(int preprocess_time_limit)
 void Entry::compute(int time_limit, Plan & plan, std::vector<int> & proposed_schedule)
 {
     //call the task scheduler to assign tasks to agents
-    scheduler->plan(time_limit,proposed_schedule);
+    scheduler->plan(time_limit, proposed_schedule);
 
     //then update the first unfinished errand/location of tasks for planner reference
     update_goal_locations(proposed_schedule);
     
     //call the planner to compute the actions
-    planner->plan(time_limit,plan);
+    planner->plan(time_limit, plan);
 
 }
 

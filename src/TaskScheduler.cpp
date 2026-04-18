@@ -1,7 +1,8 @@
 #include "TaskScheduler.h"
 
-#include "scheduler.h"
-#include "const.h"
+#include "my_planner/scheduler.h"
+#include "my_planner/const.h"
+#include "my_planner/heuristics.h"
 
 // ARCH-Z R1: DECAY=0.98 + SPT=3.5 (Best Configuration)
 
@@ -71,8 +72,8 @@ double get_spatial_penalty(int pickup_loc, int dest_loc) {
 
 void TaskScheduler::initialize(int preprocess_time_limit)
 {
-    int limit = preprocess_time_limit/2 - DefaultPlanner::SCHEDULER_TIMELIMIT_TOLERANCE;
-    DefaultPlanner::schedule_initialize(limit, env);
+    int limit = preprocess_time_limit/2 - MyPlanner::SCHEDULER_TIMELIMIT_TOLERANCE;
+    MyPlanner::schedule_initialize(limit, env);
 
     init_spatial_tracking(env->rows, env->cols);
 }
@@ -107,7 +108,7 @@ void TaskScheduler::plan(int time_limit, std::vector<int> & proposed_schedule)
             int current_loc = env->curr_states.at(agent_id).location;
             const auto& task_locs = env->task_pool[task_id].locations;
             for (int loc : task_locs) {
-                distance += DefaultPlanner::get_h(env, current_loc, loc);
+                distance += MyPlanner::get_h(env, current_loc, loc);
                 current_loc = loc;
             }
 
