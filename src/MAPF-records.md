@@ -129,7 +129,14 @@
 
 ### H3: LNS 集成
 
-**状态**：⚠️ skeleton 创建，未集成
+| 字段 | 值 |
+|------|-----|
+| **commit** | `ccc1049` |
+| **exe MD5** | `CCFBE7C54E70BC33ED9160861232685F` |
+| **状态** | ⚠️ skeleton 编译通过，待集成到 planner |
+
+**进展**：
+- 2026-04-19: CMakeLists.txt 添加 LNS 源文件，skeleton 编译通过
 
 ---
 
