@@ -13,7 +13,7 @@ include_directories("inc")
 include_directories("default_planner")
 include_directories("src/my_planner")
 
-file(GLOB SOURCES "src/*.cpp" "default_planner/*.cpp" "src/my_planner/*.cpp")
+file(GLOB SOURCES "src/*.cpp" "default_planner/*.cpp" "src/my_planner/*.cpp" "src/my_planner/LNS/*.cpp" "src/my_planner/LNS/Parallel/*.cpp")
 file(GLOB DEFAULT_PLANNER_SOURCES "default_planner/*.cpp")
 
 

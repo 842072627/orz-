@@ -41,7 +41,7 @@ public:
     std::vector<double> destroy_weights;
     std::mt19937 MT;
     
-    std::vector<std::vector<int>> intersections;
+    std::vector<int> intersections;
     
     NeighborGenerator(
         Instance& instance,

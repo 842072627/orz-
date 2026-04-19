@@ -49,7 +49,7 @@ bool LocalOptimizer::runPP(Neighbor& neighbor) {
         int agent_id = neighbor.agents[i];
         if (agent_id < 0 || agent_id >= instance.num_of_agents) continue;
         
-        Traj new_path;
+        MyPlanner::Traj new_path;
         int start_loc = instance.start_locations[agent_id];
         int goal_loc = instance.goal_locations[agent_id];
         
