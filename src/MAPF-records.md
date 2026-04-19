@@ -297,6 +297,11 @@
 | H4 | Dist2PathHeuristicTable | wrapper未集成 | ⚠️ 未完成 |
 | H5 | Frank-Wolfe路径效率 | iron=0.000 | ❌ 崩溃 |
 | H6 | 每步quick FW | bos-14%, fulfill-12% | ❌ 失败 |
+| H7 | collision detection in LNS | total -3% | ❌ 失败 |
+| H8 | collision-aware BFS | 无提升 | ❌ 失败 |
+| H9 | collision-aware A* | fulfill-4% | ❌ 失败 |
+| H10 | TimeSpaceA* LNS | 超时 | ❌ 失败 |
+| H11 | LNS RANDOMWALK 8 neighbors | 无提升 | ❌ 失败 |
 
 ---
 
@@ -342,10 +347,34 @@ plan() → 单次FW优化 → actions
   - fulfill: 0.760, orz: 0.215, iron: 0.141
 - **结论**: H3-v4 代码正常
 
+### H11: LNS RANDOMWALK with 8 neighbors
+| 字段 | 值 |
+|------|-----|
+| **commit** | `9eeca63` |
+| **exe MD5** | `5DBDCD63418934E992F4D4D59A76692D` |
+| **改动** | destroy_strategy: RANDOM→RANDOMWALK, neighbor_size: 4→8 |
+| **状态** | ❌ 无提升 |
+
+**Round 432-433 结果**：
+| 地图 | round432 | round433 | 平均 | 变化 |
+|------|----------|----------|------|------|
+| fulfill | 0.774 | 0.808 | 0.791 | +8% vs H1 |
+| room | 0.198 | 0.182 | 0.190 | +2% |
+| maze | 0.094 | 0.092 | 0.093 | +2% |
+| iron | 0.146 | 0.144 | 0.145 | -1% |
+| random | 0.523 | 0.497 | 0.510 | -1% |
+| bos | 0.240 | 0.240 | 0.240 | 0% |
+| **Total** | **2.192** | **2.186** | **2.189** | |
+
+**分析**：
+- LNS 参数对性能影响很小
+- RANDOMWALK 策略与 RANDOM 策略效果相当
+- **结论**: LNS 参数不是瓶颈，架构差距才是核心问题
+
 ---
 
 ## 待完成工作
 
 - [x] H3: LNS skeleton 编译通过（待集成）
 - [x] H4: Dist2PathHeuristicTable 功能与现有 get_gp_h() 重叠
-- [ ] H3: 实现 multi_step() + solve() 完整集成（较大工作量）
+- [ ] 实现 multi_step() + solve() 完整集成（较大工作量）
