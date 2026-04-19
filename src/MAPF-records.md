@@ -131,22 +131,27 @@
 
 | 字段 | 值 |
 |------|-----|
-| **commit** | `ccc1049` |
-| **exe MD5** | `CCFBE7C54E70BC33ED9160861232685F` |
-| **状态** | ⚠️ skeleton 编译通过，待集成（需要 multi_step + solve） |
+| **commit** | `2ba69af` |
+| **exe MD5** | `53D461F687F77F19EB43E3B143CB70A5` |
+| **状态** | 🔄 简单 LNS neighbor replanning 已添加，待调优 |
 
-**分析**（2026-04-19）：
-- 现有 `get_gp_h()` 已经使用 `traj_dists` 进行启发式搜索
-- LNS skeleton 有 NeighborGenerator, LocalOptimizer, GlobalManager
-- 缺少 Team_Kitty_Knight 的 `solve()` 方法和 `multi_step()` 集成
-- **结论**：需要较大架构改动，当前代码已有类似功能的基础实现
+**实现**（2026-04-19）：
+- 添加 `lns_replan_neighbors()` 函数
+- 在 FW 优化后调用，replan 前 8 个最延迟的 agent
+- 基于路径长度改善决定是否接受新路径
 
-**Round 363**：
-| 地图 | 分数 | tasks |
-|------|------|-------|
-| fulfill | 0.754 | 754 |
-| bos | 0.234 | 164 |
-| room | 0.180 | 72 |
+**Round 364 结果**：
+| 地图 | H1 baseline | Round 364 | 变化 |
+|------|-------------|-----------|------|
+| fulfill | 0.733 | 0.762 | **+4%** |
+| bos | 0.241 | 0.243 | 0% |
+| room | 0.186 | 0.182 | -2% |
+| maze | 0.091 | 0.092 | +1% |
+| random | 0.516 | 0.507 | -2% |
+| orz | 0.217 | 0.215 | -1% |
+| iron | 0.147 | 0.140 | -5% |
+
+**分析**：fulfill +4%，但 iron -5%。简单 LNS 有效但需调优。
 
 ---
 
