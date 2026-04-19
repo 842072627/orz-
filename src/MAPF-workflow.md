@@ -1,6 +1,6 @@
 # MAPF 研究工作流
 
-> 本文件：`src/MAPF-workflow.md`
+> 本文件：`C:\Users\Administrator\Desktop\test-studio-mapf\LORR26_842072627\src\MAPF-workflow.md`
 > 核心原则：永远有事做，永远研究驱动，永远记录完整
 
 ---
@@ -74,16 +74,20 @@
 
 ---
 
-## 📁 关键文件
+## 📁 关键文件（全路径）
 
-| 文件 | 位置 | 说明 |
-|------|------|------|
-| Workflow | `src/MAPF-workflow.md` | 本文件 |
-| 实验记录 | `src/MAPF-records.md` | 唯一真实来源 |
-| 项目笔记 | `../项目笔记.md` | 研究灵感（git 外） |
-| 测试结果 | `test-scripts/round/roundXXX/` | 只读 |
-| 代码 | `src/my_planner/` | 可修改 |
-| 备份 | `default_planner/` | 不修改 |
+| 文件 | 路径 |
+|------|------|
+| Workflow | `C:\Users\Administrator\Desktop\test-studio-mapf\LORR26_842072627\src\MAPF-workflow.md` |
+| 实验记录 | `C:\Users\Administrator\Desktop\test-studio-mapf\LORR26_842072627\src\MAPF-records.md` |
+| 项目笔记 | `C:\Users\Administrator\Desktop\test-studio-mapf\项目笔记.md` |
+| 测试结果 | `C:\Users\Administrator\Desktop\test-studio-mapf\test-scripts\round\roundXXX\` |
+| 代码 | `C:\Users\Administrator\Desktop\test-studio-mapf\LORR26_842072627\src\my_planner\` |
+| 备份 | `C:\Users\Administrator\Desktop\test-studio-mapf\LORR26_842072627\default_planner\` |
+| Team_Kitty_Knight | `C:\Users\Administrator\Desktop\test-studio-mapf\Best-Implementations-2024\Team_Kitty_Knight_da7d428b\` |
+| Start-Kit 3.1 | `C:\Users\Administrator\Desktop\test-studio-mapf\Start_Kit_main\` |
+| build 输出 | `C:\Users\Administrator\Desktop\test-studio-mapf\LORR26_842072627\build\` |
+| lifelong.exe | `C:\Users\Administrator\Desktop\test-studio-mapf\LORR26_842072627\build\lifelong.exe` |
 
 ---
 
@@ -105,9 +109,8 @@
 | 资源 | 地址 |
 |------|------|
 | 比赛官网 | https://www.mapf.info/ |
-| Team_Kitty_Knight 代码 | `Best-Implementations-2024/Team_Kitty_Knight_da7d428b/` |
-| Start-Kit 3.1 | `Start_Kit_main/` |
 | clawhub（技能市场） | https://clawhub.ai |
+| Team_Kitty_Knight 代码 | `C:\Users\Administrator\Desktop\test-studio-mapf\Best-Implementations-2024\Team_Kitty_Knight_da7d428b\` |
 
 ---
 
@@ -115,23 +118,26 @@
 
 ### 编译测试
 ```bash
-cd test-scripts; cmd /c build.bat
-cd test-scripts; cmd /c run_quick_test.bat
+cd C:\Users\Administrator\Desktop\test-studio-mapf\test-scripts
+cmd /c build.bat
+cmd /c run_quick_test.bat
 ```
 
 ### 获取 MD5
 ```powershell
-Get-FileHash build/lifelong.exe -Algorithm MD5
+Get-FileHash C:\Users\Administrator\Desktop\test-studio-mapf\LORR26_842072627\build\lifelong.exe -Algorithm MD5
 ```
 
 ### 回退代码
 ```bash
+cd C:\Users\Administrator\Desktop\test-studio-mapf\LORR26_842072627
 git checkout <good-commit> -- .
 git commit -m "revert to <commit>"
 ```
 
 ### 查看状态
 ```bash
+cd C:\Users\Administrator\Desktop\test-studio-mapf\LORR26_842072627
 git log --oneline -5
 git status
 ```
@@ -210,6 +216,8 @@ plan() → 单次FW优化 → actions
 
 | 日期 | 版本 | 说明 |
 |------|------|------|
+| 2026-04-19 | v4.2 | 补全文件全路径 |
+| 2026-04-19 | v4.1 | 补回重要参考 |
 | 2026-04-19 | v4.0 | 精简至核心原则 + 附录 |
 | 2026-04-19 | v3.x | 多次错误教训叠加 |
 | 2026-04-18 | v2.x | 初始版本 |
