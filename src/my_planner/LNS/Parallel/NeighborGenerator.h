@@ -60,6 +60,7 @@ private:
     int findMostDelayedAgent();
     void randomWalk(int start_agent, int start_time, std::vector<int>& neighbors);
     double calculateDelay(int agent_id);
+    double calculateCongestion(int agent_id);
 };
 
 }

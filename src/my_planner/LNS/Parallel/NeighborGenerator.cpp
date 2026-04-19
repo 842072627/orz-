@@ -67,6 +67,32 @@ double NeighborGenerator::calculateDelay(int agent_id) {
     return expected_dist - actual_dist;
 }
 
+double NeighborGenerator::calculateCongestion(int agent_id) {
+    // Calculate how congested an agent's path is
+    // Count intersections with other agents' paths
+    auto& traj = lns.trajs[agent_id];
+    if (traj.empty()) return 0;
+    
+    int congestion = 0;
+    for (int other_id = 0; other_id < instance.num_of_agents; other_id++) {
+        if (other_id == agent_id) continue;
+        auto& other_traj = lns.trajs[other_id];
+        if (other_traj.empty()) continue;
+        
+        // Count overlapping locations
+        for (int t1 = 0; t1 < (int)traj.size(); t1++) {
+            for (int t2 = 0; t2 < (int)other_traj.size(); t2++) {
+                if (traj[t1] == other_traj[t2]) {
+                    congestion++;
+                    break;  // Count each agent only once per timestep
+                }
+            }
+        }
+    }
+    
+    return congestion;
+}
+
 void NeighborGenerator::randomWalk(int start_agent, int start_time, std::vector<int>& neighbors) {
     if (start_agent < 0 || start_agent >= instance.num_of_agents) return;
     
@@ -142,6 +168,24 @@ Neighbor NeighborGenerator::generate() {
             if ((int)neighbor.agents.size() > neighbor_size)
                 neighbor.agents.resize(neighbor_size);
             neighbor.selected_neighbor = RANDOM;
+            break;
+        }
+        
+        case CONGESTION: {
+            // Select agents with highest congestion
+            std::vector<std::pair<int, double>> congestion_scores;
+            for (int i = 0; i < instance.num_of_agents; i++) {
+                double cong = calculateCongestion(i);
+                congestion_scores.emplace_back(i, cong);
+            }
+            // Sort by congestion (descending)
+            std::sort(congestion_scores.begin(), congestion_scores.end(),
+                [](const auto& a, const auto& b) { return a.second > b.second; });
+            // Take top neighbors
+            for (int i = 0; i < std::min(neighbor_size, (int)congestion_scores.size()); i++) {
+                neighbor.agents.push_back(congestion_scores[i].first);
+            }
+            neighbor.selected_neighbor = CONGESTION;
             break;
         }
         

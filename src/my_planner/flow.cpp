@@ -267,9 +267,9 @@ void run_complete_lns(TrajLNS& lns, int num_iterations, const TimePoint* deadlin
     // Create LNS instance from environment
     LNS::Instance instance(*lns.env);
     
-    // Create neighbor generator with RANDOMWALK strategy (like Team_Kitty_Knight)
+    // Create neighbor generator with CONGESTION strategy
     int neighbor_size = 8;
-    LNS::destroy_heuristic destroy_strategy = LNS::destroy_heuristic::RANDOMWALK;
+    LNS::destroy_heuristic destroy_strategy = LNS::destroy_heuristic::CONGESTION;
     bool ALNS = true;
     double decay_factor = 0.01;
     double reaction_factor = 0.1;
