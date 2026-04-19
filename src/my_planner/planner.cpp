@@ -188,10 +188,9 @@ namespace MyPlanner{
         std::unordered_set<int> updated;
         frank_wolfe(trajLNS, updated, flow_end_time);
         
-        // Simple LNS neighbor replanning after FW
-        // Replan paths for most delayed agents to improve global solution
+        // Complete LNS with ALNS: multiple iterations of neighbor generation + replan
         if (std::chrono::steady_clock::now() < flow_end_time){
-            lns_replan_neighbors(trajLNS, 4, &flow_end_time);
+            run_complete_lns(trajLNS, 20, &flow_end_time);
         }
     }
 

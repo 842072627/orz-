@@ -2,6 +2,9 @@
 
 #include "flow.h"
 
+#include "LNS/Instance.h"
+#include "LNS/Parallel/NeighborGenerator.h"
+#include "LNS/Parallel/LocalOptimizer.h"
 
 #include <random>
 #include <unordered_set>
@@ -256,6 +259,98 @@ void lns_replan_neighbors(TrajLNS& lns, int num_neighbors, const TimePoint* dead
         
         // Early exit if no improvements made
         if (count == 0) break;
+    }
+}
+
+// Complete LNS optimization using GlobalManager architecture
+void run_complete_lns(TrajLNS& lns, int num_iterations, const TimePoint* deadline) {
+    // Create LNS instance from environment
+    LNS::Instance instance(*lns.env);
+    
+    // Create neighbor generator with RANDOMWALK strategy
+    int neighbor_size = 4;
+    LNS::destroy_heuristic destroy_strategy = LNS::destroy_heuristic::RANDOMWALK;
+    bool ALNS = true;
+    double decay_factor = 0.01;
+    double reaction_factor = 0.1;
+    LNS::LocalOptimizer lo(instance, lns, "PP", neighbor_size);
+    LNS::NeighborGenerator ng(instance, lns, neighbor_size, destroy_strategy, ALNS, decay_factor, reaction_factor);
+    
+    // ALNS weights
+    std::vector<double> destroy_weights(LNS::destroy_heuristic::COUNT, 1.0);
+    
+    for (int iter = 0; iter < num_iterations; iter++) {
+        // Check time limit
+        if (deadline && std::chrono::steady_clock::now() >= *deadline) {
+            break;
+        }
+        
+        // Generate neighbor set using RANDOMWALK
+        LNS::Neighbor neighbor = ng.generate();
+        if (neighbor.agents.empty()) continue;
+        
+        // Store old paths and costs
+        neighbor.m_old_paths.resize(neighbor.agents.size());
+        neighbor.old_sum_of_costs = 0;
+        for (size_t i = 0; i < neighbor.agents.size(); i++) {
+            int agent_id = neighbor.agents[i];
+            neighbor.m_old_paths[i] = lns.trajs[agent_id];
+            neighbor.old_sum_of_costs += lns.trajs[agent_id].size();
+        }
+        
+        // Optimize (replan paths)
+        neighbor.m_paths.resize(neighbor.agents.size());
+        neighbor.sum_of_costs = 0;
+        
+        for (size_t i = 0; i < neighbor.agents.size(); i++) {
+            int agent_id = neighbor.agents[i];
+            int start_loc = lns.env->curr_states[agent_id].location;
+            int goal_loc = lns.tasks[agent_id];
+            
+            // Use our update_traj which does A* with flow consideration
+            auto old_traj = lns.trajs[agent_id];
+            remove_traj(lns, agent_id);
+            
+            if (update_traj(lns, agent_id, deadline)) {
+                neighbor.m_paths[i] = lns.trajs[agent_id];
+            } else {
+                // Replan failed, restore old path
+                lns.trajs[agent_id] = old_traj;
+                add_traj(lns, agent_id);
+                neighbor.m_paths[i] = old_traj;
+            }
+            neighbor.sum_of_costs += lns.trajs[agent_id].size();
+        }
+        
+        // Accept or reject based on improvement
+        neighbor.succ = (neighbor.sum_of_costs < neighbor.old_sum_of_costs);
+        
+        if (neighbor.succ) {
+            // Accept: update trajectories
+            for (size_t i = 0; i < neighbor.agents.size(); i++) {
+                int agent_id = neighbor.agents[i];
+                lns.trajs[agent_id] = neighbor.m_paths[i];
+            }
+            
+            // Update ALNS weights
+            if (ALNS) {
+                double improvement = neighbor.old_sum_of_costs - neighbor.sum_of_costs;
+                destroy_weights[neighbor.selected_neighbor] =
+                    reaction_factor * improvement / neighbor.agents.size()
+                    + (1 - reaction_factor) * destroy_weights[neighbor.selected_neighbor];
+            }
+        } else {
+            // Reject: decay weights
+            if (ALNS) {
+                destroy_weights[neighbor.selected_neighbor] =
+                    (1 - decay_factor) * destroy_weights[neighbor.selected_neighbor];
+            }
+            // Restore old trajectories
+            for (size_t i = 0; i < neighbor.agents.size(); i++) {
+                int agent_id = neighbor.agents[i];
+                lns.trajs[agent_id] = neighbor.m_old_paths[i];
+            }
+        }
     }
 }
 
