@@ -267,17 +267,19 @@ void run_complete_lns(TrajLNS& lns, int num_iterations, const TimePoint* deadlin
     // Create LNS instance from environment
     LNS::Instance instance(*lns.env);
     
-    // Create neighbor generator with RANDOM strategy (baseline)
+    // H19: Use ALNS with multiple strategies instead of fixed RANDOM
     int neighbor_size = 4;
-    LNS::destroy_heuristic destroy_strategy = LNS::destroy_heuristic::RANDOM;
     bool ALNS = true;
     double decay_factor = 0.01;
     double reaction_factor = 0.1;
-    LNS::LocalOptimizer lo(instance, lns, "PP", neighbor_size);
-    LNS::NeighborGenerator ng(instance, lns, neighbor_size, destroy_strategy, ALNS, decay_factor, reaction_factor);
     
-    // ALNS weights
-    std::vector<double> destroy_weights(LNS::destroy_heuristic::COUNT, 1.0);
+    // Create neighbor generators for different strategies
+    LNS::NeighborGenerator ng_random(instance, lns, neighbor_size, LNS::destroy_heuristic::RANDOM, ALNS, decay_factor, reaction_factor);
+    LNS::NeighborGenerator ng_randomwalk(instance, lns, neighbor_size, LNS::destroy_heuristic::RANDOMWALK, ALNS, decay_factor, reaction_factor);
+    
+    // ALNS weights for strategy selection
+    std::vector<double> strategy_weights(LNS::destroy_heuristic::COUNT, 1.0);
+    double total_weight = strategy_weights.size();  // Start uniform
     
     for (int iter = 0; iter < num_iterations; iter++) {
         // Check time limit
@@ -285,8 +287,33 @@ void run_complete_lns(TrajLNS& lns, int num_iterations, const TimePoint* deadlin
             break;
         }
         
-        // Generate neighbor set using RANDOM
-        LNS::Neighbor neighbor = ng.generate();
+        // H19: ALNS-based strategy selection
+        LNS::Neighbor neighbor;
+        LNS::destroy_heuristic selected_strategy;
+        
+        if (ALNS) {
+            // Select strategy probabilistically based on weights
+            double r = (double)rand() / RAND_MAX * total_weight;
+            double cum_weight = 0;
+            for (int s = 0; s < LNS::destroy_heuristic::COUNT; s++) {
+                cum_weight += strategy_weights[s];
+                if (r < cum_weight) {
+                    selected_strategy = (LNS::destroy_heuristic)s;
+                    break;
+                }
+            }
+        } else {
+            selected_strategy = LNS::destroy_heuristic::RANDOM;
+        }
+        
+        // Generate neighbor set using selected strategy
+        if (selected_strategy == LNS::destroy_heuristic::RANDOMWALK) {
+            neighbor = ng_randomwalk.generate();
+        } else {
+            neighbor = ng_random.generate();
+        }
+        neighbor.selected_neighbor = selected_strategy;
+        
         if (neighbor.agents.empty()) continue;
         
         // Store old paths and costs
@@ -332,18 +359,26 @@ void run_complete_lns(TrajLNS& lns, int num_iterations, const TimePoint* deadlin
                 lns.trajs[agent_id] = neighbor.m_paths[i];
             }
             
-            // Update ALNS weights
+            // H19: Update ALNS weights based on improvement
             if (ALNS) {
                 double improvement = neighbor.old_sum_of_costs - neighbor.sum_of_costs;
-                destroy_weights[neighbor.selected_neighbor] =
+                int strat_idx = (int)neighbor.selected_neighbor;
+                strategy_weights[strat_idx] =
                     reaction_factor * improvement / neighbor.agents.size()
-                    + (1 - reaction_factor) * destroy_weights[neighbor.selected_neighbor];
+                    + (1 - reaction_factor) * strategy_weights[strat_idx];
+                // Update total weight
+                total_weight = 0;
+                for (double w : strategy_weights) total_weight += w;
             }
         } else {
             // Reject: decay weights
             if (ALNS) {
-                destroy_weights[neighbor.selected_neighbor] =
-                    (1 - decay_factor) * destroy_weights[neighbor.selected_neighbor];
+                int strat_idx = (int)neighbor.selected_neighbor;
+                strategy_weights[strat_idx] =
+                    (1 - decay_factor) * strategy_weights[strat_idx];
+                // Update total weight
+                total_weight = 0;
+                for (double w : strategy_weights) total_weight += w;
             }
             // Restore old trajectories
             for (size_t i = 0; i < neighbor.agents.size(); i++) {
