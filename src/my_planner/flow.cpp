@@ -179,6 +179,8 @@ bool update_traj(TrajLNS& lns, int i, const TimePoint* deadline){
 // Iteratively find agents with high deviation and replan their paths
 void lns_replan_neighbors(TrajLNS& lns, int num_neighbors, const TimePoint* deadline){
     const int max_iterations = 3;
+    const int min_deviation_threshold = 1;  // Only replan agents with deviation >= 1
+    const int min_improvement = 3;         // Only accept if improvement >= 3 steps
     
     // Track which agents were recently replanned (avoid replanning same agent too soon)
     std::vector<bool> recently_replanned(lns.env->num_of_agents, false);
@@ -208,7 +210,8 @@ void lns_replan_neighbors(TrajLNS& lns, int num_neighbors, const TimePoint* dead
             
             // Deviation = actual - expected (higher = more delayed)
             int deviation = actual_dist - expected_dist;
-            if (deviation > 0){
+            // Only consider agents with significant deviation
+            if (deviation >= min_deviation_threshold){
                 deviations.push_back({i, deviation});
             }
         }
@@ -226,19 +229,21 @@ void lns_replan_neighbors(TrajLNS& lns, int num_neighbors, const TimePoint* dead
             
             // Save old trajectory
             auto old_traj = lns.trajs[i];
+            int old_size = old_traj.size();
             
             // Remove old trajectory from flow
             remove_traj(lns, i);
             
             // Try to replan
             if (update_traj(lns, i, deadline)){
-                // Check if new path is shorter
-                if (lns.trajs[i].size() < old_traj.size()){
-                    // Improvement found, keep new path
+                // Check if new path is significantly shorter
+                int improvement = old_size - lns.trajs[i].size();
+                if (improvement >= min_improvement){
+                    // Significant improvement found, keep new path
                     count++;
                     recently_replanned[i] = true;
                 } else {
-                    // No improvement, restore old path
+                    // No significant improvement, restore old path
                     lns.trajs[i] = old_traj;
                     add_traj(lns, i);
                 }
