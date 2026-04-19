@@ -133,28 +133,31 @@
 |------|-----|
 | **commit** | `ccc1049` |
 | **exe MD5** | `CCFBE7C54E70BC33ED9160861232685F` |
-| **状态** | ⚠️ skeleton 编译通过，待集成到 planner |
+| **状态** | ⚠️ skeleton 编译通过，待集成（需要 multi_step + solve） |
 
-**进展**：
-- 2026-04-19: CMakeLists.txt 添加 LNS 源文件，skeleton 编译通过
-- 2026-04-19: Round 363 测试确认 skeleton 未破坏现有功能（结果接近 H1 baseline）
+**分析**（2026-04-19）：
+- 现有 `get_gp_h()` 已经使用 `traj_dists` 进行启发式搜索
+- LNS skeleton 有 NeighborGenerator, LocalOptimizer, GlobalManager
+- 缺少 Team_Kitty_Knight 的 `solve()` 方法和 `multi_step()` 集成
+- **结论**：需要较大架构改动，当前代码已有类似功能的基础实现
 
-**Round 363 (commit 57682dc)**：
+**Round 363**：
 | 地图 | 分数 | tasks |
 |------|------|-------|
-| random | 0.490 | 147 |
+| fulfill | 0.754 | 754 |
 | bos | 0.234 | 164 |
 | room | 0.180 | 72 |
-| maze | 0.088 | 44 |
-| fulfill | 0.754 | 754 |
-| orz | 0.210 | 84 |
-| iron | 0.146 | 102 |
 
 ---
 
 ### H4: Dist2PathHeuristicTable wrapper
 
-**状态**：⚠️ wrapper 创建，未集成
+**状态**：⚠️ wrapper 存在，但功能与现有 get_gp_h() 重复
+
+**分析**（2026-04-19）：
+- Dist2PathHeuristicTable 是 Team_Kitty_Knight 的启发式封装
+- 我们的 `pibt.cpp` 中 `get_gp_h()` 已经使用 `traj_dists`
+- **结论**：功能重叠，不需要单独集成 H4
 
 ---
 
@@ -195,11 +198,19 @@ causal_pibt->multi_step() → LNS全局优化 → actions
 plan() → 单次FW优化 → actions
 ```
 
-**核心差距**：LNS在每步做全局优化，我们只在step 0做一次
+**核心差距**：LNS 在每步做全局优化，我们只在 step 0 做一次
+
+**现有类似功能**：
+- `get_gp_h()` 使用 `traj_dists` 进行启发式
+- `flow.cpp` 初始化 `traj_dists`
+- `frank_wolfe()` 优化流量分配
+
+**完整 LNS 需要**：multi_step() + solve() + GlobalManager（较大架构改动）
 
 ---
 
 ## 待完成工作
 
-- [ ] H3: 集成 LNS skeleton
-- [ ] H4: 集成 Dist2PathHeuristicTable wrapper
+- [x] H3: LNS skeleton 编译通过（待集成）
+- [x] H4: Dist2PathHeuristicTable 功能与现有 get_gp_h() 重叠
+- [ ] H3: 实现 multi_step() + solve() 完整集成（较大工作量）
