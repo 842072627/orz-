@@ -1,7 +1,7 @@
 # MAPF 竞赛 — 研究驱动开发工作流
 
 > **永远不要等待。永远不要暂停。永远不要依赖人工输入。**
-> 本文档：`C:\Users\Administrator\Desktop\test-studio-mapf\MAPF-workflow.md`
+> 本文档：`src/MAPF-workflow.md`
 
 ---
 
@@ -19,7 +19,7 @@
 ```
 每次触发（Heartbeat）时：
 
-1. 读取 HEARTBEAT.md 和 MAPF-records.md
+1. 读取 HEARTBEAT.md 和 src/MAPF-records.md
 2. 查阅今天的新资料、新灵感
 3. 反思历史：上次为什么失败/成功？
 4. 研究当前最优方向：查资料、浏览网页
@@ -32,7 +32,7 @@
 
 ```
 每天开始前：
-1. 读取 MAPF-records.md（知识库、假设追踪）
+1. 读取 src/MAPF-records.md（知识库、假设追踪）
 2. 读取 项目笔记.md（今天的灵感）
 3. 查阅新资料（冠军代码/论文/网页）
 4. 反思历史（为什么失败/成功？）
@@ -101,7 +101,7 @@
 ```
 
 **每次开始前必读**：
-- MAPF-records.md（知识库、假设追踪）
+- src/MAPF-records.md（知识库、假设追踪）
 - 项目笔记.md（灵感）
 - HEARTBEAT.md（当前状态）
 
@@ -111,8 +111,8 @@
 
 | 文件 | 路径 |
 |------|------|
-| Workflow | `MAPF-workflow.md` |
-| 实验记录 | `MAPF-records.md` |
+| Workflow | `src/MAPF-workflow.md` |
+| 实验记录 | `src/MAPF-records.md` |
 | 研究笔记 | `项目笔记.md` |
 | 当前状态 | `HEARTBEAT.md` |
 | 测试结果 | `test-scripts/round/roundXXX/` |
@@ -383,7 +383,7 @@
 
 ```
 Commit 检查：
-□ 实验记录已更新到 MAPF-records.md？
+□ 实验记录已更新到 src/MAPF-records.md？
 □ Round 追踪已更新？
 □ 假设追踪已更新？
 □ 知识库已更新？
@@ -398,8 +398,8 @@ Commit 检查：
 
 | 类型 | 位置 | 说明 |
 |------|------|------|
-| Workflow | `MAPF-workflow.md` | 工作流程定义 |
-| 实验记录 | `MAPF-records.md` | 所有实验结果、假设追踪 |
+| Workflow | `src/MAPF-workflow.md` | 工作流程定义 |
+| 实验记录 | `src/MAPF-records.md` | 所有实验结果、假设追踪 |
 | 研究笔记 | `项目笔记.md` | 研究过程、灵感、诊断 |
 | 代码 | `src/` | 可修改的源代码 |
 | 备份 | `default_planner/` | 原版代码（不修改） |
@@ -420,7 +420,7 @@ git checkout <good-commit> -- .  # 恢复到好的版本
 - 记录到项目笔记，下次更加小心
 
 **记录文件损坏时**：
-- MAPF-records.md 有 git 历史，可以恢复
+- src/MAPF-records.md 有 git 历史，可以恢复
 - 项目笔记.md 建议定期备份到外部
 
 ### 📍 状态真实来源（Single Source of Truth）
@@ -428,15 +428,15 @@ git checkout <good-commit> -- .  # 恢复到好的版本
 | 状态 | 真实来源 | 备份 |
 |------|---------|------|
 | 当前代码 | `git log -1` 的 commit | git history |
-| 当前分数 | `roundXXX/scores.txt` | MAPF-records.md |
-| 假设状态 | MAPF-records.md | git history |
-| 知识库 | MAPF-records.md | git history |
-| 待实验队列 | MAPF-records.md | git history |
+| 当前分数 | `roundXXX/scores.txt` | src/MAPF-records.md |
+| 假设状态 | src/MAPF-records.md | git history |
+| 知识库 | src/MAPF-records.md | git history |
+| 待实验队列 | src/MAPF-records.md | git history |
 
 **原则**：
 - 不要在多个地方重复存储同一状态
 - 以 git commit 为代码的真实来源
-- 以 MAPF-records.md 为实验记录的真实来源
+- 以 src/MAPF-records.md 为实验记录的真实来源
 
 ### Workflow 版本历史
 
@@ -503,8 +503,8 @@ git checkout <good-commit> -- .  # 恢复到好的版本
 
 | 文件 | 路径 | 说明 |
 |------|------|------|
-| MAPF-workflow.md | `MAPF-workflow.md` | 本工作流定义 |
-| MAPF-records.md | `MAPF-records.md` | 实验记录（每轮必更） |
+| MAPF-workflow.md | `src/MAPF-workflow.md` | 本工作流定义 |
+| MAPF-records.md | `src/MAPF-records.md` | 实验记录（每轮必更） |
 | 项目笔记.md | `../项目笔记.md` | 研究过程、诊断、灵感、失败分析（git repo外） |
 
 | archive/ | `../archive/` | 失败实验的代码备份（用于混合架构研究） |
@@ -708,7 +708,7 @@ default_planner/             ← 保持原样，不允许修改
 ### 研究流程
 
 ```
-1. 读取历史：MAPF-records.md、项目笔记.md
+1. 读取历史：src/MAPF-records.md、项目笔记.md
 2. 查阅资料：冠军代码/论文/网页
 3. 浏览器搜索：用 browser 工具搜索最新方案
 4. 反思历史：为什么之前失败？为什么成功？
@@ -719,7 +719,7 @@ default_planner/             ← 保持原样，不允许修改
 ### 研究方法
 
 **阅读顺序（每天开始前必读）**：
-1. MAPF-records.md — 知识库、假设追踪
+1. src/MAPF-records.md — 知识库、假设追踪
 2. 项目笔记.md — 灵感、反思
 3. HEARTBEAT.md — 当前状态
 4. 冠军代码 — 寻找新方向
@@ -738,10 +738,10 @@ default_planner/             ← 保持原样，不允许修改
 ### 每次开始前必读
 
 **按顺序打开文件读**：
-1. `MAPF-records.md` — 知识库和假设追踪
+1. `src/MAPF-records.md` — 知识库和假设追踪
 2. `项目笔记.md` — 灵感和反思
 3. `HEARTBEAT.md` — 当前状态
-4. `MAPF-workflow.md` — 今天是哪个阶段？
+4. `src/MAPF-workflow.md` — 今天是哪个阶段？
 
 **读完再开始工作**：
 - 知道今天是研究还是实验？
@@ -1010,7 +1010,7 @@ default_planner/             ← 保持原样，不允许修改
 ### 流程
 
 ```
-1. 研究完成 → 提案记录到 MAPF-records.md
+1. 研究完成 → 提案记录到 src/MAPF-records.md
 2. ✅ 完成改前检查清单
 3. 运行 build.bat
 4. 如果编译失败 → 调试期 → 修复 → 返回步骤3
@@ -1205,7 +1205,7 @@ git checkout <commit> -- .  # 直接回退到某个提交
    └─ 无 → 研究冠军代码寻找新灵感
 
 4. 有云端反馈？
-   └─ 有 → 记录到 MAPF-records.md（不等待，不影响决策）
+   └─ 有 → 记录到 src/MAPF-records.md（不等待，不影响决策）
    └─ 无 → 继续
 
 **核心**：永远不要说"没有事做"，永远基于本地分数决策
@@ -1254,7 +1254,7 @@ git checkout <commit> -- .  # 直接回退到某个提交
 
 ### 云端分数处理
 
-- 云端结果来了 → 记录到 MAPF-records.md
+- 云端结果来了 → 记录到 src/MAPF-records.md
 - 云端结果没来 → 继续本地工作
 - **永远不等待云端**
 
@@ -1542,7 +1542,7 @@ H2: <假设2>
 
 ## 性能追踪（每个 ARCH 一个表）
 
-在 `MAPF-records.md` 中维护每个 ARCH 的性能历史：
+在 `src/MAPF-records.md` 中维护每个 ARCH 的性能历史：
 
 ```markdown
 ## 📈 AARCH 性能历史
@@ -1592,7 +1592,7 @@ H2: <假设2>
 
 ### 放弃方向登记
 
-在 `MAPF-records.md` 的"放弃方向登记"中记录：
+在 `src/MAPF-records.md` 的"放弃方向登记"中记录：
 
 ```markdown
 | 方向 | ARCH | 放弃轮次 | 放弃原因 | 替代方案 |
@@ -1656,7 +1656,7 @@ H2: <假设2>
 
 ---
 
-## 假设追踪（在 MAPF-records.md 中维护）
+## 假设追踪（在 src/MAPF-records.md 中维护）
 
 ```markdown
 ## 🔬 假设追踪
@@ -1676,7 +1676,7 @@ H2: <假设2>
 
 ## 知识库（每次实验后更新）
 
-在 `MAPF-records.md` 末尾添加结构化的"可复用知识"：
+在 `src/MAPF-records.md` 末尾添加结构化的"可复用知识"：
 
 ```markdown
 ## 🧠 知识库
@@ -1752,7 +1752,7 @@ H2: <假设2>
 [ ] default_planner/scheduler.cpp（理解基准，禁止修改）
 [ ] Input_Output_Format.md
 [ ] Evaluation_Environment.md
-[ ] MAPF-records.md（历史）
+[ ] src/MAPF-records.md（历史）
 [ ] 项目笔记.md（当前研究状态）
 
 → 全部 ✅ 才能开始第一个实验
@@ -1952,7 +1952,7 @@ bos: 0.22 → 0.23 → 0.24 → 0.23 → 0.24  (稳定上升)
 
 | 文件 | 备份频率 | 备份位置 |
 |------|---------|----------|
-| MAPF-records.md | 每次实验后 | git commit |
+| src/MAPF-records.md | 每次实验后 | git commit |
 | 项目笔记.md | 每天 | git commit |
 | HEARTBEAT.md | 每次 heartbeat | 本地 |
 | 测试结果 | 每次测试后 | test-scripts/round/ |
@@ -2062,7 +2062,7 @@ git checkout <commit> -- .  # 恢复所有文件
 | 文件 | 用途 | 频率 |
 |------|------|------|
 | HEARTBEAT.md | 当前状态 | 每次heartbeat |
-| MAPF-records.md | 实验记录 | 每次实验 |
+| src/MAPF-records.md | 实验记录 | 每次实验 |
 | 项目笔记.md | 研究过程 | 每天 |
 | test-scripts/round/ | 测试结果 | 每次测试 |
 
