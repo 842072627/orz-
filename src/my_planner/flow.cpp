@@ -175,64 +175,76 @@ bool update_traj(TrajLNS& lns, int i, const TimePoint* deadline){
     return true;
 }
 
-// Simple LNS-style neighbor replanning
-// Find agents with high deviation and replan their paths
+// Multi-iteration LNS-style neighbor replanning
+// Iteratively find agents with high deviation and replan their paths
 void lns_replan_neighbors(TrajLNS& lns, int num_neighbors, const TimePoint* deadline){
-    // Calculate deviations for all agents
-    std::vector<std::pair<int, int>> deviations; // (agent_id, deviation)
+    const int max_iterations = 2;
     
-    for (int i = 0; i < lns.env->num_of_agents; i++){
-        int start = lns.env->curr_states[i].location;
-        int goal = lns.tasks[i];
-        
-        if (lns.trajs[i].empty()) continue;
-        
-        // Get expected distance (manhattan or heuristic)
-        int expected_dist = get_heuristic(lns.heuristics[goal], lns.env, start, &(lns.neighbors));
-        
-        // Get actual path length
-        int actual_dist = lns.trajs[i].size();
-        
-        // Deviation = actual - expected (higher = more delayed)
-        int deviation = actual_dist - expected_dist;
-        if (deviation > 0){
-            deviations.push_back({i, deviation});
+    for (int iter = 0; iter < max_iterations; iter++){
+        // Check time limit
+        if (deadline && std::chrono::steady_clock::now() >= *deadline){
+            break;
         }
-    }
-    
-    // Sort by deviation descending
-    std::sort(deviations.begin(), deviations.end(),
-        [](const auto& a, const auto& b) { return a.second > b.second; });
-    
-    // Replan top N neighbors
-    int count = 0;
-    for (const auto& dev : deviations){
-        if (count >= num_neighbors) break;
         
-        int i = dev.first;
+        // Calculate deviations for all agents
+        std::vector<std::pair<int, int>> deviations; // (agent_id, deviation)
         
-        // Save old trajectory
-        auto old_traj = lns.trajs[i];
+        for (int i = 0; i < lns.env->num_of_agents; i++){
+            int start = lns.env->curr_states[i].location;
+            int goal = lns.tasks[i];
+            
+            if (lns.trajs[i].empty()) continue;
+            
+            // Get expected distance (manhattan or heuristic)
+            int expected_dist = get_heuristic(lns.heuristics[goal], lns.env, start, &(lns.neighbors));
+            
+            // Get actual path length
+            int actual_dist = lns.trajs[i].size();
+            
+            // Deviation = actual - expected (higher = more delayed)
+            int deviation = actual_dist - expected_dist;
+            if (deviation > 0){
+                deviations.push_back({i, deviation});
+            }
+        }
         
-        // Remove old trajectory from flow
-        remove_traj(lns, i);
+        // Sort by deviation descending
+        std::sort(deviations.begin(), deviations.end(),
+            [](const auto& a, const auto& b) { return a.second > b.second; });
         
-        // Try to replan
-        if (update_traj(lns, i, deadline)){
-            // Check if new path is shorter
-            if (lns.trajs[i].size() < old_traj.size()){
-                // Improvement found, keep new path
-                count++;
+        // Replan top N neighbors
+        int count = 0;
+        for (const auto& dev : deviations){
+            if (count >= num_neighbors) break;
+            
+            int i = dev.first;
+            
+            // Save old trajectory
+            auto old_traj = lns.trajs[i];
+            
+            // Remove old trajectory from flow
+            remove_traj(lns, i);
+            
+            // Try to replan
+            if (update_traj(lns, i, deadline)){
+                // Check if new path is shorter
+                if (lns.trajs[i].size() < old_traj.size()){
+                    // Improvement found, keep new path
+                    count++;
+                } else {
+                    // No improvement, restore old path
+                    lns.trajs[i] = old_traj;
+                    add_traj(lns, i);
+                }
             } else {
-                // No improvement, restore old path
+                // Replan failed, restore old path
                 lns.trajs[i] = old_traj;
                 add_traj(lns, i);
             }
-        } else {
-            // Replan failed, restore old path
-            lns.trajs[i] = old_traj;
-            add_traj(lns, i);
         }
+        
+        // Early exit if no improvements made
+        if (count == 0) break;
     }
 }
 
