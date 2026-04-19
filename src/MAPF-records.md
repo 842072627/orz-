@@ -131,27 +131,28 @@
 
 | 字段 | 值 |
 |------|-----|
-| **commit** | `2ba69af` |
-| **exe MD5** | `53D461F687F77F19EB43E3B143CB70A5` |
-| **状态** | 🔄 简单 LNS neighbor replanning 已添加，待调优 |
+| **commit** | `f591c8b` |
+| **exe MD5** | `7E2C5F14AFF312DE5883E7DBA6914BF4` |
+| **状态** | 🔄 简单 LNS neighbor replanning 3次迭代，fulfill +5% |
 
 **实现**（2026-04-19）：
 - 添加 `lns_replan_neighbors()` 函数
-- 在 FW 优化后调用，replan 前 8 个最延迟的 agent
+- 在 FW 优化后调用，3次迭代，replan 前 8 个最延迟的 agent
+- 使用 recently_replanned 追踪避免重复 replan
 - 基于路径长度改善决定是否接受新路径
 
-**Round 364 结果**：
-| 地图 | H1 baseline | Round 364 | 变化 |
+**Round 367 结果**：
+| 地图 | H1 baseline | Round 367 | 变化 |
 |------|-------------|-----------|------|
-| fulfill | 0.733 | 0.762 | **+4%** |
-| bos | 0.241 | 0.243 | 0% |
-| room | 0.186 | 0.182 | -2% |
-| maze | 0.091 | 0.092 | +1% |
-| random | 0.516 | 0.507 | -2% |
-| orz | 0.217 | 0.215 | -1% |
+| fulfill | 0.733 | 0.771 | **+5%** |
+| bos | 0.241 | 0.241 | 0% |
+| room | 0.186 | 0.168 | -10% |
+| maze | 0.091 | 0.100 | +10% |
+| random | 0.516 | 0.527 | +2% |
+| orz | 0.217 | 0.220 | +1% |
 | iron | 0.147 | 0.140 | -5% |
 
-**分析**：fulfill +4%，但 iron -5%。简单 LNS 有效但需调优。
+**分析**：fulfill +5% ✅，maze +10% ✅，但 room -10% ❌，iron -5% ❌
 
 ---
 
@@ -184,7 +185,7 @@
 |----|------|------|------|
 | H1 | +1 priority移除 | fulfill+34%, bos+35% | ✅ 成功 |
 | H2 | causalPIBT例外 | fulfill-25% | ❌ 失败 |
-| H3 | LNS集成 | skeleton未集成 | ⚠️ 未完成 |
+| H3 | LNS集成 | fulfill+5%, room-10%, iron-5% | 🔄 部分成功 |
 | H4 | Dist2PathHeuristicTable | wrapper未集成 | ⚠️ 未完成 |
 | H5 | Frank-Wolfe路径效率 | iron=0.000 | ❌ 崩溃 |
 | H6 | 每步quick FW | bos-14%, fulfill-12% | ❌ 失败 |
