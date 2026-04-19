@@ -191,7 +191,7 @@ namespace MyPlanner{
         // Simple LNS neighbor replanning after FW
         // Replan paths for most delayed agents to improve global solution
         if (std::chrono::steady_clock::now() < flow_end_time){
-            lns_replan_neighbors(trajLNS, 8, &flow_end_time);
+            lns_replan_neighbors(trajLNS, 4, &flow_end_time);
         }
     }
 
