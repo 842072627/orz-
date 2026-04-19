@@ -267,9 +267,9 @@ void run_complete_lns(TrajLNS& lns, int num_iterations, const TimePoint* deadlin
     // Create LNS instance from environment
     LNS::Instance instance(*lns.env);
     
-    // Create neighbor generator with RANDOMWALK strategy
+    // Create neighbor generator with RANDOM strategy
     int neighbor_size = 4;
-    LNS::destroy_heuristic destroy_strategy = LNS::destroy_heuristic::RANDOMWALK;
+    LNS::destroy_heuristic destroy_strategy = LNS::destroy_heuristic::RANDOM;
     bool ALNS = true;
     double decay_factor = 0.01;
     double reaction_factor = 0.1;
@@ -285,7 +285,7 @@ void run_complete_lns(TrajLNS& lns, int num_iterations, const TimePoint* deadlin
             break;
         }
         
-        // Generate neighbor set using RANDOMWALK
+        // Generate neighbor set using RANDOM
         LNS::Neighbor neighbor = ng.generate();
         if (neighbor.agents.empty()) continue;
         
