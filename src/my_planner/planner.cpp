@@ -165,6 +165,9 @@ namespace MyPlanner{
 
     static void update_guide_paths_once_for_multistep(SharedEnvironment* env, TimePoint flow_end_time)
     {
+        // H20 DISABLED - caused crashes, needs debugging
+        // TODO: re-enable with proper state management
+        
         // one-time guide-path update for goal-changed agents
         for (int i = 0; i < env->num_of_agents; i++)
         {
