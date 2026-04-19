@@ -20,6 +20,7 @@
 #include "pibt.h"
 #include "flow.h"
 #include "const.h"
+#include "LNS/PLNSSolver.h"
 #include <chrono>
 #include <iostream>
 
@@ -186,6 +187,12 @@ namespace MyPlanner{
         // one-time FW optimization in the flow allocation phase
         std::unordered_set<int> updated;
         frank_wolfe(trajLNS, updated, flow_end_time);
+        
+        // Simple LNS neighbor replanning after FW
+        // Replan paths for most delayed agents to improve global solution
+        if (std::chrono::steady_clock::now() < flow_end_time){
+            lns_replan_neighbors(trajLNS, 8, &flow_end_time);
+        }
     }
 
     static void refresh_multistep_step_state(SharedEnvironment* env, std::vector<double>& local_priority)
