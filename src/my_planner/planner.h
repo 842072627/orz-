@@ -28,6 +28,10 @@ namespace MyPlanner{
 
     void plan(int time_limit, std::vector<std::vector<Action>> & actions,
                         SharedEnvironment* env, int num_steps=10);
+
+    // H18: Run PIBT for multiple steps to generate coordinated actions
+    void run_multi_step_pibt(SharedEnvironment* env, std::vector<double>& local_priority,
+                             std::vector<std::vector<Action>>& all_actions, int window_size);
     
 }
 #endif

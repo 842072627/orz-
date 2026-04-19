@@ -406,4 +406,34 @@ namespace MyPlanner{
         env->curr_timestep = original_timestep;
         decided = original_decided;
     }
+
+    // H18: Run PIBT for multiple steps to generate coordinated actions
+    // This is similar to the loop in plan() but without guide path recomputation
+    void run_multi_step_pibt(SharedEnvironment* env, std::vector<double>& local_priority,
+                             std::vector<std::vector<Action>>& all_actions, int window_size) {
+        // Initialize actions structure
+        all_actions.resize(env->num_of_agents);
+        
+        // Store original states to restore later
+        auto original_states = env->start_states;
+        int original_timestep = env->curr_timestep;
+        
+        // Run PIBT for window_size steps
+        for (int step = 0; step < window_size; step++) {
+            std::vector<Action> one_step_actions;
+            
+            // Refresh state for this step
+            refresh_multistep_step_state(env, local_priority);
+            
+            // Run PIBT once
+            run_multistep_pibt_once(env, local_priority, one_step_actions);
+            
+            // Append actions and roll forward states
+            append_actions_and_rollout_states(env, all_actions, one_step_actions);
+        }
+        
+        // Restore original states
+        env->start_states = original_states;
+        env->curr_timestep = original_timestep;
+    }
 }
