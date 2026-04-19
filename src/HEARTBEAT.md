@@ -76,6 +76,7 @@ plan() → 单次FW优化 → LNS一次优化 → PIBT单步 → actions
 | H11 | LNS RANDOMWALK 8 neighbors | ❌ 无提升 | LNS params not bottleneck |
 | H12 | LNS CONGESTION strategy | ❌ 无提升 | 仍在方差范围内 |
 | H13 | PIBT-first guide path generation | ❌ 失败 | fulfill=0.417, orz=0.015 |
+| H14 | LNS 40 iterations | ❌ 无提升 | fulfill=0.830→0.789, 在方差范围内 |
 
 ---
 
