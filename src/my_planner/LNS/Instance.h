@@ -1,7 +1,7 @@
 #pragma once
 #include <vector>
 #include <string>
-#include "../../Types.h"
+#include "../Types.h"
 
 namespace LNS {
 

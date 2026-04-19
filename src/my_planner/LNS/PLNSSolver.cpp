@@ -19,18 +19,18 @@ void PLNSSolver::setEnvironment(const SharedEnvironment& env) {
     instance = std::make_shared<Instance>(env);
     
     // Create TrajLNS
-    lns = std::make_shared<TrajLNS>();
+    lns = std::make_shared<MyPlanner::TrajLNS>();
     lns->env = const_cast<SharedEnvironment*>(&env);
     lns->init_mem();
     
     // Create GlobalManager
-    global_manager = std::make_shared<Parallel::GlobalManager>(
+    global_manager = std::make_shared<GlobalManager>(
         *instance,
         *lns,
         num_threads,
         max_iterations,
         8,  // neighbor_size
-        Parallel::destroy_heuristic::RANDOMWALK,
+        destroy_heuristic::RANDOMWALK,
         true,  // ALNS
         0.01,  // decay_factor
         0.1   // reaction_factor

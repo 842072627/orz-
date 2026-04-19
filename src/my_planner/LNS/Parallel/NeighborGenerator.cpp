@@ -6,7 +6,7 @@ namespace LNS {
 
 NeighborGenerator::NeighborGenerator(
     Instance& instance,
-    TrajLNS& lns,
+    MyPlanner::TrajLNS& lns,
     int neighbor_size,
     destroy_heuristic destroy_strategy,
     bool ALNS,
@@ -25,7 +25,7 @@ NeighborGenerator::NeighborGenerator(
     
     // Find intersections (locations with degree > 2)
     for (int i = 0; i < instance.map_size; i++) {
-        if (!instance.isObstacle(i) && getDegree(i) > 2) {
+        if (!instance.isObstacle(i) && instance.getDegree(i) > 2) {
             intersections.push_back(i);
         }
     }

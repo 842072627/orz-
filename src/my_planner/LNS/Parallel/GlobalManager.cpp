@@ -4,7 +4,7 @@ namespace LNS {
 
 GlobalManager::GlobalManager(
     Instance& instance,
-    TrajLNS& lns,
+    MyPlanner::TrajLNS& lns,
     int num_threads,
     int max_iterations,
     int neighbor_size,

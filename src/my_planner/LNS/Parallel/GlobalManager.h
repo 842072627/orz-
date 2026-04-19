@@ -5,13 +5,14 @@
 #include "../Instance.h"
 #include "NeighborGenerator.h"
 #include "LocalOptimizer.h"
+#include "../../TrajLNS.h"
 
 namespace LNS {
 
 class GlobalManager {
 public:
     Instance& instance;
-    TrajLNS& lns;
+    MyPlanner::TrajLNS& lns;
     
     int num_threads;
     int max_iterations;
@@ -26,7 +27,7 @@ public:
     
     GlobalManager(
         Instance& instance,
-        TrajLNS& lns,
+        MyPlanner::TrajLNS& lns,
         int num_threads,
         int max_iterations,
         int neighbor_size,

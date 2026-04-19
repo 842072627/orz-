@@ -5,7 +5,7 @@ namespace LNS {
 
 LocalOptimizer::LocalOptimizer(
     Instance& instance,
-    TrajLNS& lns,
+    MyPlanner::TrajLNS& lns,
     std::string replan_algo_name,
     int window_size_for_PATH
 ) : instance(instance),

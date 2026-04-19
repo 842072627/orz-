@@ -3,8 +3,8 @@
 #include <memory>
 #include <random>
 #include "../Instance.h"
-#include "../../heuristics.h"
 #include "../../TrajLNS.h"
+#include "../../Types.h"
 
 namespace LNS {
 
@@ -23,8 +23,8 @@ public:
     double old_sum_of_costs;
     double sum_of_costs;
     bool succ;
-    std::vector<Traj> m_old_paths;
-    std::vector<Traj> m_paths;
+    std::vector<MyPlanner::Traj> m_old_paths;
+    std::vector<MyPlanner::Traj> m_paths;
     
     Neighbor() : selected_neighbor(0), old_sum_of_costs(0), sum_of_costs(0), succ(false) {}
 };
@@ -32,7 +32,7 @@ public:
 class NeighborGenerator {
 public:
     Instance& instance;
-    TrajLNS& lns;
+    MyPlanner::TrajLNS& lns;
     int neighbor_size;
     destroy_heuristic destroy_strategy;
     bool ALNS;
@@ -45,7 +45,7 @@ public:
     
     NeighborGenerator(
         Instance& instance,
-        TrajLNS& lns,
+        MyPlanner::TrajLNS& lns,
         int neighbor_size,
         destroy_heuristic destroy_strategy,
         bool ALNS,

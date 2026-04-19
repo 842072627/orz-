@@ -3,6 +3,8 @@
 #include <string>
 #include "Instance.h"
 #include "Parallel/GlobalManager.h"
+#include "../TrajLNS.h"
+#include "../../inc/SharedEnv.h"
 
 namespace LNS {
 
@@ -14,8 +16,8 @@ public:
     int max_iterations;
     
     std::shared_ptr<Instance> instance;
-    std::shared_ptr<TrajLNS> lns;
-    std::shared_ptr<Parallel::GlobalManager> global_manager;
+    std::shared_ptr<MyPlanner::TrajLNS> lns;
+    std::shared_ptr<GlobalManager> global_manager;
     
     PLNSSolver(
         int num_of_agents,
