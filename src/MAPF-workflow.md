@@ -82,6 +82,8 @@
 | 实验记录 | `src/MAPF-records.md` | 唯一真实来源 |
 | 项目笔记 | `../项目笔记.md` | 研究灵感（git 外） |
 | 测试结果 | `test-scripts/round/roundXXX/` | 只读 |
+| 代码 | `src/my_planner/` | 可修改 |
+| 备份 | `default_planner/` | 不修改 |
 
 ---
 
@@ -98,7 +100,18 @@
 
 ---
 
-## 🔧 附录：常见操作
+## 🌐 重要参考
+
+| 资源 | 地址 |
+|------|------|
+| 比赛官网 | https://www.mapf.info/ |
+| Team_Kitty_Knight 代码 | `Best-Implementations-2024/Team_Kitty_Knight_da7d428b/` |
+| Start-Kit 3.1 | `Start_Kit_main/` |
+| clawhub（技能市场） | https://clawhub.ai |
+
+---
+
+## 🔧 常见操作
 
 ### 编译测试
 ```bash
@@ -198,3 +211,5 @@ plan() → 单次FW优化 → actions
 | 日期 | 版本 | 说明 |
 |------|------|------|
 | 2026-04-19 | v4.0 | 精简至核心原则 + 附录 |
+| 2026-04-19 | v3.x | 多次错误教训叠加 |
+| 2026-04-18 | v2.x | 初始版本 |
