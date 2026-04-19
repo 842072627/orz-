@@ -178,7 +178,10 @@ bool update_traj(TrajLNS& lns, int i, const TimePoint* deadline){
 // Multi-iteration LNS-style neighbor replanning
 // Iteratively find agents with high deviation and replan their paths
 void lns_replan_neighbors(TrajLNS& lns, int num_neighbors, const TimePoint* deadline){
-    const int max_iterations = 2;
+    const int max_iterations = 3;
+    
+    // Track which agents were recently replanned (avoid replanning same agent too soon)
+    std::vector<bool> recently_replanned(lns.env->num_of_agents, false);
     
     for (int iter = 0; iter < max_iterations; iter++){
         // Check time limit
@@ -190,6 +193,8 @@ void lns_replan_neighbors(TrajLNS& lns, int num_neighbors, const TimePoint* dead
         std::vector<std::pair<int, int>> deviations; // (agent_id, deviation)
         
         for (int i = 0; i < lns.env->num_of_agents; i++){
+            if (recently_replanned[i]) continue;
+            
             int start = lns.env->curr_states[i].location;
             int goal = lns.tasks[i];
             
@@ -231,6 +236,7 @@ void lns_replan_neighbors(TrajLNS& lns, int num_neighbors, const TimePoint* dead
                 if (lns.trajs[i].size() < old_traj.size()){
                     // Improvement found, keep new path
                     count++;
+                    recently_replanned[i] = true;
                 } else {
                     // No improvement, restore old path
                     lns.trajs[i] = old_traj;
