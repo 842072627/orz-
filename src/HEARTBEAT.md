@@ -25,8 +25,8 @@
 
 ### 项目状态
 - **代码路径**: `C:\Users\Administrator\Desktop\test-studio-mapf\LORR26_842072627`
-- **Git commit**: 9eeca63 (H11: LNS RANDOMWALK with 8 neighbors)
-- **测试**: round432 完成
+- **Git commit**: fabd758 (H12 CONGESTION + H13 PIBT-first failed)
+- **测试**: round438 完成
 
 ### 测试结果 (round432-438)
 | 地图 | round432 | round433 | round435 | round438 | 平均 |
@@ -89,6 +89,22 @@ plan() → 单次FW优化 → LNS一次优化 → PIBT单步 → actions
 - LNS 参数不是瓶颈
 - 架构差距才是核心问题
 - 需要实现 multi_step() 协调规划
+
+---
+
+## 🔬 H12 分析 (LNS CONGESTION)
+
+**改动**: 添加 CONGESTION neighbor selection strategy
+- 实现 calculateCongestion() 方法
+- 选择路径交叉最多的 agents 进行重规划
+
+**结果**: No improvement - within variance
+- round435: fulfill=0.811, total=2.186
+- round436: fulfill=0.728, total=2.119
+
+**分析**:
+- CONGESTION 策略与 RANDOM/RANDOMWALK 效果相当
+- LNS neighbor selection 不是瓶颈
 
 ---
 
