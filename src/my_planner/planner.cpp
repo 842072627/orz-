@@ -190,7 +190,7 @@ namespace MyPlanner{
         
         // Complete LNS with ALNS: multiple iterations of neighbor generation + replan
         if (std::chrono::steady_clock::now() < flow_end_time){
-            run_complete_lns(trajLNS, 20, &flow_end_time);
+            run_complete_lns(trajLNS, 40, &flow_end_time);
         }
     }
 
