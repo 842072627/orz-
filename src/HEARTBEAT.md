@@ -1,29 +1,63 @@
 # HEARTBEAT.md
 
-## 当前状态 (2026-04-19 20:20) - 🔄 永远活跃
+## 🚨 工作流偏好 (2026-04-20 更新)
 
-### 项目状态
-- **代码路径**: `C:\Users\Administrator\Desktop\test-studio-mapf\LORR26_842072627`
-- **Git commit**: 628e8cd (TimeSpaceA* preparation)
-- **测试**: round414 完成
+### 核心原则 1：架构复杂度优先
+> **永远不为调参浪费时间**
+- P0 = 复杂架构实现
+- P3 = 参数微调(禁止)
+
+### 核心原则 2：复杂架构不轻易回退
+> **改复杂架构时不要轻易回退**
+- 失败后分析原因，保留代码
+- 继续改，直到成功
+- 回退 = 丢失分析机会
+
+### 核心原则 3：切换方向是灾难
+> **切换到完全不相关的方向是极其可怕的操作**
+- 要学习各种架构，融合成更复杂的架构
+- Team_Kitty_Knight = CausalPIBT + PLNS + TimeSpaceA* + GlobalManager
+- 永远在当前架构上迭代，不放弃
 
 ---
 
-## 📊 测试结果
+## 当前状态 (2026-04-20 00:30)
 
-### Round 412-414 vs 碰撞感知 (H8)
-| Map | round412 | round413 | round414 | H8失败 |
-|-----|----------|----------|----------|--------|
-| random | 0.517 | 0.530 | 0.507 | 不稳定 |
-| bos | 0.247 | 0.239 | 0.246 | 无提升 |
-| room | 0.190 | 0.180 | 0.182 | 无提升 |
-| maze | 0.102 | 0.100 | 0.090 | 无提升 |
-| fulfill | 0.765 | 0.789 | 0.708 | 高方差 |
-| orz | 0.228 | 0.210 | 0.217 | 无提升 |
-| iron | 0.141 | 0.146 | 0.141 | 无提升 |
-| **Total** | **2.190** | **2.194** | **2.091** | **回退** |
+### 项目状态
+- **代码路径**: `C:\Users\Administrator\Desktop\test-studio-mapf\LORR26_842072627`
+- **Git commit**: 9eeca63 (H11: LNS RANDOMWALK with 8 neighbors)
+- **测试**: round432 完成
 
-**结论**: 碰撞感知路径搜索 (H8) 无稳定提升，回退到 baseline
+### 测试结果 (round432)
+| 地图 | 分数 | tasks |
+|------|------|-------|
+| random | 0.523 | 157 |
+| bos | 0.240 | 168 |
+| room | 0.198 | 79 |
+| maze | 0.094 | 47 |
+| fulfill | 0.774 | 774 |
+| orz | 0.217 | 87 |
+| iron | 0.146 | 102 |
+| **Total** | **2.192** | |
+
+---
+
+## 架构分析
+
+### Team_Kitty_Knight (9.039)
+```
+causal_pibt->multi_step() → LNS全局优化 → actions
+```
+
+### 我们当前架构
+```
+plan() → 单次FW优化 → LNS一次优化 → PIBT单步 → actions
+```
+
+**核心差距**：
+1. Team_Kitty_Knight 用 `causal_pibt->multi_step()` 生成协调的多步路径
+2. 我们的 PIBT 只做单步规划，没有多步协调
+3. Team_Kitty_Knight 的 LNS 在每步运行，我们的 LNS 只在初始化时运行一次
 
 ---
 
@@ -31,95 +65,49 @@
 
 | H# | 假设 | 结果 | 原因 |
 |----|------|------|------|
-| H1 | causalPIBT例外 | fulfill -25% | 移除关键例外 |
-| H2 | PathTable碰撞检测 | fulfill -11% | LNS acceptance太严格 |
-| H5 | Frank-Wolfe路径效率 | iron=0.000 | 崩溃 |
-| H6 | 每步quick FW | bos -14%, fulfill -12% | 破坏路径稳定性 |
-| H7 | run_complete_lns碰撞检测 | total -3% | A*不考虑多agent碰撞 |
-| **H8** | **find_collision_free_path** | **total ~0** | **BFS不如A*，无稳定提升** |
-
-### H8 碰撞感知路径搜索失败详情
-实现了 `find_collision_free_path` 函数：
-- 使用 BFS 在时间-空间搜索
-- 检查 vertex/edge collision
-- **问题**：不使用 flow heuristic，只用 manhattan distance
-- **结果**：找到的路径可能更长，或 timeout
-- **结论**：需要在 A* 框架内集成碰撞检查，不是单独做 BFS
+| H1 | priority管理 | ✅ +9% | Team_Kitty_Knight风格 |
+| H2 | causalPIBT例外 | ❌ -25% | 移除关键例外 |
+| H5 | Frank-Wolfe路径效率 | ❌ | 崩溃 |
+| H6 | 每步quick FW | ❌ -12% | 破坏路径稳定性 |
+| H7 | collision detection in LNS | ❌ -3% | A*不考虑多agent碰撞 |
+| H8 | collision-aware BFS | ❌ | BFS无flow heuristic |
+| H9 | collision-aware A* | ❌ -4% | PathTable不一致 |
+| H10 | TimeSpaceA* LNS | ❌ 超时 | A* 太慢 |
+| H11 | LNS RANDOMWALK 8 neighbors | ❌ 无提升 | LNS params not bottleneck |
 
 ---
 
-## 🔬 下一步方向
+## 🔬 H11 分析 (LNS 参数)
 
-### 方案A: TimeSpaceA* 集成 (P0) ⭐⭐⭐
-**核心问题**：普通 A* 只考虑单个 agent，不考虑时间维度和多 agent 碰撞
+**改动**: RANDOM→RANDOMWALK, 4→8 neighbors
+
+**结果**: fulfill=0.774 (同baseline), total=2.192 (vs 2.183 baseline)
+
+**分析**: 
+- LNS 参数不是瓶颈
+- 架构差距才是核心问题
+- 需要实现 multi_step() 协调规划
+
+---
+
+## 🚀 下一步行动
+
+### 方案A: 实现 CausalPIBT.multi_step() (P0) ⭐⭐⭐
+**核心问题**: 我们的 PIBT 不生成协调的多步路径
 
 Team_Kitty_Knight 的方法：
-```
-CausalPIBT.multi_step() → 初始路径（通过 PIBT 协调）
-    ↓
-PLNS.solve() + TimeSpaceA* → 碰撞感知优化
-    ↓
-无碰撞路径
-```
+1. `causal_pibt->multi_step()` 运行 PIBT 多次，每次更新状态
+2. 生成多步协调路径（已避免碰撞）
+3. PLNS 优化这些路径
 
-**我们的差距**：
-- Team_Kitty_Knight 用 TimeSpaceA* 在 LNS 重新优化时生成碰撞感知路径
-- 我们用普通 A* 覆盖 PIBT 协调的路径
-- 需要 TimeSpaceA* 来弥补这个差距
+**我们的实现方向**：
+1. 在 planner.cpp 中实现 multi_step 版本
+2. 让 PIBT 运行多次，每次更新状态
+3. 然后用 LNS 优化
 
-**需要的实现**：
-1. TimeSpaceA* 在搜索时考虑其他 agent 的位置和时间
-2. 生成碰撞感知的单 agent 路径
-3. 在 LNS 重新优化时使用，而不是普通 A*
+### 方案B: 提高 LNS 迭代效率 (P1)
+- 更快的路径重规划
+- 批量碰撞检测
 
-### 方案B: 调整 LNS 参数 (P1)
-- neighbor_size
-- 迭代次数
-- ALNS 参数
-
-### 方案C: 专注高权重地图 (P2)
-- fulfill (0.765) 贡献最大
-- bos (0.247) 第二
-- 针对性优化这两个地图
-
----
-
-## ✅ 当前最佳版本
-
-- **Commit**: 628e8cd
-- **方法**: H3-v4 + start_orientations + OpenMP
-- **Total**: ~2.19 (稳定)
-- **fulfill**: ~0.76 (稳定)
-
----
-
-## 🏆 对比 Team_Kitty_Knight (9.039)
-
-| 系统 | LNS每步? | 碰撞感知? | 方法 |
-|------|---------|---------|------|
-| Team_Kitty_Knight | ✅ | ✅ TimeSpaceA* | CausalPIBT + PLNS + TimeSpaceA* |
-| 我们 (当前) | ❌ | ❌ | PIBT + LNS一次 + 普通A* |
-
-**差距原因**：
-- Team_Kitty_Knight 用 TimeSpaceA* 在 LNS 重新优化时生成碰撞感知路径
-- 我们用普通 A* 覆盖 PIBT 协调的路径
-- 需要 TimeSpaceA* 来弥补这个差距
-
-**架构差距 (9.039 vs 2.19 = 4x gap)**:
-1. Team_Kitty_Knight 的 CausalPIBT 做多步协调执行
-2. PLNS 做全局优化，调用 TimeSpaceA* 生成碰撞感知路径
-3. 我们只有一次 LNS，用普通 A*，没有真正的碰撞感知
-
----
-
-## 📝 H8 实验教训
-
-1. **碰撞检测在 LNS 层不工作** (H7)：检查已有路径的碰撞会导致过度拒绝
-2. **碰撞感知 BFS 也不工作** (H8)：没有 flow heuristic，路径质量差
-3. **真正需要的是 TimeSpaceA***：在 A* 搜索时集成碰撞约束
-
-### 为什么碰撞感知在 A* 框架外不工作
-- A* 的 flow heuristic 找到的是考虑整体 flow 的最短路径
-- 单独的碰撞感知 BFS 找到的是不考虑 flow 的最短无碰撞路径
-- 两者可能都很长或不理想
-- **关键**：需要在 A* 框架内集成碰撞检查，同时保留 flow heuristic
+### 方案C: 专注特定地图优化 (P2)
+- room/maze 低分地图专项优化
