@@ -63,9 +63,9 @@ public:
         // else
 
         if (orient != -1) {
-            min_heuristic = getH(loc, orient, lns.tasks.at(agent_idx));
+            min_heuristic = get_h(env, loc, lns.tasks.at(agent_idx));
         } else {
-            min_heuristic = getH(loc, lns.tasks.at(agent_idx));
+            min_heuristic = get_h(env, loc, lns.tasks.at(agent_idx));
         }
 
         if (num_threads > 1) {

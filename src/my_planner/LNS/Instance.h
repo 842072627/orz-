@@ -12,6 +12,7 @@ public:
     int map_size;
     std::vector<char> my_map;
     std::vector<int> start_locations;
+    std::vector<int> start_orientations;
     std::vector<int> goal_locations;
     int num_of_agents;
     
