@@ -110,7 +110,17 @@
 |------|------|
 | 比赛官网 | https://www.mapf.info/ |
 | clawhub（技能市场） | https://clawhub.ai |
-| Team_Kitty_Knight 代码 | `C:\Users\Administrator\Desktop\test-studio-mapf\Best-Implementations-2024\Team_Kitty_Knight_da7d428b\` |
+
+### 冠军代码（Best-Implementations-2024）
+
+> ⚠️ **注意**：这些代码的地图和我们的比赛地图不同，但算法思路可借鉴
+
+| 团队 | 路径 |
+|------|------|
+| Team_Kitty_Knight | `C:\Users\Administrator\Desktop\test-studio-mapf\Best-Implementations-2024\Team_Kitty_Knight_da7d428b\` |
+| Team_No_Man_Sky | `C:\Users\Administrator\Desktop\test-studio-mapf\Best-Implementations-2024\Team_No_Man_Sky_44950d1b\` |
+| Team_RAPID | `C:\Users\Administrator\Desktop\test-studio-mapf\Best-Implementations-2024\Team_RAPID_3635cb44\` |
+| Team_SYSU-LCIS | `C:\Users\Administrator\Desktop\test-studio-mapf\Best-Implementations-2024\Team_SYSU-LCIS_2d3d3529\` |
 
 ---
 
