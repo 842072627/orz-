@@ -108,9 +108,7 @@ bool causalPIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
 		if (decision[next.location] != -1){
 			continue;
 		}
-		if (higher_id != -1 && prev_decision[next.location] == higher_id){
-			continue;
-		}
+		// Team_Kitty_Knight: no higher_id exception (more agent flexibility)
 		next_states.at(curr_id) = State(next.location, -1, -1);
 		decision.at(next.location) = curr_id;
 

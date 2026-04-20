@@ -61,24 +61,26 @@
 
 ---
 
-## ARCH-B R5 + Priority Fix: Spatial Load Balancing + No +1 Increment
+## ARCH-B R5 + Priority Fix + higher_id Exception: 完整优化
 
 | 字段 | 值 |
 |------|-----|
-| **commit** | `a4d7fbb` (scheduler) + `+priority_fix` |
+| **commit** | `a4d7fbb` + `63c5853` + `higher_id_fix` |
 | **Source MD5** | `6D7C0B3B8AB1D8979336D36774BA4713` |
-| **优化内容** | TaskScheduler.cpp: 16x16 区域负载均衡，PICKUP=7.0, DEST=1.0, DECAY=0.95；planner.cpp: 移除 +1 priority increment |
+| **优化内容** | TaskScheduler.cpp: 16x16 区域负载均衡，PICKUP=7.0, DEST=1.0, DECAY=0.95；planner.cpp: 移除 +1 priority increment；pibt.cpp: 移除 higher_id exception |
 | **测试日期** | 2026-04-20 |
 
-### 初步测试（2次）
+### 测试结果（4次）
 
 | Round | random | fulfill | total |
 |-------|--------|---------|-------|
 | 29 | 0.530 | 0.759 | 1.289 |
 | 30 | 0.487 | 0.748 | 1.235 |
+| 31 | 0.500 | 0.748 | 1.248 |
+| 32 | 0.510 | 0.768 | 1.278 |
 
-**平均**: random=0.509, fulfill=0.754, total=**1.262**
-**相比v3.1基线 total=0.944，提升 +33.7%**
+**4次平均**: random=0.507, fulfill=0.756, total=**1.263**
+**相比v3.1基线 total=0.944，提升 +33.8%**
 
 ---
 
