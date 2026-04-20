@@ -9,7 +9,7 @@ namespace MyPlanner
     const int PIBT_RUNTIME_PER_100_AGENTS = 1;
 
     //The minimal time left for PIBT for multiple steps in ms. 
-    const int MIN_PIBT_TIME = 100; 
+    const int MIN_PIBT_TIME = 50;  // reduced from 100 to give more time to frank_wolfe
 
     // Traffic flow assignment end time tolerance in ms.
     // The default planner will end the traffic flow assignment phase this many milliseconds before traffic flow assignment end time.
