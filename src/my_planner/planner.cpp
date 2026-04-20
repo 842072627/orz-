@@ -20,7 +20,6 @@
 #include "pibt.h"
 #include "flow.h"
 #include "const.h"
-#include "LNS/PLNSSolver.h"
 #include <chrono>
 #include <iostream>
 
@@ -165,9 +164,6 @@ namespace MyPlanner{
 
     static void update_guide_paths_once_for_multistep(SharedEnvironment* env, TimePoint flow_end_time)
     {
-        // H20 DISABLED - caused crashes, needs debugging
-        // TODO: re-enable with proper state management
-        
         // one-time guide-path update for goal-changed agents
         for (int i = 0; i < env->num_of_agents; i++)
         {
@@ -190,11 +186,6 @@ namespace MyPlanner{
         // one-time FW optimization in the flow allocation phase
         std::unordered_set<int> updated;
         frank_wolfe(trajLNS, updated, flow_end_time);
-        
-        // Complete LNS with ALNS: multiple iterations of neighbor generation + replan
-        if (std::chrono::steady_clock::now() < flow_end_time){
-            run_complete_lns(trajLNS, 20, &flow_end_time);
-        }
     }
 
     static void refresh_multistep_step_state(SharedEnvironment* env, std::vector<double>& local_priority)
@@ -209,7 +200,7 @@ namespace MyPlanner{
             }
             else{
                 trajLNS.tasks[i] = env->goal_locations[i].front().first;
-                // NOTE: removed +1 increment - Team_Kitty_Knight doesn't increment during refresh
+                local_priority[i] = local_priority[i] + 1;
             }
 
             assert(env->start_states[i].location >=0);
@@ -408,35 +399,5 @@ namespace MyPlanner{
         env->start_states = original_states;
         env->curr_timestep = original_timestep;
         decided = original_decided;
-    }
-
-    // H18: Run PIBT for multiple steps to generate coordinated actions
-    // This is similar to the loop in plan() but without guide path recomputation
-    void run_multi_step_pibt(SharedEnvironment* env, std::vector<double>& local_priority,
-                             std::vector<std::vector<Action>>& all_actions, int window_size) {
-        // Initialize actions structure
-        all_actions.resize(env->num_of_agents);
-        
-        // Store original states to restore later
-        auto original_states = env->start_states;
-        int original_timestep = env->curr_timestep;
-        
-        // Run PIBT for window_size steps
-        for (int step = 0; step < window_size; step++) {
-            std::vector<Action> one_step_actions;
-            
-            // Refresh state for this step
-            refresh_multistep_step_state(env, local_priority);
-            
-            // Run PIBT once
-            run_multistep_pibt_once(env, local_priority, one_step_actions);
-            
-            // Append actions and roll forward states
-            append_actions_and_rollout_states(env, all_actions, one_step_actions);
-        }
-        
-        // Restore original states
-        env->start_states = original_states;
-        env->curr_timestep = original_timestep;
     }
 }

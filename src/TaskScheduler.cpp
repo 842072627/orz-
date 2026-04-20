@@ -6,7 +6,7 @@
 /**
  * Initializes the task scheduler with a given time limit for preprocessing.
  * 
- * This function prepares the task scheduler by allocating up to half of the given preprocessing time limit 
+ * This function prepares the task scheduler by allocating up of the given preprocessing time limit 
  * and adjust for a specified tolerance to account for potential timing errors. 
  * It ensures that initialization does not exceed the allocated time.
  * 

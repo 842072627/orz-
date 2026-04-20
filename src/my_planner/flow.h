@@ -31,12 +31,6 @@ void init_dist_table(TrajLNS& lns, int amount);
 //update traj and distance table for agent i
 bool update_traj(TrajLNS& lns, int i, const TimePoint* deadline = nullptr);
 
-// Simple LNS-style neighbor replanning
-// Find N agents with highest deviation and replan their paths
-void lns_replan_neighbors(TrajLNS& lns, int num_neighbors, const TimePoint* deadline = nullptr);
-
-// Complete LNS optimization using GlobalManager architecture
-void run_complete_lns(TrajLNS& lns, int num_iterations, const TimePoint* deadline = nullptr);
 
 }
 #endif
