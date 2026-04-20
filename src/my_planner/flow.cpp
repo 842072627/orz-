@@ -144,22 +144,15 @@ void update_dist_2_path(TrajLNS& lns, int i){
 }
 
 //compute distance table for each traj
-void init_dist_table(TrajLNS& lns, int amount){
-
-    int count = 0;
+void init_dist_table(TrajLNS& lns){
+    // Team_Kitty_Knight: process all agents (no amount limit)
     for (int i=0 ; i <lns.env->num_of_agents; i++){
-                // std::cout<<i<<";";
-        if (count >= amount){
-            break;
-        }
         if(!lns.trajs[i].empty() && lns.trajs[i].size() == get_heuristic(lns.heuristics[lns.trajs[i].back()], lns.env,lns.trajs[i].front(),&(lns.neighbors)))
             continue;
         if(!lns.trajs[i].empty() && lns.traj_dists[i].empty()){
             init_dist_2_path(lns.traj_dists[i], lns.env, lns.trajs[i]);
-            count++;
             lns.dist2path_inited++;
         }
-
     }
 }
 

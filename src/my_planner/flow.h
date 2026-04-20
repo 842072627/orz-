@@ -26,7 +26,7 @@ void frank_wolfe(TrajLNS& lns,std::unordered_set<int>& updated, TimePoint timeli
 void update_dist_2_path(TrajLNS& lns, int i);
 
 //compute distance table for each traj
-void init_dist_table(TrajLNS& lns, int amount);
+void init_dist_table(TrajLNS& lns);
 
 //update traj and distance table for agent i
 bool update_traj(TrajLNS& lns, int i, const TimePoint* deadline = nullptr);
