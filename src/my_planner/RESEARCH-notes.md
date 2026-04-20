@@ -266,7 +266,34 @@ class GlobalManager {
 - 没有LNS式的neighborhood概念
 
 **差距评估**：这不是简单的算法替换，需要引入并行LNS框架。
-- [ ] 代码差异分析.md
+### PathTable分析 - 2026-04-21 07:28
+
+**PathTable = 冲突检测表**：维护所有agent的路径，O(1)查询冲突
+
+```cpp
+class PathTable {
+    vector<vector<int>> table; // [location][timestep] = agent_id
+    vector<int> goals;         // [location] = timestep到达
+    
+    // 关键方法
+    getConflictingAgents(agent_id, loc, to_time);  // 查询某时刻某位置的冲突agent
+    constrained(from, to, to_time);                 // 检查边(from->to)在to_time是否被占用
+    getHoldingTime(location, earliest_timestep);    // agent在某位置等待到何时
+};
+```
+
+**这如何用于LNS**：
+1. 每个LocalOptimizer重规划一个neighborhood（子集）
+2. PathTable记录当前所有agent的位置/路径
+3. 重规划时查询PathTable避免产生新冲突
+4. 更新后写回PathTable供其他neighborhood使用
+
+**这对我们意味着什么**：
+- 我们的multi-step没有PathTable——每次plan()是孤立计算的
+- 冠军的LNS通过PathTable实现**跨neighborhood协调**
+- 我们没有neighborhood概念，都是"全局"重规划
+
+**差距量化**：这是**协调架构**的差距，不只是算法差距。
 - [x] **新增发现**：single-step vs multi-step架构差异是核心差距
 - [x] **新增发现**：rand() tie-breaking在A*中被使用
 
