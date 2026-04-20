@@ -61,26 +61,50 @@
 
 ---
 
-## ARCH-B R5 + Priority Fix + higher_id Exception: 完整优化
+## 完整优化：4项融合架构
 
-| 字段 | 值 |
-|------|-----|
-| **commit** | `a4d7fbb` + `63c5853` + `higher_id_fix` |
-| **Source MD5** | `6D7C0B3B8AB1D8979336D36774BA4713` |
-| **优化内容** | TaskScheduler.cpp: 16x16 区域负载均衡，PICKUP=7.0, DEST=1.0, DECAY=0.95；planner.cpp: 移除 +1 priority increment；pibt.cpp: 移除 higher_id exception |
-| **测试日期** | 2026-04-20 |
+### 优化组件
 
-### 测试结果（4次）
+| # | 组件 | 文件 | 效果 |
+|---|------|------|------|
+| 1 | ARCH-B R5 spatial scheduler | TaskScheduler.cpp | PICKUP=7.0, DEST=1.0, DECAY=0.95 |
+| 2 | 无 +1 priority increment | planner.cpp | 防止优先级膨胀 |
+| 3 | 无 higher_id exception | pibt.cpp | 移除因果PIBT中不必要的限制 |
+| 4 | Dist2Path for warehouse | utils.cpp (is_large_map 90000→50000) | 启用路径距离启发式表 |
+
+### ⚠️ MD5 Bug 修正
+- 旧脚本 MD5 只算根目录文件，`my_planner/*.cpp` 从未被计入
+- MD5 缓存全部失效（误报命中）
+- 脚本已修复：`os.walk('.')` 递归包含所有子目录
+
+### 测试结果（Dist2Path 关闭，MD5=BE7A67C4C146504F7729D41B9C032D28）
 
 | Round | random | fulfill | total |
 |-------|--------|---------|-------|
-| 29 | 0.530 | 0.759 | 1.289 |
-| 30 | 0.487 | 0.748 | 1.235 |
-| 31 | 0.500 | 0.748 | 1.248 |
-| 32 | 0.510 | 0.768 | 1.278 |
+| 36 | 0.523 | 0.713 | 1.236 |
 
-**4次平均**: random=0.507, fulfill=0.756, total=**1.263**
-**相比v3.1基线 total=0.944，提升 +33.8%**
+**组件 1+2+3 贡献**: random≈0.523, fulfill≈0.713, total≈**1.236**
+
+### 测试结果（Dist2Path 开启，MD5=0E7B88593DAF0994550A76BAF5EDC236）
+
+| Round | random | fulfill | total |
+|-------|--------|---------|-------|
+| 34 | 0.490 | 1.085 | 1.575 |
+| 35 | 0.527 | 1.100 | 1.627 |
+| 37 | 0.513 | 1.105 | 1.618 |
+
+**全部4项融合**: random≈0.510, fulfill≈**1.097**, total≈**1.607**
+
+### 贡献分解
+
+| 阶段 | fulfill 提升 | 说明 |
+|------|-------------|------|
+| v3.1 基线 | 0.446 | 原始 Start-Kit |
+| + 组件1+2+3 | 0.713 | scheduler + priority + higher_id |
+| + 组件4 (Dist2Path) | **1.097** | **最大贡献** |
+
+**最终**: random≈0.510, fulfill≈1.097, total≈**1.607**
+**vs v3.1 基线 0.944 → +70.2%**
 
 ---
 
