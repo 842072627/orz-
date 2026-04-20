@@ -218,6 +218,31 @@ namespace MyPlanner{
             if (!env->goal_locations[i].empty() && trajLNS.neighbors[env->start_states[i].location].size() == 1){
                 local_priority[i] = local_priority[i] + 10;
             }
+
+            // DEV-336: Recompute guide path if agent has significantly deviated from its planned path
+            // This is the key difference from Team_Kitty_Knight: we keep guide paths updated during multi-step simulation
+            if (!trajLNS.traj_dists[i].empty() && !trajLNS.trajs[i].empty())
+            {
+                std::pair<int,int> dists = get_source_2_path(trajLNS.traj_dists[i], trajLNS.env, trajLNS.env->start_states[i].location, &(trajLNS.neighbors));
+                // If deviation is large (dists.first > 5), the guide path is stale - recompute it
+                if (dists.first > 5 && trajLNS.trajs[i].back() == trajLNS.tasks[i])
+                {
+                    std::vector<int> old_traj = trajLNS.trajs[i];
+                    if (!trajLNS.trajs[i].empty())
+                        remove_traj(trajLNS, i);
+                    if (update_traj(trajLNS, i, nullptr))
+                    {
+                        // guide path updated successfully
+                    }
+                    else
+                    {
+                        // restore old trajectory on failure
+                        trajLNS.trajs[i] = old_traj;
+                        if (!old_traj.empty())
+                            add_traj(trajLNS, i);
+                    }
+                }
+            }
         }
     }
 
