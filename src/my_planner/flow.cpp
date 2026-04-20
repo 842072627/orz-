@@ -122,8 +122,10 @@ void frank_wolfe(TrajLNS& lns,std::unordered_set<int>& updated, TimePoint timeli
             continue;
         }
         std::vector<int> old_traj = lns.trajs[a];
-        remove_traj(lns,a);
-        if (!update_traj(lns,a, &timelimit)){
+        if (!lns.trajs[a].empty())
+            remove_traj(lns, a);
+        // Team_Kitty_Knight: no deadline in frank_wolfe update_traj - full A* search
+        if (!update_traj(lns, a, nullptr)){
             // Team_Kitty_Knight: no break on failure, restore and continue
             lns.trajs[a] = old_traj;
             if (!old_traj.empty()){

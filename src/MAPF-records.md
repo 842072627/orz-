@@ -110,3 +110,24 @@
 
 ## 实验记录
 
+### frank_wolfe deadline 移除 (commit b397bfb 之后)
+
+| Round | random | fulfill | total |
+|-------|--------|---------|-------|
+| 84 | 0.513 | 1.119 | 1.632 |
+| 85 | 0.503 | 1.109 | 1.612 |
+| 86 | 0.520 | 1.102 | 1.622 |
+| 87 | 0.533 | 1.085 | 1.618 |
+| 88 | 0.477 | 1.114 | 1.591 |
+
+**5次平均 (MD5=53E306DCFACF955EDED017FE88D669FC)**: random≈0.509, fulfill≈1.106, total≈1.615
+**历史平均 (R71-83)**: random≈0.497, fulfill≈1.097, total≈1.594
+**提升**: +2.1% total
+
+**改动**: flow.cpp frank_wolfe 中 update_traj 不再传 deadline 参数 (nullptr)，让 A* 完整运行
+**分析**: Team_Kitty_Knight 的 update_traj 不带 deadline，完整 A* 搜索产生更好的 guide paths，轻微改善
+
+---
+
+## 实验记录
+
