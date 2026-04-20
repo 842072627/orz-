@@ -266,7 +266,42 @@ class GlobalManager {
 - 没有LNS式的neighborhood概念
 
 **差距评估**：这不是简单的算法替换，需要引入并行LNS框架。
-### PathTable分析 - 2026-04-21 07:28
+### 架构关键发现 - 2026-04-21 07:35
+
+**我们的plan()接口 vs champion的plan()接口**：
+
+```cpp
+// 我们的 (MAPFPlanner.cpp)
+void plan(int time_limit, Plan & plan) {
+    int min_plan_steps = ... + 1;
+    MyPlanner::plan(limit, plan.actions, env, min_plan_steps); // 多步 plan
+}
+
+// champion (default_planner/planner.cpp)
+void plan(int time_limit, vector<Action> & actions, SharedEnvironment* env) {
+    // 单步plan! actions是单步的vector<Action>，不是vector<vector<Action>>
+}
+```
+
+**关键差异**：
+- champion的plan()返回**单步**actions，下个timestep立即再次调用plan()
+- 我们的plan()返回**多步**actions (min_plan_steps步)，通过executor分window执行
+- 这就是"single-step vs multi-step"的真正含义！
+
+**但这不是问题所在**：
+- 我们的multi-step plan通过executor的window机制分解执行
+- 每次executor.next_command()只发送GO/STOP一个命令
+- 所以实际上也是每步协调的
+
+**所以差距不在single-step vs multi-step本身**，而在于：
+1. 冠军的guide path每步重新计算（因为每步都重新调用plan）
+2. 我们的guide path在一次plan()调用中计算一次，然后用于整个multi-step window
+3. **这就是guide path staleness的核心**：在window内部，guide path不更新
+
+**这意味着**：
+- 如果我们的window_size = 1（即每步都重新plan），那guide path就是fresh的
+- 但我们的window_size通常 > 1（有通信延迟）
+- 所以差距取决于window_size的大小
 
 **PathTable = 冲突检测表**：维护所有agent的路径，O(1)查询冲突
 
