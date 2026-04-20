@@ -153,8 +153,7 @@ namespace MyPlanner{
             // cross-episode priority update
             if(require_guide_path[i])
                 local_priority[i] = p_copy[i];
-            else if (!env->goal_locations[i].empty())
-                local_priority[i] = local_priority[i]+1;
+            // Team_Kitty_Knight: no +1 increment (avoids priority inflation)
 
             if (!env->goal_locations[i].empty() && trajLNS.neighbors[env->start_states[i].location].size() == 1){
                 local_priority[i] = local_priority[i] + 10;
@@ -200,7 +199,7 @@ namespace MyPlanner{
             }
             else{
                 trajLNS.tasks[i] = env->goal_locations[i].front().first;
-                local_priority[i] = local_priority[i] + 1;
+                // Team_Kitty_Knight: no +1 increment
             }
 
             assert(env->start_states[i].location >=0);
