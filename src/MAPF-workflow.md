@@ -30,6 +30,7 @@
 ### 测试脚本
 - **默认**: `run_mini_md5.ps1` (random + fulfill)
 - **方差**: `run_mini_variance.ps1` (非必要不使用)
+build脚本：build.bat
 
 ### 分数记录
 - **必须记录 commit ID**
