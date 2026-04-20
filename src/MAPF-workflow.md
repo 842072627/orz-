@@ -29,8 +29,9 @@
 
 ### 测试脚本
 - **默认**: `C:\Users\Administrator\Desktop\test-studio-mapf\test-scripts\run_mini_md5.ps1` (random + fulfill)
+记录存在C:\Users\Administrator\Desktop\test-studio-mapf\test-scripts\round_mini 里面
 - **方差**: `C:\Users\Administrator\Desktop\test-studio-mapf\test-scripts\run_mini_variance.ps1` (非必要不使用)
-build脚本：build.bat
+build脚本： `C:\Users\Administrator\Desktop\test-studio-mapf\test-scripts\build.bat`
 
 ### 分数记录
 - **必须记录 commit ID**
@@ -47,10 +48,10 @@ build脚本：build.bat
 
 | 文件 | 职责 | 可重写函数 |
 |------|------|-----------|
-| `src/Entry.cpp` + `inc/Entry.h` | 双时间尺度协调者 | `compute()`, `initialize()` |
-| `src/TaskScheduler.cpp` + `inc/TaskScheduler.h` | 任务分配 | `plan()`, `initialize()` |
-| `src/Executor.cpp` + `inc/Executor.h` | 执行控制 | `process_new_plan()`, `next_command()`, `initialize()` |
-| `src/MAPFPlanner.cpp` + `inc/MAPFPlanner.h` | 路径规划 | `plan()`, `initialize()` |
+| `src/Entry.cpp` + `inc/Entry.h` | --- | `compute()`, `initialize()` |
+| `src/TaskScheduler.cpp` + `inc/TaskScheduler.h` | --- | `plan()`, `initialize()` |
+| `src/Executor.cpp` + `inc/Executor.h` | --- | `process_new_plan()`, `next_command()`, `initialize()` |
+| `src/MAPFPlanner.cpp` + `inc/MAPFPlanner.h` | --- | `plan()`, `initialize()` |
 
 ---
 
@@ -71,12 +72,14 @@ build脚本：build.bat
 
 ### ✅ 允许
 - 优先在 `src/my_planner/` 修改算法
-- 新增 `.cpp/.h` 文件
+- 在`src`下新增 `.cpp/.h` 文件
 - 修改 `CMakeLists.txt`
+- 核心接口文件（4个）
 
 ### ❌ 禁止
 - 修改 `default_planner/`（保持备份）
 - 修改 `inc/` 头文件
+- 未在允许范围内的其他一切文件
 
 ---
 
@@ -99,6 +102,7 @@ build脚本：build.bat
 | 实验记录 | `src/MAPF-records.md` |
 | 代码 | `src/my_planner/` |
 | 备份 | `default_planner/` |
+| 项目笔记 | `C:\Users\Administrator\Desktop\test-studio-mapf\项目笔记.md` |
 | **冠军代码** | `Best-Implementations-2024/` |
 | build | `build/lifelong.exe` |
 
