@@ -1,13 +1,6 @@
-
-
-
 #include "pibt.h"
 
 #include <cstdint>
-
-
-
-
 
 namespace MyPlanner{
 int get_gp_h(TrajLNS& lns, int ai, int target){
@@ -84,15 +77,17 @@ bool causalPIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
 	std::sort(successors.begin(), successors.end(), 
 		[&](PIBT_C& a, PIBT_C& b)
 		{
-			int diff[4] = {1,lns.env->cols,-1,-lns.env->cols};
 			if (a.heuristic == b.heuristic){
 					//tie break on prefer moving forward
 					if (a.location==orien_next_v && b.location!=orien_next_v)
 						return true;
 					if (a.location!=orien_next_v && b.location==orien_next_v)
 						return false;
-					// random tie break
-					return a.tie_breaker < b.tie_breaker;
+					// deterministic: prefer location closer to current
+					int a_dist = std::abs(a.location - prev_loc);
+					int b_dist = std::abs(b.location - prev_loc);
+					if (a_dist != b_dist) return a_dist < b_dist;
+					return a.location < b.location;
 			}
 			return a.heuristic < b.heuristic; 
 		});
@@ -200,12 +195,6 @@ bool moveCheck(int id, std::vector<bool>& checked,
 		return true;
 	actions.at(id) = Action::W;
 	return false;
-	
-
-	
-
-	
-	
 }
 
 }
