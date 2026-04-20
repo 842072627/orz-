@@ -1,7 +1,7 @@
 # MAPF Deep Research Notes
 
 > 深度研究笔记 - 沉淀真正的知识，不是跑测试记录
-> Last updated: 2026-04-21 07:40 GMT+8
+> Last updated: 2026-04-21 07:42 GMT+8
 
 ---
 
@@ -156,6 +156,20 @@ while (std::chrono::steady_clock::now() < timelimit){
 
 **冠军的版本**：基本相同。关键都是：无deadline update_traj + 失败继续。
 
+### 7. 启发式数据结构对比
+
+**Champion**: `std::vector<HeuristicTable> global_heuristictable;`
+- O(1)访问: `heuristics[goal]` (数组索引)
+- 预分配，大小 = map_size
+- 缓存友好
+
+**Our**: `std::unordered_map<int, HeuristicTable> global_heuristictable;`
+- O(1)平均: `heuristics.find(goal)` (哈希查找)
+- 动态分配，有哈希冲突开销
+- 缓存不友好
+
+**性能影响**: 中等。不是核心差距，但影响启发式查找速度。
+
 ---
 
 ## 架构差距总结
@@ -168,6 +182,7 @@ while (std::chrono::steady_clock::now() < timelimit){
 | rand() tie-breaking | ✅ | ❌ (deterministic) | 中 | 低 |
 | higher_id exception | ✅ (有) | ❌ (无，更好) | 已验证我们更好 | - |
 | flow-guided A* | ✅ | ✅ (已有) | - | - |
+| 启发式数据结构 | vector | unordered_map | 中 | 低 |
 
 ---
 
@@ -183,10 +198,10 @@ while (std::chrono::steady_clock::now() < timelimit){
 
 ## 研究产出 (2026-04-21)
 
-- commit `17c8a37` - RESEARCH-notes.md initial
+- commit `17c8a37` - Flow-guided A*真相
 - commit `7040d47` - GlobalManager = LNS coordinator
 - commit `519f390` - PathTable = conflict detection
 - commit `e0927dd` - single-step vs multi-step architecture
-- commit `???????` - causalPIBT detailed comparison
+- commit `5ece99f` - causalPIBT comparison + heuristics data structure
 
-_Last updated: 2026-04-21 07:40 GMT+8_
+_Last updated: 2026-04-21 07:42 GMT+8_
