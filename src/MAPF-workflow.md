@@ -28,8 +28,8 @@
 ## 测试规则
 
 ### 测试脚本
-- **默认**: `run_mini_md5.ps1` (random + fulfill)
-- **方差**: `run_mini_variance.ps1` (非必要不使用)
+- **默认**: `C:\Users\Administrator\Desktop\test-studio-mapf\test-scripts\run_mini_md5.ps1` (random + fulfill)
+- **方差**: `C:\Users\Administrator\Desktop\test-studio-mapf\test-scripts\run_mini_variance.ps1` (非必要不使用)
 build脚本：build.bat
 
 ### 分数记录
