@@ -127,6 +127,21 @@
 **改动**: flow.cpp frank_wolfe 中 update_traj 不再传 deadline 参数 (nullptr)，让 A* 完整运行
 **分析**: Team_Kitty_Knight 的 update_traj 不带 deadline，完整 A* 搜索产生更好的 guide paths，轻微改善
 
+### pibt.cpp get_gp_h 统一 (fallback to heuristics for large maps)
+
+| Round | random | fulfill | total |
+|-------|--------|---------|-------|
+| 95 | 0.497 | 1.149 | 1.646 |
+| 96 | 0.510 | 1.126 | 1.636 |
+| 97 | 0.463 | 1.072 | 1.535 |
+
+**3次平均 (MD5=BA9586DA4E7DCD3B971D7FACD4692F00)**: random≈0.490, fulfill≈1.116, total≈1.606
+**对比 frank_wolfe deadline 移除后 (R84-88)**: total≈1.615
+**结论**: 无显著差异，结果在方差范围内
+
+**改动**: 移除了 is_large_map 判断，统一 small/large map 的 get_gp_h 逻辑，都优先检查 traj_dists，然后 heuristics，然后 manhattan
+**分析**: Team_Kitty_Knight 的 get_gp_h 不区分 is_large_map，统一使用相同逻辑
+
 ---
 
 ## 实验记录
