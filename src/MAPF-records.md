@@ -61,5 +61,26 @@
 
 ---
 
+## ARCH-B R5: Spatial Load Balancing Scheduler
+
+| 字段 | 值 |
+|------|-----|
+| **commit** | `a4d7fbb` |
+| **Source MD5** | `6D7C0B3B8AB1D8979336D36774BA4713` |
+| **优化内容** | TaskScheduler.cpp: 16x16 区域负载均衡，PICKUP=7.0, DEST=1.0, DECAY=0.95 |
+| **测试日期** | 2026-04-20 |
+
+### 初步测试（2次）
+
+| Round | random | fulfill | total |
+|-------|--------|---------|-------|
+| 27 | 0.503 | 0.681 | 1.184 |
+| 28 | 0.517 | 0.648 | 1.165 |
+
+**初步平均**: random=0.510, fulfill=0.665, total=**1.175**
+**相比v3.1基线 total=0.944，提升 +24.5%**
+
+---
+
 ## 实验记录
 
