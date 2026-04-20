@@ -124,11 +124,13 @@ void frank_wolfe(TrajLNS& lns,std::unordered_set<int>& updated, TimePoint timeli
         std::vector<int> old_traj = lns.trajs[a];
         remove_traj(lns,a);
         if (!update_traj(lns,a, &timelimit)){
+            // Team_Kitty_Knight: no break on failure, restore and continue
             lns.trajs[a] = old_traj;
-            add_traj(lns,a);
-            break;
+            if (!old_traj.empty()){
+                add_traj(lns,a);
+            }
+            continue;
         }
-        
     }
     return;
 
