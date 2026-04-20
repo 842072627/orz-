@@ -233,7 +233,39 @@ temp_op = ( (flow[curr_id].d[d]+1) * flow[next].d[(d+2)%4]);
 ## 进度追踪
 
 - [x] TimeSpaceA*实现分析.md — **已更正：不是TimeSpaceA*，是flow-guided A***
-- [ ] GlobalManager设计分析.md
+### GlobalManager分析 - 2026-04-21 07:25
+
+**重大发现**：GlobalManager是**LNS (Large Neighborhood Search)** 协调器
+
+**关键组件**：
+```cpp
+class GlobalManager {
+    std::vector<std::shared_ptr<NeighborGenerator>> neighbor_generators; // 邻居生成器
+    std::vector<std::shared_ptr<LocalOptimizer>> local_optimizers;       // 本地优化器
+    PathTable path_table;                    // 路径缓存表
+    std::vector<updating_queues>;             // 并行更新队列
+    float sum_of_costs;                      // 全局成本
+    int num_of_failures;                     // 失败计数
+};
+```
+
+**LNS流程**：
+1. GlobalManager协调多个agent子集(neighborhood)的并行重规划
+2. 每个LocalOptimizer处理一个neighborhood
+3. 路径缓存在PathTable中共享
+4. 全局成本sum_of_costs被追踪用于判断收敛
+
+**这对我们意味着什么**：
+- 我们的planner是"单线程"的：一次frank_wolfe循环
+- 冠军的planner是"多线程"的：多个neighborhood并行优化
+- 不是单个算法强，是**并行化协调架构**强
+
+**我们的代码中是否有类似结构**：
+- flow.cpp的frank_wolfe是单线程的
+- 没有PathTable缓存机制
+- 没有LNS式的neighborhood概念
+
+**差距评估**：这不是简单的算法替换，需要引入并行LNS框架。
 - [ ] 代码差异分析.md
 - [x] **新增发现**：single-step vs multi-step架构差异是核心差距
 - [x] **新增发现**：rand() tie-breaking在A*中被使用
