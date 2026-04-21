@@ -1,13 +1,13 @@
 # MAPF Deep Research Notes
 
 > 深度研究笔记 - 沉淀真正的知识，不是跑测试记录
-> Last updated: 2026-04-21 07:42 GMT+8
+> Last updated: 2026-04-21 12:30 GMT+8
 
 ---
 
 ## 核心问题
 
-**Q: 为什么我们的代码 (total≈1.61) 与冠军 (total≈4.0) 差距 2.5x？**
+**Q: 为什么我们的代码 (total≈1.65) 与冠军 (total≈4.0) 差距 2.4x？**
 
 **A: 架构设计差异** - 不是参数调优能解决的
 
@@ -79,97 +79,6 @@ class PathTable {
 3. 重规划时查询PathTable避免产生新冲突
 4. 更新后写回PathTable供其他neighborhood使用
 
-### 4. single-step vs multi-step 架构真相
-
-**关键发现**：
-
-```cpp
-// Champion的plan() - 单步
-void plan(int time_limit, vector<Action> & actions, SharedEnvironment* env) {
-    // 单步actions，下个timestep立即再次调用plan()
-    update_traj(...) + frank_wolfe(...) + PIBT(...)
-}
-
-// 我们的plan() - 多步 via executor window
-void plan(int time_limit, vector<vector<Action>> & actions,
-         SharedEnvironment* env, int num_steps) {
-    // 多步actions，通过executor的window机制分解执行
-    // window_size = min_planner_communication_time / ...
-}
-```
-
-**我们的executor机制**：
-- executor维护一个window_size的action窗口
-- 每次next_command()只发送GO/STOP一个命令
-- 通过TPG（Temporal Dependency Graph）协调agent执行顺序
-
-**所以实际上也是每步协调的**——但guide path在window内部不更新。
-
-### 5. causalPIBT Tie-Breaking详细对比
-
-**关键差异**：
-
-1. **Champion有higher_id exception (line 67-69)**:
-```cpp
-if (higher_id != -1 && prev_decision[next.location] == higher_id){
-    continue;  // skip if prev occupant is higher priority
-}
-```
-我们**没有**这个检查——我们更灵活。
-
-2. **occupied检查**:
-```cpp
-// Champion: 无例外
-if(occupied[next.location]) continue;
-
-// 我们: 第一个agent可以stay at prev_loc
-if(occupied[next.location] && !(higher_id == -1 && prev_loc == next.location))
-    continue;
-```
-
-3. **tie-breaking**:
-```cpp
-// Champion: rand() tie-breaking
-return a.tie_breaker < b.tie_breaker;
-
-// 我们: deterministic closer location
-int a_dist = std::abs(a.location - prev_loc);
-int b_dist = std::abs(b.location - prev_loc);
-if (a_dist != b_dist) return a_dist < b_dist;
-return a.location < b.location;
-```
-
-**已验证**：我们的PIBT版本（无higher_id exception）比冠军的好。
-
-### 6. frank_wolfe循环
-
-**我们的版本**:
-```cpp
-while (std::chrono::steady_clock::now() < timelimit){
-    // 遍历所有agent，按deviation排序
-    if (!update_traj(lns, a, nullptr)) { // 无deadline
-        lns.trajs[a] = old_traj;
-        continue; // 失败继续
-    }
-}
-```
-
-**冠军的版本**：基本相同。关键都是：无deadline update_traj + 失败继续。
-
-### 7. 启发式数据结构对比
-
-**Champion**: `std::vector<HeuristicTable> global_heuristictable;`
-- O(1)访问: `heuristics[goal]` (数组索引)
-- 预分配，大小 = map_size
-- 缓存友好
-
-**Our**: `std::unordered_map<int, HeuristicTable> global_heuristictable;`
-- O(1)平均: `heuristics.find(goal)` (哈希查找)
-- 动态分配，有哈希冲突开销
-- 缓存不友好
-
-**性能影响**: 中等。不是核心差距，但影响启发式查找速度。
-
 ---
 
 ## 架构差距总结
@@ -186,13 +95,56 @@ while (std::chrono::steady_clock::now() < timelimit){
 
 ---
 
-## 我的行为规则
+## 已验证事实
 
-1. **实验前写假设** - 预期X提升，因为Y原因
-2. **最多测5次** - 没提升就停，分析原因
-3. **失败立即反思** - 是假设错了还是方向错了
-4. **20次测试上限** - 超过必须停下来问自己在干嘛
-5. **写笔记** - 每次研究产出文档，不只是测试数据
+1. **frank_wolfe essential**: 去掉后fulfill -71%
+2. **LNS不能叠加在frank_wolfe后面**: 目标冲突
+3. **is_large_map检查有道理**: 移除后fulfill -17%
+4. **DEV-336 (deviation>5 recompute)**: 是当前最优的guide path更新策略
+5. **threshold=5是经验最优**: 太高(2)或太低(3)都更差
+6. **window_size不能随便改**: 减少导致fulfill -83%
+7. **PIBT higher_id exception**: 我们没有反而更好
+8. **rand() tie-breaking**: 比deterministic轻微改善
+
+---
+
+## 灾难性失败记录
+
+| 方向 | 结果 | 原因 |
+|------|------|------|
+| A2 (LNS替换FW) | fulfill=0.338 | frank_wolfe是必须的 |
+| B1 (window_size-1) | fulfill -83% | TPG依赖被破坏 |
+| A7 (移除is_large_map) | fulfill -17% | is_large_map有道理 |
+
+---
+
+## frank_wolfe天花板
+
+**核心发现**：frank_wolfe主循环架构天花板 ≈ 1.6-1.7
+
+**原因**：
+- frank_wolfe在plan()开始时分配flow并优化路径
+- executor的window机制让guide path在多步内保持stale
+- DEV-336通过deviation>5来缓解stale问题，但不是根本解决
+- 冠军的架构是每步plan + 每步replan，不是multi-step window
+
+**所有"叠加LNS"尝试都失败**：
+- A1-A7: 全部失败
+- A8: LNS destroy-repair循环 - total=1.620
+- A9: PIBT higher_id - total=1.581
+- A10: guide path 5→2 - total=1.590
+
+---
+
+## 下一步研究方向
+
+**不是放弃** - 而是承认frank_wolfe天花板的现实，聚焦可改进的方向：
+
+1. **PIBT决策质量** - 启发式准确性、tie-breaking策略
+2. **启发式更新频率** - Dev-336是补丁，不是根本解决
+3. **任务分配质量** - scheduler的贪心策略
+
+**真正需要的是**：单步plan + 每步replan架构 - 但这需要完全重写executor
 
 ---
 
@@ -204,4 +156,4 @@ while (std::chrono::steady_clock::now() < timelimit){
 - commit `e0927dd` - single-step vs multi-step architecture
 - commit `5ece99f` - causalPIBT comparison + heuristics data structure
 
-_Last updated: 2026-04-21 07:42 GMT+8_
+_Last updated: 2026-04-21 12:30 GMT+8_
