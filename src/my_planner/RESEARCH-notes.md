@@ -215,11 +215,27 @@ class PathTable {
 | GlobalManager | - | 待定义 |
 | TimeSpaceAStar | - | 待定义 |
 
-### Day 3 待办
-- [ ] 定义Instance类（或包装SharedEnvironment）
-- [ ] 创建GlobalManager骨架
+### Day 3 里程碑 ✅
+- [x] Instance.h包装类完成（4362字节）
+- [x] GlobalManager.h骨架完成（5397字节）
+- [x] 项目编译成功
+- [x] Baseline验证: total=1.652
+
+### LNS组件实现状态
+| 组件 | 文件 | 状态 | 字节 |
+|------|------|------|------|
+| PathTable | `inc/LNS/PathTable.h` | ✅ 骨架完成 | 3463 |
+| NeighborGenerator | `inc/LNS/NeighborGenerator.h` | ✅ 骨架完成 | 2269 |
+| LocalOptimizer | `inc/LNS/LocalOptimizer.h` | ✅ 骨架完成 | 2337 |
+| Instance | `inc/LNS/Instance.h` | ✅ 包装完成 | 4362 |
+| GlobalManager | `inc/LNS/GlobalManager.h` | ✅ 骨架完成 | 5397 |
+| TimeSpaceAStar | - | 待实现 | - |
+
+### Day 4 待办
+- [ ] 实现TimeSpaceAStarPlanner（或使用现有A*）
 - [ ] 集成到planner.cpp测试
+- [ ] 端到端测试
 
 ---
 
-_Last updated: 2026-04-21 14:35 GMT+8 - Day 2里程碑完成_
+_Last updated: 2026-04-21 14:45 GMT+8 - Day 3里程碑完成_
