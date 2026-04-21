@@ -96,6 +96,114 @@
 - commit `5ece99f` - causalPIBT comparison
 - commit `ed59b73` - A11失败记录
 - commit `8794697` - A12失败记录
-- commit `????` - **Dist2Path被注释！启发式不是瓶颈**
+- commit `48554eb` - **Dist2Path被注释！启发式不是瓶颈**
 
-_Last updated: 2026-04-21 14:00 GMT+8_
+---
+
+## LNS架构详细分析 (2026-04-21 14:20)
+
+### PLNSSolver核心参数 (plns.h)
+
+```cpp
+int window_size_for_PATH=15;     // 路径规划window
+int neighbor_size=8;             // neighborhood大小
+destroy_strategy=RANDOMWALK;      // destroy策略
+init_algo_name="LaCAM2";        // LaCAM2仅用于初始化
+replan_algo_name="PP";          // replan用Prioritized Planning
+int execution_window=1;          // **关键！每步完全replan**
+```
+
+### GlobalManager核心组件
+
+| 组件 | 职责 |
+|------|------|
+| NeighborGenerator | 生成neighborhood（destroy哪些agent） |
+| LocalOptimizer | 重新规划被destroy的agent |
+| PathTable | O(1)冲突检测 |
+| Agent管理 | 维护每个agent的路径和状态 |
+
+### LNS主循环逻辑 (GlobalManager.run())
+
+```
+1. getInitialSolution(): 用LaCAM2生成初始解
+2. LOOP (直到时间用完):
+   a. 生成neighbors (NeighborGenerator):
+      - destroy策略: RANDOMWALK
+      - 随机选择neighbor_size个agent
+      - 标记其路径为destroyed
+   b. 重新规划 (LocalOptimizer):
+      - 对每个destroyed agent用PIBT重新规划
+      - 检查冲突 (PathTable)
+   c. 接受/拒绝:
+      - 如果新方案更优，接受
+      - 否则拒绝，保留原方案
+3. 返回最终actions
+```
+
+### champion的plan()流程 (planner.cpp)
+
+```cpp
+// 1. 用causal_pibt生成init_paths (multi_step)
+auto multi_step_actions = causal_pibt->multi_step(window_size, ...);
+
+// 2. 转换为init_paths格式
+for each agent i:
+    init_path[i] = 从multi_step_actions[i]生成
+
+// 3. 用LNS改进init_paths
+auto actions = plns->solve(goal_locations, init_paths, time_limit);
+
+// 4. 返回actions
+```
+
+### 关键差异：execution_window=1
+
+**我们的架构**:
+```
+plan() called once → frank_wolfe生成guide paths → executor消费window_size步
+```
+
+**冠军架构**:
+```
+plan() called every frame → LNS重新规划 → execution_window=1 → 每步fresh
+```
+
+### 重构需要的关键组件
+
+1. **PLNSSolver**: 主调度器，管理LNS迭代
+2. **GlobalManager**: 协调neighbors、replan、accept/reject
+3. **NeighborGenerator**: 实现RANDOMWALK等destroy策略
+4. **LocalOptimizer**: 实现PIBT/PP重新规划
+5. **PathTable**: O(1)冲突检测表
+6. **TimeSpaceAStarPlanner**: SIPP变体，用于复杂场景
+
+--## A13 LNS重构进度 (2026-04-21 14:25)
+
+### Day 1 里程碑 ✅
+- [x] 创建LNS目录结构 (`inc/LNS/`, `src/LNS/`)
+- [x] PathTable.h骨架完成（3493字节）
+- [x] 项目编译成功 (lifelong.exe 3.7MB)
+- [x] Baseline验证: total=1.652
+
+### PathTable.h 实现状态
+```cpp
+class PathTable {
+    std::vector<std::vector<int>> table; // [location][time] = agent_id
+    std::vector<int> goals; // goal location -> timestep
+    
+    void insertPath(int agent_id, const vector<pair<int,int>>& path);
+    bool constrained(int location, int timestep) const;
+    bool edgeConstrained(int from, int to, int timestep) const;
+    void getConflictingAgents(int location, int timestep, set<int>& agents) const;
+    int getHoldingTime(int location, int earliest_timestep) const;
+};
+```
+
+### Day 2 待办
+- [ ] 创建NeighborGenerator骨架
+- [ ] 创建LocalOptimizer骨架
+- [ ] 集成到planner.cpp测试
+
+---
+
+_Last updated: 2026-04-21 14:25 GMT+8 - Day 1里程碑完成_
