@@ -2,11 +2,12 @@
 #include <random>
 #include <unordered_set>
 #include <set>
-#include "../LNS/PathTable.h"
-#include "../../my_planner/Types.h"
+#include "PathTable.h"
 
 namespace LNS {
 
+// Minimal NeighborGenerator for LNS
+// Generates neighborhoods of agents to destroy/replan
 class NeighborGenerator
 {
 public:

@@ -70,7 +70,8 @@ public:
         float old_cost = 0;
         float new_cost = 0;
         
-        for (int agent_id : agent_ids) {
+        for (size_t idx = 0; idx < agent_ids.size(); ++idx) {
+            int agent_id = agent_ids[idx];
             if (agent_id < 0 || agent_id >= num_agents) continue;
             
             // Old cost (path length)
@@ -79,7 +80,6 @@ public:
             }
             
             // New cost
-            size_t idx = &agent_id - &agent_ids[0];  // Map agent_id to index in new_paths
             if (idx < new_paths.size() && !new_paths[idx].empty()) {
                 // Update path
                 paths[agent_id] = new_paths[idx];

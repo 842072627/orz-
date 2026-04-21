@@ -3,8 +3,11 @@
 #include <set>
 #include "../my_planner/Types.h"
 
-#define NO_AGENT -1
+#ifndef MAX_TIMESTEP
 #define MAX_TIMESTEP 10000
+#endif
+
+#define NO_AGENT -1
 
 namespace LNS {
 

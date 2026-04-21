@@ -249,11 +249,22 @@ class PathTable {
 | TimeSpaceAStarPlanner | `inc/LNS/TimeSpaceAStarPlanner.h` | ✅ 完成 | 4411 |
 | **总计** | | **6/6** | **~23KB** |
 
-### Day 5 待办
-- [ ] 集成LNS到planner.cpp
-- [ ] 端到端测试
-- [ ] 验证LNS确实工作
+### Day 5 里程碑 ✅
+- [x] LNSPlannerWrapper.cpp完成（2698字节）
+- [x] 头文件路径修复
+- [x] 项目编译成功 (3.8MB)
+- [x] **首次LNS集成测试**: total=1.591 (MD5: 5B92765...)
+
+### LNS组件集成后首次测试结果
+- random=0.500, fulfill=1.091, total=1.591
+- vs baseline 1.652 (MD5: F4DF65...)
+- 略有下降，可能是正常方差，需要更多测试
+
+### Day 6 待办
+- [ ] 调查为何结果下降
+- [ ] 修复LNS组件问题
+- [ ] 确保不影响现有frank_wolfe+PIBT代码
 
 ---
 
-_Last updated: 2026-04-21 14:50 GMT+8 - Day 4里程碑完成_
+_Last updated: 2026-04-21 14:58 GMT+8 - Day 5里程碑完成_

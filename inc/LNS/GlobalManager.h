@@ -6,6 +6,7 @@
 #include "NeighborGenerator.h"
 #include "LocalOptimizer.h"
 #include "Instance.h"
+#include "TimeSpaceAStarPlanner.h"
 
 namespace LNS {
 
