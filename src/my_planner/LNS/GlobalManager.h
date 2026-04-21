@@ -7,6 +7,7 @@
 #include "LocalOptimizer.h"
 #include "Instance.h"
 #include "TimeSpaceAStarPlanner.h"
+#include "../Types.h"
 
 namespace LNS {
 

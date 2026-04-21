@@ -1,7 +1,7 @@
 // LNS Planner Wrapper - For integration testing
 // This provides a simple interface to use LNS as an alternative planner
 
-#include "../../inc/LNS/GlobalManager.h"
+#include "LNS/GlobalManager.h"
 #include "../../inc/SharedEnv.h"
 #include <iostream>
 #include <vector>
