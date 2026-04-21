@@ -317,3 +317,69 @@ M1????constraint-based A*,???:
 - ??????
 
 _Last updated: 2026-04-21 16:55 GMT+8_
+
+---
+
+## 2026架构重大变化 (2026-04-21 19:30)
+
+### 重大发现：我的理解完全错误！
+
+**错误**：我以为"冠军每步replan，我们50步replan一次"，这是瞎编的差距。
+
+**真相**：Dual-Timescale Architecture是比赛本身的设计，不是冠军的创新。
+
+### 2026架构时间线
+
+**V3.0.0 (2026-03-13)** - 架构重构：
+- Executor组件 - 分离planning和execution
+- Runtime delay generation via `delayConfig`
+- Agent footprint (safety bubbles) 碰撞检测
+- Multistep/staged planner execution
+
+**V3.1.0 (2026-04-11)** - 改进：
+- Python接口层
+- 执行管道和共享环境同步改进
+- 修复delayed和windowed execution下的action validation问题
+
+### Executor机制（重要！）
+
+**我们的Executor** (`default_executor.cpp`):
+1. TPG (Temporal Dependency Graph) 协调agent执行顺序
+2. `mcp()` 函数决定GO/STOP：
+   - 如果agent是TPG队列中下一个位置的第一名 → GO
+   - 否则 → STOP
+3. **模拟时假设"no delay"**（注释：`//simulate with mcp (no delay)`）
+4. Delay由simulator处理，executor只管协调
+
+**冠军的Executor**: 代码里**没有executor.cpp**！他们用start-kit的default_executor。
+
+**结论**：Executor代码基本相同，差距在**Planner**！
+
+### Planner流程分析
+
+**我们的planner (`planner.cpp`)**: 
+1. Step 0: 
+   - `setup_multistep_episode_state()`
+   - `update_guide_paths_once_for_multistep()` → guide paths + frank_wolfe + ConflictRepair
+2. Steps 0 to num_steps-1:
+   - 每次调用 `run_multistep_pibt_once()` (causalPIBT)
+   - **Step 0之后不再更新guide paths和运行FW**
+
+**num_steps = min_plan_steps = window_size**
+
+```cpp
+min_plan_steps = (int)(env->min_planner_communication_time/(env->action_time*env->max_counter)) + 1;
+```
+
+### 关键发现
+
+1. **我们用causalPIBT** - 不是普通PIBT（line 299: `causalPIBT(i,-1,...)`）
+2. **我们没有higher_id exception** - 已验证这比冠军的更好
+3. **我们的executor和冠军基本相同** - 都用start-kit的default_executor
+4. **差距在Planner**：guide path质量和更新策略
+
+### 待研究问题
+
+1. **为什么guide path在window内stale？** - 这是否是性能瓶颈？
+2. **min_planner_communication_time是多少？** - 决定window大小
+3. **为什么champion能到4.0+？** - 他们的guide path更新策略是什么？
