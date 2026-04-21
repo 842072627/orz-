@@ -268,6 +268,23 @@ class PathTable {
 - 集成代码已添加，待调试
 - LNS组件位置: `src/my_planner/LNS/` (~27KB)
 
+### 已验证事实
+- Baseline: total=1.652 (commit d866970, MD5 F4DF65E8F10C2A68D19B40EC9F1E1847)
+- LNS集成代码(9878a44): total=1.583 (MD5 90D8ACD654FB318CC5A3C906A4645EEC)
+- **差异7%，LNS集成代码本身导致性能下降，即使USE_LNS=false**
+
+### 问题根因分析
+LNS集成代码可能的问题：
+1. 添加了#include "LNS/GlobalManager.h"，可能引入了不需要的代码
+2. 添加了static std::shared_ptr lns_manager，可能改变了内存布局
+3. update_guide_paths_with_lns函数存在但未使用，可能编译器优化产生了副作用
+4. chrono和iostream的引入可能影响了某些行为
+
+### 候选修复方案
+1. **最小化修改**：只添加必要的USE_LNS开关，不添加static变量
+2. **完全隔离**：LNS代码完全放在单独的cpp文件，通过条件编译控制
+3. **回归测试**：逐步添加代码，测试每步的影响
+
 ---
 
-_Last updated: 2026-04-21 15:20 GMT+8 - Day 7 LNS集成进行中_
+_Last updated: 2026-04-21 15:30 GMT+8 - 问题分析完成_
