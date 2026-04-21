@@ -378,8 +378,59 @@ min_plan_steps = (int)(env->min_planner_communication_time/(env->action_time*env
 3. **我们的executor和冠军基本相同** - 都用start-kit的default_executor
 4. **差距在Planner**：guide path质量和更新策略
 
-### 待研究问题
+### Champion的PLNS架构（真正差距！）
 
-1. **为什么guide path在window内stale？** - 这是否是性能瓶颈？
-2. **min_planner_communication_time是多少？** - 决定window大小
-3. **为什么champion能到4.0+？** - 他们的guide path更新策略是什么？
+**Champion的planner流程** (`my_planner/src/planner.cpp`):
+```cpp
+// 1. 生成初始多步actions
+auto multi_step_actions = causal_pibt->multi_step(window_size, ...);
+
+// 2. 用LNS优化路径
+auto actions = plns->solve(goal_locations, init_paths, time_limit);
+
+// 3. 返回单步actions
+```
+
+**关键发现**：
+1. **frank_wolfe被注释掉了！** (line 99-105)
+2. **用LaCAM2生成初始解** (`init_algo_name="LaCAM2"`)
+3. **用PLNS (Parallel LNS) 优化路径**
+4. **用PP (Pipe Planner) 重规划**
+
+**Champion的配置**：
+```cpp
+bool async = true;
+int neighbor_size = 8;
+destroy_heuristic destroy_strategy = RANDOMWALK;
+bool ALNS = true;
+double decay_factor = 0.01;
+double reaction_factor = 0.1;
+std::string init_algo_name = "LaCAM2";
+std::string replan_algo_name = "PP";
+int window_size_for_PATH = 15;
+```
+
+### 真正的架构差距
+
+| 组件 | Champion | 我们 | 差距影响 |
+|------|----------|------|----------|
+| 初始解算法 | **LaCAM2** | frank_wolfe | 巨大 |
+| 路径优化 | **PLNS** | frank_wolfe循环 | 巨大 |
+| 重规划 | **PP (Pipe Planner)** | PIBT | 大 |
+| 并行化 | **async LNS** | 单线程 | 大 |
+
+### LaCAM2是什么？
+LaCAM2 (Large Neighborhood Search for Conflict-Based Asymmetric Multi-agent path planning) 是一种比frank_wolfe更先进的初始解和路径优化算法。
+
+### PP (Pipe Planner)是什么？
+PP是一种基于管道的重规划算法，用于处理动态任务分配和路径更新。
+
+### 待验证假设
+
+**假设#1**: LaCAM2 + PLNS 比 frank_wolfe + PIBT 更适合throughput优化
+- 证据: Champion 4.0+ vs 我们 1.668
+- 需要验证: 是否有公开benchmark对比两者
+
+**假设#2**: 我们的frank_wolfe已经足够好，但缺少LaCAM2级别的初始解
+- 证据: frank_wolfe能产生可行解
+- 需要验证: LaCAM2在相同问题上的表现
