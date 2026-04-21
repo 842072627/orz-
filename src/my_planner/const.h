@@ -1,3 +1,4 @@
+
 #ifndef CONST_H
 #define CONST_H
 namespace MyPlanner
@@ -22,9 +23,6 @@ namespace MyPlanner
     // The default scheduler timelimit tolerance in ms.
     // The TaskScheduler will deduct this value from the time limit for default scheduler.
     const int SCHEDULER_TIMELIMIT_TOLERANCE = 10;
-
-    // A13: Use LNS instead of frank_wolfe for guide path optimization
-    const bool USE_LNS_FOR_GUIDE_PATHS = false;
 
 }
 #endif

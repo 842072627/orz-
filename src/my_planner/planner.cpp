@@ -20,7 +20,6 @@
 #include "pibt.h"
 #include "flow.h"
 #include "const.h"
-#include "LNS/GlobalManager.h"
 #include <chrono>
 #include <iostream>
 
@@ -55,9 +54,6 @@ namespace MyPlanner{
     std::vector<int> dummy_goals;
     TrajLNS trajLNS;
     std::mt19937 mt1;
-
-    // A13: LNS GlobalManager for guide path optimization
-    static std::shared_ptr<LNS::GlobalManager> lns_manager = nullptr;
 
     static State rollout_next_state(const State& state, Action action, const SharedEnvironment* env)
     {
@@ -166,76 +162,8 @@ namespace MyPlanner{
         }
     }
 
-    // A13: Update guide paths using LNS instead of frank_wolfe
-    static void update_guide_paths_with_lns(SharedEnvironment* env, TimePoint flow_end_time)
-    {
-        if (!lns_manager) return;
-        
-        // Update LNS with current state
-        std::vector<int> curr_locs(env->num_of_agents);
-        std::vector<int> curr_orients(env->num_of_agents);
-        std::vector<int> goal_locs(env->num_of_agents);
-        
-        for (int i = 0; i < env->num_of_agents; ++i) {
-            curr_locs[i] = env->curr_states[i].location;
-            curr_orients[i] = env->curr_states[i].orientation;
-            if (!env->goal_locations[i].empty()) {
-                goal_locs[i] = env->goal_locations[i].front().first;
-            } else {
-                goal_locs[i] = curr_locs[i];
-            }
-        }
-        
-        // Calculate remaining time for LNS
-        auto remaining_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-            flow_end_time - std::chrono::steady_clock::now()).count();
-        if (remaining_ms <= 0) return;
-        
-        lns_manager->update(curr_locs, curr_orients, goal_locs);
-        
-        // Run LNS
-        auto actions = lns_manager->run(remaining_ms);
-        
-        // Update trajLNS with LNS results
-        // Convert actions to trajectories
-        for (int i = 0; i < env->num_of_agents; ++i) {
-            if (require_guide_path[i] || trajLNS.trajs[i].empty()) {
-                // Get path from current state to goal
-                // For now, just create a simple trajectory based on LNS action
-                trajLNS.trajs[i].clear();
-                int curr_loc = curr_locs[i];
-                int curr_orient = curr_orients[i];
-                trajLNS.trajs[i].push_back(curr_loc);
-                
-                // Simple path: just follow the first action direction for a few steps
-                int action = actions[i];
-                for (int step = 0; step < 10; ++step) {
-                    int next_loc = curr_loc;
-                    if (action == 0) { // FW
-                        if (curr_orient == 0) next_loc = curr_loc + 1;
-                        else if (curr_orient == 1) next_loc = curr_loc + env->cols;
-                        else if (curr_orient == 2) next_loc = curr_loc - 1;
-                        else if (curr_orient == 3) next_loc = curr_loc - env->cols;
-                    }
-                    if (next_loc >= 0 && next_loc < (int)env->map.size() && !env->map[next_loc]) {
-                        curr_loc = next_loc;
-                    }
-                    trajLNS.trajs[i].push_back(curr_loc);
-                }
-            }
-        }
-        
-        std::cout << "[LNS] Guide paths updated" << std::endl;
-    }
-
     static void update_guide_paths_once_for_multistep(SharedEnvironment* env, TimePoint flow_end_time)
     {
-        // A13: Use LNS instead of frank_wolfe if enabled
-        if (USE_LNS_FOR_GUIDE_PATHS && lns_manager) {
-            update_guide_paths_with_lns(env, flow_end_time);
-            return;
-        }
-        
         // one-time guide-path update for goal-changed agents
         for (int i = 0; i < env->num_of_agents; i++)
         {
@@ -412,36 +340,6 @@ namespace MyPlanner{
 
             new (&trajLNS) TrajLNS(env, global_heuristictable, global_neighbors);
             trajLNS.init_mem();
-
-            // A13: Initialize LNS GlobalManager
-            if (USE_LNS_FOR_GUIDE_PATHS) {
-                std::vector<int> start_locs(env->num_of_agents);
-                std::vector<int> start_orients(env->num_of_agents);
-                std::vector<int> goal_locs(env->num_of_agents);
-                
-                for (int i = 0; i < env->num_of_agents; ++i) {
-                    start_locs[i] = env->curr_states[i].location;
-                    start_orients[i] = env->curr_states[i].orientation;
-                    if (!env->goal_locations[i].empty()) {
-                        goal_locs[i] = env->goal_locations[i].front().first;
-                    } else {
-                        goal_locs[i] = start_locs[i];
-                    }
-                }
-                
-                lns_manager = std::make_shared<LNS::GlobalManager>(
-                    env->map,
-                    env->rows,
-                    env->cols,
-                    env->num_of_agents,
-                    start_locs,
-                    start_orients,
-                    goal_locs,
-                    10,  // window_size
-                    8    // neighbor_size
-                );
-                std::cout << "[LNS] Initialized with " << env->num_of_agents << " agents" << std::endl;
-            }
 
             //assign intial priority to each agent
             std::shuffle(ids.begin(), ids.end(), mt1);
