@@ -20,6 +20,7 @@
 #include "pibt.h"
 #include "flow.h"
 #include "const.h"
+#include "LNS/LNSWrapper.h"
 #include <chrono>
 #include <iostream>
 
@@ -186,6 +187,11 @@ namespace MyPlanner{
         // one-time FW optimization in the flow allocation phase
         std::unordered_set<int> updated;
         frank_wolfe(trajLNS, updated, flow_end_time);
+
+        // A14: LNS optimization for guide paths
+        if (USE_LNS_FOR_GUIDE_PATHS) {
+            // TODO: integrate LNSWrapper
+        }
     }
 
     static void refresh_multistep_step_state(SharedEnvironment* env, std::vector<double>& local_priority)
