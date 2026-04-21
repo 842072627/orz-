@@ -1,6 +1,4 @@
-#ifndef DEFAULT_PLANNER_TYPES_H
-#define DEFAULT_PLANNER_TYPES_H
-
+#pragma once
 #include <limits.h>
 
 
@@ -116,7 +114,6 @@ namespace DefaultPlanner{
 	typedef std::vector<std::vector<int>> Neighbors;
 
 }
-#endif
 
 
 

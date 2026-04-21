@@ -1,5 +1,5 @@
-#ifndef DEFAULT_PLANNER_H
-#define DEFAULT_PLANNER_H
+#ifndef PLANNER
+#define PLANNER
 
 // Default planner baseline used by src/MAPFPlanner.cpp.
 //
