@@ -6,7 +6,7 @@
 #include "my_planner/const.h"
 
 // Default planner (starkit baseline)
-#include "../default_planner/planner.h"
+#include "planner.h"
 
 // Check if map should use our planner or default starkit planner
 // Our planner (MyPlanner) is optimized for fulfill/warehouse but crashes on room/maze/iron/orz
