@@ -25,7 +25,7 @@ namespace MyPlanner
     const int SCHEDULER_TIMELIMIT_TOLERANCE = 10;
 
     // A14: Use LNS for guide path optimization
-    const bool USE_LNS_FOR_GUIDE_PATHS = false;
+    const bool USE_LNS_FOR_GUIDE_PATHS = true;
 
 }
 #endif

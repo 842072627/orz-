@@ -190,7 +190,22 @@ namespace MyPlanner{
 
         // A14: LNS optimization for guide paths
         if (USE_LNS_FOR_GUIDE_PATHS) {
-            // TODO: integrate LNSWrapper
+            // Initialize LNS instance
+            static LNS::LNSWrapper lns_wrapper;
+            static bool lns_initialized = false;
+            
+            if (!lns_initialized) {
+                LNS::Instance inst(*env);
+                lns_wrapper.init(&inst, 10);
+                lns_initialized = true;
+            }
+            
+            // Calculate remaining time for LNS
+            auto remaining_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                flow_end_time - std::chrono::steady_clock::now()).count();
+            if (remaining_ms > 10) {
+                lns_wrapper.run(remaining_ms);
+            }
         }
     }
 
