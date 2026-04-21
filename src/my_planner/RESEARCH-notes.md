@@ -87,9 +87,16 @@ if (configs["scheduler"]=="matching") {
 | A14 | ConflictRepair后处理 | 1.668 (+1%) |
 | A23 | 扩展ConflictRepair到20 agents | 1.097 (-4%) |
 | A24 | Greedy matching scheduler | 1.612 (-3%) |
+| A25 | 冲突感知frank_wolfe排序 | 1.531 (-8%) |
 
-**结论**：ConflictRepair不是瓶颈，简单增加范围有害。
-Scheduler改成greedy matching也反而让性能下降。
+**结论**：所有小改动都失败，frank_wolfe + PIBT架构天花板 ≈ 1.6-1.7
+
+### A25失败分析
+按冲突数量排序agents反而让性能大幅下降（-11% fulfill）。
+可能原因：冲突最多的agents恰恰是最困难的，优先更新它们引入更多不稳定。
+
+**核心问题**：frank_wolfe优化SOC，但比赛评分是Throughput。
+这两个目标不一致，导致所有基于SOC优化的改进都无效。
 
 ---
 
