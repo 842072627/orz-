@@ -2,10 +2,10 @@
 #ifndef heuristics_hpp
 #define heuristics_hpp
 
-#include "Types.h"
+#include "my_Types.h"
 #include "utils.h"
 #include <queue>
-#include "TrajLNS.h"
+#include "my_TrajLNS.h"
 #include "search_node.h"
 
 namespace MyPlanner{

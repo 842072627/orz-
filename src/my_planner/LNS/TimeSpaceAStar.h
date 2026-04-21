@@ -4,7 +4,7 @@
 #include <unordered_set>
 #include <chrono>
 #include <random>
-#include "../my_planner/Types.h"
+#include "../my_planner/my_Types.h"
 #include "../my_planner/search_node.h"
 #include "../my_planner/heuristics.h"
 #include "Instance.h"

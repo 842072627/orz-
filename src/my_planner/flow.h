@@ -1,9 +1,9 @@
 
 #ifndef flow_hpp
 #define flow_hpp
-#include "Types.h"
+#include "my_Types.h"
 #include "search.h"
-#include "TrajLNS.h"
+#include "my_TrajLNS.h"
 #include "heuristics.h"
 
 #include <random>

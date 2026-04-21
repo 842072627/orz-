@@ -14,7 +14,7 @@
 #include "utils.h"
 #include "Memory.h"
 #include "search_node.h"
-#include "Types.h"
+#include "my_Types.h"
 #include <cassert>
 #include <iostream>
 

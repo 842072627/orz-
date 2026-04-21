@@ -1,7 +1,7 @@
 #pragma once
 #include <vector>
 #include <chrono>
-#include "../my_planner/Types.h"
+#include "../my_planner/my_Types.h"
 #include "../my_planner/search.h"
 #include "../my_planner/heuristics.h"
 #include "Instance.h"

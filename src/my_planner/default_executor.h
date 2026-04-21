@@ -15,7 +15,7 @@
 // Reference:
 //   Ma, H., Kumar, T. S., & Koenig, S. (2017). Multi-agent path finding with
 //   delay probabilities. AAAI Conference on Artificial Intelligence, Vol. 31.
-#include "Types.h"
+#include "my_Types.h"
 
 namespace MyPlanner{
 

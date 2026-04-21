@@ -7,10 +7,10 @@
 #include <unordered_set>
 #include <tuple>
 #include <cstdint>
-#include "Types.h"
+#include "my_Types.h"
 #include "utils.h"
 #include "heuristics.h"
-#include "TrajLNS.h"
+#include "my_TrajLNS.h"
 #include "utils.h"
 
 

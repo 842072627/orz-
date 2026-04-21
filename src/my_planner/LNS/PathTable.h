@@ -1,7 +1,7 @@
 #pragma once
 #include <vector>
 #include <set>
-#include "../Types.h"
+#include "../my_Types.h"
 
 #ifndef MAX_TIMESTEP
 #define MAX_TIMESTEP 10000

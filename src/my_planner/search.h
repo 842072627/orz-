@@ -2,7 +2,7 @@
 #ifndef search_hpp
 #define search_hpp
 
-#include "Types.h"
+#include "my_Types.h"
 #include "utils.h"
 #include "Memory.h"
 #include "heap.h"

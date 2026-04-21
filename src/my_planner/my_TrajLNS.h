@@ -1,7 +1,7 @@
 #ifndef TRAJ_LNS_H
 #define TRAJ_LNS_H
 
-#include "Types.h"
+#include "my_Types.h"
 #include "Memory.h"
 #include "search_node.h"
 #include "heap.h"
