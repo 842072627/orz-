@@ -464,3 +464,34 @@ LaCAM2的核心思想：
 1. 在frank_wolfe之后添加conflict repair（已有A14的ConflictRepair后处理）
 2. 研究为什么A14只提升1%而不是更多
 3. 尝试不同的neighborhood生成策略
+
+---
+
+## 新发现：SOC vs Throughput 优化目标不匹配！
+
+**关键发现**：
+1. frank_wolfe优化的是**SOC (Sum of Costs)** - `lns.soc`
+2. 比赛评分是**Throughput (tasks/makespan)**
+3. **这两个目标不完全一致！**
+
+**证据**：
+```cpp
+// flow.cpp
+lns.soc -= lns.trajs[agent].size() - 1;  // SOC减
+lns.soc += lns.trajs[agent].size() - 1;  // SOC加
+```
+
+**问题分析**：
+- SOC优化 -> 最小化总路径长度
+- Throughput优化 -> 最大化单位时间完成任务数
+- 如果为了避免冲突而走更长的路，SOC增加但可能影响throughput
+
+**A14 ConflictRepair效果有限的原因**：
+- 只修复5个agents的冲突（太少）
+- 只从timestep 0开始（窗口内会有更多冲突）
+- 贪心修复不是最优
+
+**新A方向候选**：
+1. 研究是否应该优化throughput而不是SOC
+2. 改进ConflictRepair到更多agents和更长时间窗口
+3. 添加makespan优化到frank_wolfe目标函数
