@@ -86,8 +86,10 @@ if (configs["scheduler"]=="matching") {
 |------|------|------|
 | A14 | ConflictRepair后处理 | 1.668 (+1%) |
 | A23 | 扩展ConflictRepair到20 agents | 1.097 (-4%) |
+| A24 | Greedy matching scheduler | 1.612 (-3%) |
 
 **结论**：ConflictRepair不是瓶颈，简单增加范围有害。
+Scheduler改成greedy matching也反而让性能下降。
 
 ---
 
