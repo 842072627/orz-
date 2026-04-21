@@ -199,11 +199,27 @@ class PathTable {
 };
 ```
 
-### Day 2 待办
-- [ ] 创建NeighborGenerator骨架
-- [ ] 创建LocalOptimizer骨架
+### Day 2 里程碑 ✅
+- [x] NeighborGenerator.h骨架完成（2269字节）
+- [x] LocalOptimizer.h骨架完成（2337字节）
+- [x] 项目编译成功
+- [x] Baseline验证: total=1.652
+
+### LNS组件实现状态
+| 组件 | 文件 | 状态 |
+|------|------|------|
+| PathTable | `inc/LNS/PathTable.h` | ✅ 骨架完成 |
+| NeighborGenerator | `inc/LNS/NeighborGenerator.h` | ✅ 骨架完成 |
+| LocalOptimizer | `inc/LNS/LocalOptimizer.h` | ✅ 骨架完成 |
+| Instance | - | 待定义 |
+| GlobalManager | - | 待定义 |
+| TimeSpaceAStar | - | 待定义 |
+
+### Day 3 待办
+- [ ] 定义Instance类（或包装SharedEnvironment）
+- [ ] 创建GlobalManager骨架
 - [ ] 集成到planner.cpp测试
 
 ---
 
-_Last updated: 2026-04-21 14:25 GMT+8 - Day 1里程碑完成_
+_Last updated: 2026-04-21 14:35 GMT+8 - Day 2里程碑完成_
