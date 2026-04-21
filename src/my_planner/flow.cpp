@@ -112,6 +112,14 @@ void frank_wolfe(TrajLNS& lns,std::unordered_set<int>& updated, TimePoint timeli
         return a.rand > b.rand;
     });
 
+    // A41: Use adaptive deadline for update_traj
+    // Calculate remaining time and allocate a fair share per agent
+    auto now = std::chrono::steady_clock::now();
+    auto remaining_ms = std::chrono::duration<double, std::milli>(timelimit - now).count();
+    // Give each update_traj a budget of remaining_time / num_agents, but at least 5ms
+    int agent_count = lns.env->num_of_agents;
+    int deadline_per_agent = std::max(5, (int)(remaining_ms / agent_count));
+    
     int count=0;
     int a, index;
     while (std::chrono::steady_clock::now() < timelimit){
@@ -124,9 +132,12 @@ void frank_wolfe(TrajLNS& lns,std::unordered_set<int>& updated, TimePoint timeli
         std::vector<int> old_traj = lns.trajs[a];
         if (!lns.trajs[a].empty())
             remove_traj(lns, a);
-        // Team_Kitty_Knight: no deadline in frank_wolfe update_traj - full A* search
-        if (!update_traj(lns, a, nullptr)){
-            // Team_Kitty_Knight: no break on failure, restore and continue
+        
+        // A41: Pass adaptive deadline to prevent any single A* from taking too long
+        TimePoint agent_deadline = std::chrono::steady_clock::now() + 
+            std::chrono::milliseconds(deadline_per_agent);
+        if (!update_traj(lns, a, &agent_deadline)){
+            // Restore and continue
             lns.trajs[a] = old_traj;
             if (!old_traj.empty()){
                 add_traj(lns,a);
