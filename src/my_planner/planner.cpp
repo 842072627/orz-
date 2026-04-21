@@ -21,6 +21,7 @@
 #include "flow.h"
 #include "const.h"
 #include "LNS/LNSWrapper.h"
+#include "LNS/ConflictRepair.h"
 #include <chrono>
 #include <iostream>
 
@@ -190,22 +191,32 @@ namespace MyPlanner{
 
         // A14: LNS optimization for guide paths
         if (USE_LNS_FOR_GUIDE_PATHS) {
-            // Initialize LNS instance
-            static LNS::LNSWrapper lns_wrapper;
-            static bool lns_initialized = false;
+            // Use ConflictRepair to fix guide path conflicts after frank_wolfe
+            static LNS::ConflictRepair conflict_repair(env->rows, env->cols, 50);
             
-            if (!lns_initialized) {
-                LNS::Instance inst(*env);
-                lns_wrapper.init(&inst, 10);
-                lns_initialized = true;
+            // Get guide paths from trajLNS
+            auto& paths = trajLNS.trajs;
+            
+            // Select a small neighborhood to repair (top 5 congested agents)
+            std::vector<int> agent_ids;
+            for (int i = 0; i < env->num_of_agents && (int)agent_ids.size() < 5; i++) {
+                if (!paths[i].empty()) {
+                    agent_ids.push_back(i);
+                }
             }
             
-            // Calculate remaining time for LNS
-            auto remaining_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                flow_end_time - std::chrono::steady_clock::now()).count();
-            if (remaining_ms > 10) {
-                lns_wrapper.run(remaining_ms);
+            // Get goals
+            std::vector<int> goals;
+            for (int i = 0; i < env->num_of_agents; i++) {
+                if (env->goal_locations[i].empty()) {
+                    goals.push_back(-1);
+                } else {
+                    goals.push_back(env->goal_locations[i][0].first);
+                }
             }
+            
+            // Repair conflicts
+            conflict_repair.repairNeighbor(paths, agent_ids, goals, 0);
         }
     }
 
