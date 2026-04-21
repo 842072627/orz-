@@ -1,7 +1,7 @@
 # MAPF Deep Research Notes
 
 > 深度研究笔记 - 沉淀真正的知识，不是跑测试记录
-> Last updated: 2026-04-21 12:30 GMT+8
+> Last updated: 2026-04-21 14:00 GMT+8
 
 ---
 
@@ -13,71 +13,39 @@
 
 ---
 
-## 冠军架构解析
+## 冠军架构解析（最新发现）
 
-### 1. Flow-guided A* (不是 TimeSpaceA*!)
+### 真正的架构：LNS主循环，不是LaCAM2！
 
-**我之前误解了TimeSpaceA*** - 冠军的astar不是3D时空搜索！
+**我之前的误解**：以为冠军用LaCAM2作为主循环
 
-**真正的算法**：
-```
-f = g + h + op_flow + all_vertex_flow
-```
+**真相**：
+- LaCAM2只是**初始化算法(initAlgo)**，不是主循环
+- **真正的主循环是LNS**（Large Neighborhood Search）
+- 配置：`lifelong_solver_name: "LNS"` (n_agents≥600时)
 
-其中：
-- `g` = 路径长度（从起点的步数）
-- `h` = 启发式（到目标的曼哈顿距离）
-- `op_flow` = 反向流量（反向穿过这条边的agent数）
-- `all_vertex_flow` = 经过这个顶点的总流量
+### LNS配置详解
 
-**关键公式**（search.cpp第86行）：
-```cpp
-temp_op = ( (flow[curr_id].d[d]+1) * flow[next].d[(d+2)%4]);
-// 如果我们向东(d=0)，检查下一个位置有多少agent想向西(d=2)
-```
-
-**搜索仍是2D空间**，但启发式被动态flow信息丰富。
-
-### 2. GlobalManager = LNS协调器
-
-**不是简单的"全局状态管理"**，而是Large Neighborhood Search的并行协调框架：
-
-```cpp
-class GlobalManager {
-    std::vector<std::shared_ptr<NeighborGenerator>> neighbor_generators;
-    std::vector<std::shared_ptr<LocalOptimizer>> local_optimizers;
-    PathTable path_table;                    // 路径缓存表
-    std::vector<updating_queues>;             // 并行更新队列
-    float sum_of_costs;                      // 全局成本
-    int num_of_failures;                     // 失败计数
-};
+```json
+"LNS": {
+    "initAlgo": "LaCAM2",        // 用LaCAM2初始化
+    "replanAlgo": "PP",           // 用PP(PIBT)重规划
+    "execution_window": 1,        // 每步执行！
+    "pibtWindow": 5,              // PIBT窗口=5，类似我们的guide path
+    "neighborSize": 8,            // LNS邻居大小
+    "sipp": true,                 // 使用SIPP作为单agent求解器
+}
 ```
 
-**LNS流程**：
-1. GlobalManager协调多个agent子集(neighborhood)的并行重规划
-2. 每个LocalOptimizer处理一个neighborhood
-3. 路径缓存在PathTable中共享
-4. 全局成本sum_of_costs被追踪用于判断收敛
+### 关键参数对比
 
-**我们的差距**：我们的planner是"单线程"的frank_wolfe循环，冠军是"多线程"LNS并行。
-
-### 3. PathTable = 冲突检测表
-
-```cpp
-class PathTable {
-    vector<vector<int>> table; // [location][timestep] = agent_id
-    vector<int> goals;         // [location] = timestep到达
-
-    getConflictingAgents(agent_id, loc, to_time);  // O(1)查询冲突
-    constrained(from, to, to_time);                // 检查边是否被占用
-};
-```
-
-**这如何用于LNS**：
-1. 每个LocalOptimizer重规划一个neighborhood
-2. PathTable记录当前所有agent的位置/路径
-3. 重规划时查询PathTable避免产生新冲突
-4. 更新后写回PathTable供其他neighborhood使用
+| 参数 | 冠军 | 我们 | 意义 |
+|------|------|------|------|
+| execution_window | **1** | 5 (window_size) | **每步replan！** |
+| replanAlgo | PP (PIBT) | PIBT | 相同 |
+| pibtWindow | 5 | 5 (DEV-336) | 相同机制 |
+| main loop | **LNS** | frank_wolfe | **本质差距** |
+| init | LaCAM2 | frank_wolfe | LaCAM2更强 |
 
 ---
 
@@ -85,26 +53,30 @@ class PathTable {
 
 | 组件 | 冠军 | 我们 | 性能影响 | 实现难度 |
 |------|------|------|----------|----------|
-| LNS并行协调 | ✅ | ❌ (单线程FW) | **巨大** | 极高 |
-| PathTable | ✅ | ❌ | **大** | 高 |
-| single-step plan | ✅ (每步replan) | ❌ (multi-step window) | 中 | 中 |
-| rand() tie-breaking | ✅ | ❌ (deterministic) | 中 | 低 |
-| higher_id exception | ✅ (有) | ❌ (无，更好) | 已验证我们更好 | - |
-| flow-guided A* | ✅ | ✅ (已有) | - | - |
-| 启发式数据结构 | vector | unordered_map | 中 | 低 |
+| **主循环** | LNS (每步replan) | frank_wolfe (多步window) | **巨大** | 极高 |
+| 初始化 | LaCAM2 | frank_wolfe | 中 | 高 |
+| 单agent求解 | SIPP | A* | 中 | 中 |
+| 冲突避免 | LNS neighbor | PIBT | 中 | 高 |
+| guide path | pibtWindow=5 | DEV-336 | - | 已实现 |
 
 ---
 
-## 已验证事实
+## 核心发现：frank_wolfe天花板
 
-1. **frank_wolfe essential**: 去掉后fulfill -71%
-2. **LNS不能叠加在frank_wolfe后面**: 目标冲突
-3. **is_large_map检查有道理**: 移除后fulfill -17%
-4. **DEV-336 (deviation>5 recompute)**: 是当前最优的guide path更新策略
-5. **threshold=5是经验最优**: 太高(2)或太低(3)都更差
-6. **window_size不能随便改**: 减少导致fulfill -83%
-7. **PIBT higher_id exception**: 我们没有反而更好
-8. **rand() tie-breaking**: 比deterministic轻微改善
+**frank_wolfe作为主循环的天花板 ≈ 1.6-1.7**
+
+**原因**：
+- frank_wolfe在plan()开始时分配flow并优化路径
+- executor的window机制让guide path在多步内保持stale
+- DEV-336通过deviation>5来缓解stale问题，但不是根本解决
+- **冠军的架构是每步LNS重规划，不是multi-step window**
+
+**所有"叠加LNS"尝试都失败**：
+- A1-A7: 全部失败
+- A8: LNS destroy-repair循环 - total=1.620
+- A9: PIBT higher_id - total=1.581
+- A10: guide path 5→2 - total=1.590
+- **A11: 冲突检测guide path修复 - 灾难性失败 (fulfill -89%)**
 
 ---
 
@@ -115,36 +87,57 @@ class PathTable {
 | A2 (LNS替换FW) | fulfill=0.338 | frank_wolfe是必须的 |
 | B1 (window_size-1) | fulfill -83% | TPG依赖被破坏 |
 | A7 (移除is_large_map) | fulfill -17% | is_large_map有道理 |
+| A11 (冲突检测guide path) | fulfill -89% | **破坏了PIBT决策的一致性** |
 
 ---
 
-## frank_wolfe天花板
+## A11失败根因分析
 
-**核心发现**：frank_wolfe主循环架构天花板 ≈ 1.6-1.7
+**失败的操作**：在`refresh_multistep_step_state`中检测冲突并修改guide path
 
-**原因**：
-- frank_wolfe在plan()开始时分配flow并优化路径
-- executor的window机制让guide path在多步内保持stale
-- DEV-336通过deviation>5来缓解stale问题，但不是根本解决
-- 冠军的架构是每步plan + 每步replan，不是multi-step window
+**为什么失败**：
+1. PIBT在step>0时使用当前的guide path做决策
+2. 如果在PIBT决策后修改guide path，会导致不一致
+3. PIBT假设guide path在整个step期间保持不变
+4. 修改guide path会破坏这个假设，导致死锁或冲突
 
-**所有"叠加LNS"尝试都失败**：
-- A1-A7: 全部失败
-- A8: LNS destroy-repair循环 - total=1.620
-- A9: PIBT higher_id - total=1.581
-- A10: guide path 5→2 - total=1.590
+**教训**：
+- **不要在PIBT决策后修改guide path**
+- guide path的修改必须在PIBT运行之前完成
+- 冲突解决应该是PIBT内部机制，而不是事后修复
 
 ---
 
-## 下一步研究方向
+## 已验证事实
 
-**不是放弃** - 而是承认frank_wolfe天花板的现实，聚焦可改进的方向：
+1. **frank_wolfe essential**: 去掉后fulfill -71%
+2. **LNS不能叠加在frank_wolfe后面**: 目标冲突（frank_wolfe优化SOC，LNS减少冲突）
+3. **is_large_map检查有道理**: 移除后fulfill -17%
+4. **DEV-336 (deviation>5 recompute)**: 是当前最优的guide path更新策略
+5. **threshold=5是经验最优**: 太高(2)或太低(3)都更差
+6. **window_size不能随便改**: 减少导致fulfill -83%
+7. **PIBT higher_id exception**: 我们没有反而更好
+8. **rand() tie-breaking**: 比deterministic轻微改善
+9. **LaCAM2只是initAlgo**: 真正主循环是LNS，每步replan
+10. **不要在PIBT决策后修改guide path**: 会导致灾难性的不一致
 
-1. **PIBT决策质量** - 启发式准确性、tie-breaking策略
-2. **启发式更新频率** - Dev-336是补丁，不是根本解决
-3. **任务分配质量** - scheduler的贪心策略
+---
 
-**真正需要的是**：单步plan + 每步replan架构 - 但这需要完全重写executor
+## A11方向：结论
+
+**A11尝试失败的根本原因**：
+- 试图在PIBT决策后修改guide path
+- 这破坏了PIBT的一致性假设
+- 导致fulfill从1.142暴跌到0.129
+
+**真正需要做的**：
+- 要么在PIBT决策前修改guide path
+- 要么完全重构为LNS主循环
+
+**当前状态**：
+- 所有小改动都已验证失败
+- 架构限制已确认
+- 继续小改动没有意义
 
 ---
 
@@ -155,5 +148,7 @@ class PathTable {
 - commit `519f390` - PathTable = conflict detection
 - commit `e0927dd` - single-step vs multi-step architecture
 - commit `5ece99f` - causalPIBT comparison + heuristics data structure
+- commit `????` - **LaCAM2只是initAlgo，LNS才是主循环**
+- commit `????` - **A11尝试失败：在PIBT后修改guide path导致灾难**
 
-_Last updated: 2026-04-21 12:30 GMT+8_
+_Last updated: 2026-04-21 14:00 GMT+8_
