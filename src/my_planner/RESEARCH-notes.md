@@ -231,11 +231,29 @@ class PathTable {
 | GlobalManager | `inc/LNS/GlobalManager.h` | ✅ 骨架完成 | 5397 |
 | TimeSpaceAStar | - | 待实现 | - |
 
-### Day 4 待办
-- [ ] 实现TimeSpaceAStarPlanner（或使用现有A*）
-- [ ] 集成到planner.cpp测试
+### Day 4 里程碑 ✅
+- [x] TimeSpaceAStarPlanner.h完成（4411字节）
+- [x] LocalOptimizer集成TimeSpaceAStar
+- [x] GlobalManager集成LocalOptimizer
+- [x] 项目编译成功
+- [x] Baseline验证: total=1.652
+
+### LNS组件实现状态 (6/6 完成!)
+| 组件 | 文件 | 状态 | 字节 |
+|------|------|------|------|
+| PathTable | `inc/LNS/PathTable.h` | ✅ 完成 | 3463 |
+| NeighborGenerator | `inc/LNS/NeighborGenerator.h` | ✅ 完成 | 2269 |
+| LocalOptimizer | `inc/LNS/LocalOptimizer.h` | ✅ 完成 | ~2800 |
+| Instance | `inc/LNS/Instance.h` | ✅ 完成 | 4362 |
+| GlobalManager | `inc/LNS/GlobalManager.h` | ✅ 完成 | 5639 |
+| TimeSpaceAStarPlanner | `inc/LNS/TimeSpaceAStarPlanner.h` | ✅ 完成 | 4411 |
+| **总计** | | **6/6** | **~23KB** |
+
+### Day 5 待办
+- [ ] 集成LNS到planner.cpp
 - [ ] 端到端测试
+- [ ] 验证LNS确实工作
 
 ---
 
-_Last updated: 2026-04-21 14:45 GMT+8 - Day 3里程碑完成_
+_Last updated: 2026-04-21 14:50 GMT+8 - Day 4里程碑完成_

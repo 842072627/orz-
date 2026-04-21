@@ -26,6 +26,7 @@ public:
     
     // State
     std::vector<std::vector<std::pair<int, int>>> paths;  // Current paths for all agents
+    std::vector<int> goal_locs;  // Goal locations for all agents
     float sum_of_costs = 0;
     int num_failures = 0;
     
@@ -47,7 +48,8 @@ public:
         int neighbor_size = 8
     ) : num_of_agents(num_agents),
         window_size_for_PATH(window_size),
-        neighbor_size(neighbor_size)
+        neighbor_size(neighbor_size),
+        goal_locs(goal_locs)
     {
         // Create instance
         instance = std::make_shared<Instance>();
@@ -55,7 +57,7 @@ public:
         instance->num_of_cols = num_cols;
         instance->map_size = map.size();
         instance->my_map = map;
-        instance->num_of_agents = num_agents;
+        instance->num_of_agents = num_of_agents;
         instance->start_locations = start_locs;
         instance->start_orientations = start_orients;
         instance->goal_locations = goal_locs;
@@ -66,9 +68,10 @@ public:
         // Initialize components
         neighbor_generator = NeighborGenerator(num_agents, neighbor_size, 0);
         local_optimizer = LocalOptimizer(num_agents, window_size, 0);
+        local_optimizer.init(instance, goal_locs);
         
         // Initialize paths
-        paths.resize(num_of_agents);
+        paths.resize(num_agents);
     }
     
     // Run LNS main loop
@@ -146,11 +149,13 @@ public:
     void update(
         const std::vector<int>& curr_locs,
         const std::vector<int>& curr_orients,
-        const std::vector<int>& goal_locs
+        const std::vector<int>& goal_locs_new
     ) {
         instance->start_locations = curr_locs;
         instance->start_orientations = curr_orients;
-        instance->goal_locations = goal_locs;
+        instance->goal_locations = goal_locs_new;
+        goal_locs = goal_locs_new;
+        local_optimizer.updateGoals(goal_locs_new);
         
         // Update paths to start from current locations
         for (int i = 0; i < num_of_agents; ++i) {
