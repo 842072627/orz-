@@ -1,13 +1,13 @@
 # MAPF Deep Research Notes
 
 > 深度研究笔记 - 沉淀真正的知识，不是跑测试记录
-> Last updated: 2026-04-21 14:00 GMT+8
+> Last updated: 2026-04-21 07:42 GMT+8
 
 ---
 
 ## 核心问题
 
-**Q: 为什么我们的代码 (total≈1.65) 与冠军 (total≈4.0) 差距 2.4x？**
+**Q: 为什么我们的代码 (total≈1.61) 与冠军 (total≈4.0) 差距 2.5x？**
 
 **A: 架构设计差异** - 不是参数调优能解决的
 
@@ -15,75 +15,184 @@
 
 ## 冠军架构解析
 
-### 真正的架构：LNS主循环
+### 1. Flow-guided A* (不是 TimeSpaceA*!)
 
-**关键发现**：冠军的Dist2Path代码被注释掉了！
+**我之前误解了TimeSpaceA*** - 冠军的astar不是3D时空搜索！
 
-```cpp
-// Dist2PathHeuristicTable.h 第34-39行
-// if (!lns.traj_dists.empty() && !lns.traj_dists[agent_idx].empty())
-//     min_heuristic = get_dist_2_path(lns.traj_dists[agent_idx], lns.env, loc, &(lns.neighbors));
-// else
+**真正的算法**：
+```
+f = g + h + op_flow + all_vertex_flow
 ```
 
-**冠军只使用静态启发式表**，没有使用Dist2Path！
+其中：
+- `g` = 路径长度（从起点的步数）
+- `h` = 启发式（到目标的曼哈顿距离）
+- `op_flow` = 反向流量（反向穿过这条边的agent数）
+- `all_vertex_flow` = 经过这个顶点的总流量
 
-### 架构差距总结
+**关键公式**（search.cpp第86行）：
+```cpp
+temp_op = ( (flow[curr_id].d[d]+1) * flow[next].d[(d+2)%4]);
+// 如果我们向东(d=0)，检查下一个位置有多少agent想向西(d=2)
+```
 
-| 组件 | 冠军 | 我们 | 关键差异 |
-|------|------|------|----------|
-| 主循环 | LNS | frank_wolfe | **根本差异** |
-| 启发式 | 静态表 | Dist2Path | 我们的更优（但没用） |
-| 重规划 | 每步完全重规划 | guide path stale | **根本差异** |
-| 冲突处理 | LNS neighborhood repair | PIBT因果链 | 不同机制 |
+**搜索仍是2D空间**，但启发式被动态flow信息丰富。
 
-### 核心结论
+### 2. GlobalManager = LNS协调器
 
-**启发式不是瓶颈**！冠军甚至没用Dist2Path，但他们的LNS主循环架构让他们的性能是我们的2.4倍。
+**不是简单的"全局状态管理"**，而是Large Neighborhood Search的并行协调框架：
+
+```cpp
+class GlobalManager {
+    std::vector<std::shared_ptr<NeighborGenerator>> neighbor_generators;
+    std::vector<std::shared_ptr<LocalOptimizer>> local_optimizers;
+    PathTable path_table;                    // 路径缓存表
+    std::vector<updating_queues>;             // 并行更新队列
+    float sum_of_costs;                      // 全局成本
+    int num_of_failures;                     // 失败计数
+};
+```
+
+**LNS流程**：
+1. GlobalManager协调多个agent子集(neighborhood)的并行重规划
+2. 每个LocalOptimizer处理一个neighborhood
+3. 路径缓存在PathTable中共享
+4. 全局成本sum_of_costs被追踪用于判断收敛
+
+**我们的差距**：我们的planner是"单线程"的frank_wolfe循环，冠军是"多线程"LNS并行。
+
+### 3. PathTable = 冲突检测表
+
+```cpp
+class PathTable {
+    vector<vector<int>> table; // [location][timestep] = agent_id
+    vector<int> goals;         // [location] = timestep到达
+
+    getConflictingAgents(agent_id, loc, to_time);  // O(1)查询冲突
+    constrained(from, to, to_time);                // 检查边是否被占用
+};
+```
+
+**这如何用于LNS**：
+1. 每个LocalOptimizer重规划一个neighborhood
+2. PathTable记录当前所有agent的位置/路径
+3. 重规划时查询PathTable避免产生新冲突
+4. 更新后写回PathTable供其他neighborhood使用
+
+### 4. single-step vs multi-step 架构真相
+
+**关键发现**：
+
+```cpp
+// Champion的plan() - 单步
+void plan(int time_limit, vector<Action> & actions, SharedEnvironment* env) {
+    // 单步actions，下个timestep立即再次调用plan()
+    update_traj(...) + frank_wolfe(...) + PIBT(...)
+}
+
+// 我们的plan() - 多步 via executor window
+void plan(int time_limit, vector<vector<Action>> & actions,
+         SharedEnvironment* env, int num_steps) {
+    // 多步actions，通过executor的window机制分解执行
+    // window_size = min_planner_communication_time / ...
+}
+```
+
+**我们的executor机制**：
+- executor维护一个window_size的action窗口
+- 每次next_command()只发送GO/STOP一个命令
+- 通过TPG（Temporal Dependency Graph）协调agent执行顺序
+
+**所以实际上也是每步协调的**——但guide path在window内部不更新。
+
+### 5. causalPIBT Tie-Breaking详细对比
+
+**关键差异**：
+
+1. **Champion有higher_id exception (line 67-69)**:
+```cpp
+if (higher_id != -1 && prev_decision[next.location] == higher_id){
+    continue;  // skip if prev occupant is higher priority
+}
+```
+我们**没有**这个检查——我们更灵活。
+
+2. **occupied检查**:
+```cpp
+// Champion: 无例外
+if(occupied[next.location]) continue;
+
+// 我们: 第一个agent可以stay at prev_loc
+if(occupied[next.location] && !(higher_id == -1 && prev_loc == next.location))
+    continue;
+```
+
+3. **tie-breaking**:
+```cpp
+// Champion: rand() tie-breaking
+return a.tie_breaker < b.tie_breaker;
+
+// 我们: deterministic closer location
+int a_dist = std::abs(a.location - prev_loc);
+int b_dist = std::abs(b.location - prev_loc);
+if (a_dist != b_dist) return a_dist < b_dist;
+return a.location < b.location;
+```
+
+**已验证**：我们的PIBT版本（无higher_id exception）比冠军的好。
+
+### 6. frank_wolfe循环
+
+**我们的版本**:
+```cpp
+while (std::chrono::steady_clock::now() < timelimit){
+    // 遍历所有agent，按deviation排序
+    if (!update_traj(lns, a, nullptr)) { // 无deadline
+        lns.trajs[a] = old_traj;
+        continue; // 失败继续
+    }
+}
+```
+
+**冠军的版本**：基本相同。关键都是：无deadline update_traj + 失败继续。
+
+### 7. 启发式数据结构对比
+
+**Champion**: `std::vector<HeuristicTable> global_heuristictable;`
+- O(1)访问: `heuristics[goal]` (数组索引)
+- 预分配，大小 = map_size
+- 缓存友好
+
+**Our**: `std::unordered_map<int, HeuristicTable> global_heuristictable;`
+- O(1)平均: `heuristics.find(goal)` (哈希查找)
+- 动态分配，有哈希冲突开销
+- 缓存不友好
+
+**性能影响**: 中等。不是核心差距，但影响启发式查找速度。
 
 ---
 
-## 灾难性失败记录
+## 架构差距总结
 
-| 方向 | 结果 | 原因 |
-|------|------|------|
-| A2 (LNS替换FW) | fulfill=0.338 | frank_wolfe是必须的 |
-| B1 (window_size-1) | fulfill -83% | TPG依赖被破坏 |
-| A7 (移除is_large_map) | fulfill -17% | is_large_map有道理 |
-| A11 | fulfill -89% | **在PIBT决策后修改guide path** |
-| A12 | fulfill -100% | **O(n)遍历导致超时/死锁** |
-
----
-
-## 已验证事实
-
-1. **frank_wolfe essential**: 去掉后fulfill -71%
-2. **LNS不能叠加在frank_wolfe后面**: 目标冲突
-3. **is_large_map检查有道理**: 移除后fulfill -17%
-4. **DEV-336**: 当前最优的guide path更新策略
-5. **threshold=5是经验最优**: 太高或太低都更差
-6. **window_size不能随便改**: 减少导致fulfill -83%
-7. **启发式不是瓶颈**: 冠军甚至没用Dist2Path
-8. **不要在PIBT决策后修改guide path**: 灾难
-9. **不要在PIBT排序中遍历整个map**: 灾难
-10. **frank_wolfe天花板 ≈ 1.6-1.7**: 架构限制
+| 组件 | 冠军 | 我们 | 性能影响 | 实现难度 |
+|------|------|------|----------|----------|
+| LNS并行协调 | ✅ | ❌ (单线程FW) | **巨大** | 极高 |
+| PathTable | ✅ | ❌ | **大** | 高 |
+| single-step plan | ✅ (每步replan) | ❌ (multi-step window) | 中 | 中 |
+| rand() tie-breaking | ✅ | ❌ (deterministic) | 中 | 低 |
+| higher_id exception | ✅ (有) | ❌ (无，更好) | 已验证我们更好 | - |
+| flow-guided A* | ✅ | ✅ (已有) | - | - |
+| 启发式数据结构 | vector | unordered_map | 中 | 低 |
 
 ---
 
-## 核心结论
+## 我的行为规则
 
-**frank_wolfe + PIBT架构的天花板 ≈ 1.6-1.7**
-
-唯一能突破的方向：**LNS主循环架构重构**
-
-但这需要：
-1. 数周工作时间
-2. 集成LaCAM2初始化
-3. 实现完整的LNS框架（GlobalManager, NeighborGenerator, LocalOptimizer）
-4. 实现TimeSpaceA* (SIPP变体)
-
-风险：极高（可能在重写过程中引入新问题）
-回报：理论上100%+（突破1.7天花板）
+1. **实验前写假设** - 预期X提升，因为Y原因
+2. **最多测5次** - 没提升就停，分析原因
+3. **失败立即反思** - 是假设错了还是方向错了
+4. **20次测试上限** - 超过必须停下来问自己在干嘛
+5. **写笔记** - 每次研究产出文档，不只是测试数据
 
 ---
 
@@ -93,198 +202,6 @@
 - commit `7040d47` - GlobalManager = LNS coordinator
 - commit `519f390` - PathTable = conflict detection
 - commit `e0927dd` - single-step vs multi-step architecture
-- commit `5ece99f` - causalPIBT comparison
-- commit `ed59b73` - A11失败记录
-- commit `8794697` - A12失败记录
-- commit `48554eb` - **Dist2Path被注释！启发式不是瓶颈**
+- commit `5ece99f` - causalPIBT comparison + heuristics data structure
 
----
-
-## LNS架构详细分析 (2026-04-21 14:20)
-
-### PLNSSolver核心参数 (plns.h)
-
-```cpp
-int window_size_for_PATH=15;     // 路径规划window
-int neighbor_size=8;             // neighborhood大小
-destroy_strategy=RANDOMWALK;      // destroy策略
-init_algo_name="LaCAM2";        // LaCAM2仅用于初始化
-replan_algo_name="PP";          // replan用Prioritized Planning
-int execution_window=1;          // **关键！每步完全replan**
-```
-
-### GlobalManager核心组件
-
-| 组件 | 职责 |
-|------|------|
-| NeighborGenerator | 生成neighborhood（destroy哪些agent） |
-| LocalOptimizer | 重新规划被destroy的agent |
-| PathTable | O(1)冲突检测 |
-| Agent管理 | 维护每个agent的路径和状态 |
-
-### LNS主循环逻辑 (GlobalManager.run())
-
-```
-1. getInitialSolution(): 用LaCAM2生成初始解
-2. LOOP (直到时间用完):
-   a. 生成neighbors (NeighborGenerator):
-      - destroy策略: RANDOMWALK
-      - 随机选择neighbor_size个agent
-      - 标记其路径为destroyed
-   b. 重新规划 (LocalOptimizer):
-      - 对每个destroyed agent用PIBT重新规划
-      - 检查冲突 (PathTable)
-   c. 接受/拒绝:
-      - 如果新方案更优，接受
-      - 否则拒绝，保留原方案
-3. 返回最终actions
-```
-
-### champion的plan()流程 (planner.cpp)
-
-```cpp
-// 1. 用causal_pibt生成init_paths (multi_step)
-auto multi_step_actions = causal_pibt->multi_step(window_size, ...);
-
-// 2. 转换为init_paths格式
-for each agent i:
-    init_path[i] = 从multi_step_actions[i]生成
-
-// 3. 用LNS改进init_paths
-auto actions = plns->solve(goal_locations, init_paths, time_limit);
-
-// 4. 返回actions
-```
-
-### 关键差异：execution_window=1
-
-**我们的架构**:
-```
-plan() called once → frank_wolfe生成guide paths → executor消费window_size步
-```
-
-**冠军架构**:
-```
-plan() called every frame → LNS重新规划 → execution_window=1 → 每步fresh
-```
-
-### 重构需要的关键组件
-
-1. **PLNSSolver**: 主调度器，管理LNS迭代
-2. **GlobalManager**: 协调neighbors、replan、accept/reject
-3. **NeighborGenerator**: 实现RANDOMWALK等destroy策略
-4. **LocalOptimizer**: 实现PIBT/PP重新规划
-5. **PathTable**: O(1)冲突检测表
-6. **TimeSpaceAStarPlanner**: SIPP变体，用于复杂场景
-
---## A13 LNS重构进度 (2026-04-21 14:25)
-
-### Day 1 里程碑 ✅
-- [x] 创建LNS目录结构 (`inc/LNS/`, `src/LNS/`)
-- [x] PathTable.h骨架完成（3493字节）
-- [x] 项目编译成功 (lifelong.exe 3.7MB)
-- [x] Baseline验证: total=1.652
-
-### PathTable.h 实现状态
-```cpp
-class PathTable {
-    std::vector<std::vector<int>> table; // [location][time] = agent_id
-    std::vector<int> goals; // goal location -> timestep
-    
-    void insertPath(int agent_id, const vector<pair<int,int>>& path);
-    bool constrained(int location, int timestep) const;
-    bool edgeConstrained(int from, int to, int timestep) const;
-    void getConflictingAgents(int location, int timestep, set<int>& agents) const;
-    int getHoldingTime(int location, int earliest_timestep) const;
-};
-```
-
-### Day 2 里程碑 ✅
-- [x] NeighborGenerator.h骨架完成（2269字节）
-- [x] LocalOptimizer.h骨架完成（2337字节）
-- [x] 项目编译成功
-- [x] Baseline验证: total=1.652
-
-### LNS组件实现状态
-| 组件 | 文件 | 状态 |
-|------|------|------|
-| PathTable | `inc/LNS/PathTable.h` | ✅ 骨架完成 |
-| NeighborGenerator | `inc/LNS/NeighborGenerator.h` | ✅ 骨架完成 |
-| LocalOptimizer | `inc/LNS/LocalOptimizer.h` | ✅ 骨架完成 |
-| Instance | - | 待定义 |
-| GlobalManager | - | 待定义 |
-| TimeSpaceAStar | - | 待定义 |
-
-### Day 3 里程碑 ✅
-- [x] Instance.h包装类完成（4362字节）
-- [x] GlobalManager.h骨架完成（5397字节）
-- [x] 项目编译成功
-- [x] Baseline验证: total=1.652
-
-### LNS组件实现状态
-| 组件 | 文件 | 状态 | 字节 |
-|------|------|------|------|
-| PathTable | `inc/LNS/PathTable.h` | ✅ 骨架完成 | 3463 |
-| NeighborGenerator | `inc/LNS/NeighborGenerator.h` | ✅ 骨架完成 | 2269 |
-| LocalOptimizer | `inc/LNS/LocalOptimizer.h` | ✅ 骨架完成 | 2337 |
-| Instance | `inc/LNS/Instance.h` | ✅ 包装完成 | 4362 |
-| GlobalManager | `inc/LNS/GlobalManager.h` | ✅ 骨架完成 | 5397 |
-| TimeSpaceAStar | - | 待实现 | - |
-
-### Day 4 里程碑 ✅
-- [x] TimeSpaceAStarPlanner.h完成（4411字节）
-- [x] LocalOptimizer集成TimeSpaceAStar
-- [x] GlobalManager集成LocalOptimizer
-- [x] 项目编译成功
-- [x] Baseline验证: total=1.652
-
-### LNS组件实现状态 (6/6 完成!)
-| 组件 | 文件 | 状态 | 字节 |
-|------|------|------|------|
-| PathTable | `inc/LNS/PathTable.h` | ✅ 完成 | 3463 |
-| NeighborGenerator | `inc/LNS/NeighborGenerator.h` | ✅ 完成 | 2269 |
-| LocalOptimizer | `inc/LNS/LocalOptimizer.h` | ✅ 完成 | ~2800 |
-| Instance | `inc/LNS/Instance.h` | ✅ 完成 | 4362 |
-| GlobalManager | `inc/LNS/GlobalManager.h` | ✅ 完成 | 5639 |
-| TimeSpaceAStarPlanner | `inc/LNS/TimeSpaceAStarPlanner.h` | ✅ 完成 | 4411 |
-| **总计** | | **6/6** | **~23KB** |
-
-### Day 5-6 修正: 文件位置违规已修复
-- [x] LNS组件从 `inc/LNS/` 移到 `src/my_planner/LNS/`
-- [x] commit `de6d548`: 遵守workflow规则
-- [x] 编译成功
-- [x] 测试结果: total=1.632 (在baseline 1.652附近)
-
-### Day 7: LNS集成planner.cpp (进行中)
-- [x] 添加USE_LNS_FOR_GUIDE_PATHS开关到const.h
-- [x] 集成LNS GlobalManager到planner.cpp
-- [x] 添加update_guide_paths_with_lns函数
-- [x] USE_LNS_FOR_GUIDE_PATHS=false（回退状态）
-- [ ] 编译成功
-- [ ] 测试: total=1.583 (vs baseline 1.652, 略低)
-
-### LNS集成状态
-- USE_LNS_FOR_GUIDE_PATHS = false (当前禁用)
-- 集成代码已添加，待调试
-- LNS组件位置: `src/my_planner/LNS/` (~27KB)
-
-### 已验证事实
-- Baseline: total=1.652 (commit d866970, MD5 F4DF65E8F10C2A68D19B40EC9F1E1847)
-- LNS集成代码(9878a44): total=1.583 (MD5 90D8ACD654FB318CC5A3C906A4645EEC)
-- **差异7%，LNS集成代码本身导致性能下降，即使USE_LNS=false**
-
-### 问题根因分析
-LNS集成代码可能的问题：
-1. 添加了#include "LNS/GlobalManager.h"，可能引入了不需要的代码
-2. 添加了static std::shared_ptr lns_manager，可能改变了内存布局
-3. update_guide_paths_with_lns函数存在但未使用，可能编译器优化产生了副作用
-4. chrono和iostream的引入可能影响了某些行为
-
-### 候选修复方案
-1. **最小化修改**：只添加必要的USE_LNS开关，不添加static变量
-2. **完全隔离**：LNS代码完全放在单独的cpp文件，通过条件编译控制
-3. **回归测试**：逐步添加代码，测试每步的影响
-
----
-
-_Last updated: 2026-04-21 15:30 GMT+8 - 问题分析完成_
+_Last updated: 2026-04-21 07:42 GMT+8_
