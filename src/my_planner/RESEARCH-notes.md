@@ -88,15 +88,21 @@ if (configs["scheduler"]=="matching") {
 | A23 | 扩展ConflictRepair到20 agents | 1.097 (-4%) |
 | A24 | Greedy matching scheduler | 1.612 (-3%) |
 | A25 | 冲突感知frank_wolfe排序 | 1.531 (-8%) |
+| A26 | 简化版LaCAM2冲突重规划 | 1.614 (-3%) |
 
 **结论**：所有小改动都失败，frank_wolfe + PIBT架构天花板 ≈ 1.6-1.7
 
-### A25失败分析
-按冲突数量排序agents反而让性能大幅下降（-11% fulfill）。
-可能原因：冲突最多的agents恰恰是最困难的，优先更新它们引入更多不稳定。
+### 失败模式总结
+1. **ConflictRepair方向**：增加处理范围反而让性能下降
+2. **Scheduler方向**：greedy matching不如per-agent贪心
+3. **排序方向**：按冲突排序让问题更糟
+4. **LaCAM2简化方向**：重新规划冲突agents引入更多不稳定
 
-**核心问题**：frank_wolfe优化SOC，但比赛评分是Throughput。
+**核心问题**：frank_wolfe优化SOC（路径长度和），比赛评分是Throughput（单位时间完成任务数）。
 这两个目标不一致，导致所有基于SOC优化的改进都无效。
+
+**真正原因**：frank_wolfe是批量重规划架构，PIBT是运行时冲突解决。
+这种组合无法实现真正的"每步重规划"，所以天花板是1.6-1.7。
 
 ---
 
