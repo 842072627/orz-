@@ -15,7 +15,8 @@ namespace MyPlanner{
 enum ADAPTIVE {RANDOM, CONGESTION, DEVIATION, COUNT};
 
 // extern std::vector<HeuristicTable> global_heuristictable;
-extern std::unordered_map<int, HeuristicTable> global_heuristictable;
+// CHAMPION-BASED: Use vector for O(1) access without hash overhead
+extern std::vector<HeuristicTable> global_heuristictable;
 extern bool global_heuristics_initialized;
 extern Neighbors global_neighbors;
 
@@ -64,7 +65,8 @@ class TrajLNS{
 
     std::vector<Int4> flow;
     // std::vector<HeuristicTable>& heuristics;
-    std::unordered_map<int, HeuristicTable>& heuristics;
+    // CHAMPION-BASED: Use vector reference instead of unordered_map
+    std::vector<HeuristicTable>& heuristics;
     std::vector<Dist2Path> traj_dists;
     std::vector<s_node> goal_nodes;// store the goal node of single agent search for each agent. contains all cost information.
 
@@ -82,7 +84,8 @@ class TrajLNS{
         mem.init(env->map.size());
     }
 
-    TrajLNS(SharedEnvironment* env, std::unordered_map<int, HeuristicTable>& heuristics, Neighbors& neighbors):
+    // CHAMPION-BASED: Use vector reference instead of unordered_map
+    TrajLNS(SharedEnvironment* env, std::vector<HeuristicTable>& heuristics, Neighbors& neighbors):
         env(env),
         trajs(env->num_of_agents),
         tasks(env->num_of_agents),

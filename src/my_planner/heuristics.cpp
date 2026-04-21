@@ -6,7 +6,8 @@
 namespace MyPlanner{
 
 // std::vector<HeuristicTable> global_heuristictable; //TODO: Change this to unordered_map
-std::unordered_map<int, HeuristicTable> global_heuristictable;
+// CHAMPION-BASED OPTIMIZATION: Use vector for O(1) access without hash overhead
+std::vector<HeuristicTable> global_heuristictable;
 bool global_heuristics_initialized = false;
 Neighbors global_neighbors;
 
@@ -35,7 +36,8 @@ void init_neighbor(SharedEnvironment* env){
 
 void init_heuristics(SharedEnvironment* env){
 	if (!global_heuristics_initialized){
-		// global_heuristictable.resize(env->map.size());
+		// CHAMPION-BASED: Resize vector to map size for O(1) access
+		global_heuristictable.resize(env->map.size());
 		global_heuristics_initialized=true;
 		init_neighbor(env);
 	}
@@ -101,9 +103,8 @@ int get_h(SharedEnvironment* env, int source, int target){
 			init_heuristics(env);
 		}
 
-		// if (global_heuristictable.at(target).empty()){
-		if (global_heuristictable.find(target) == global_heuristictable.end() || global_heuristictable[target].empty()){
-			global_heuristictable.insert_or_assign(target, HeuristicTable());
+		// CHAMPION-BASED: Vector access instead of unordered_map find
+		if (global_heuristictable[target].empty()){
 			init_heuristic(global_heuristictable[target],env,target);
 		}
 

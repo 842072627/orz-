@@ -112,7 +112,8 @@ namespace MyPlanner{
                 for (int j = 0; j < env->goal_locations[i].size(); j++)
                 {
                     int goal_loc = env->goal_locations[i][j].first;
-                    if (trajLNS.heuristics.find(goal_loc) == trajLNS.heuristics.end() ||
+                    // CHAMPION-BASED: Vector access instead of unordered_map find
+                    if (goal_loc >= trajLNS.heuristics.size() ||
                         trajLNS.heuristics[goal_loc].empty()){
                         init_heuristic(trajLNS.heuristics[goal_loc], env, goal_loc);
                     }
