@@ -420,17 +420,47 @@ int window_size_for_PATH = 15;
 | 并行化 | **async LNS** | 单线程 | 大 |
 
 ### LaCAM2是什么？
-LaCAM2 (Large Neighborhood Search for Conflict-Based Asymmetric Multi-agent path planning) 是一种比frank_wolfe更先进的初始解和路径优化算法。
+LaCAM2 (Large Neighborhood Search for Conflict-Based Asymmetric Multi-agent path planning) 是一种为Lifelong MAPF设计的算法。
+
+**证据**：论文标题 "LaCAM2: Minimal Randomized... for Lifelong Multi-Agent Path Finding in Congested Systems" (arXiv:2309.16857)
 
 ### PP (Pipe Planner)是什么？
 PP是一种基于管道的重规划算法，用于处理动态任务分配和路径更新。
 
-### 待验证假设
+---
 
-**假设#1**: LaCAM2 + PLNS 比 frank_wolfe + PIBT 更适合throughput优化
-- 证据: Champion 4.0+ vs 我们 1.668
-- 需要验证: 是否有公开benchmark对比两者
+## 下一步：如何缩小差距？
 
-**假设#2**: 我们的frank_wolfe已经足够好，但缺少LaCAM2级别的初始解
-- 证据: frank_wolfe能产生可行解
-- 需要验证: LaCAM2在相同问题上的表现
+### 方案A：实现LaCAM2+PLNS（高风险高回报）
+- **工作量**：数周
+- **风险**：极高
+- **回报**：可能达到4.0+
+- **需要**：完整的LaCAM2实现
+
+### 方案B：渐进式改进frank_wolfe+PIBT（中风险中回报）
+- **工作量**：数天到数周
+- **风险**：中等
+- **回报**：不确定
+- **方向**：
+  - 改进guide path更新策略
+  - 改进PIBT的conflict resolution
+  - 改进scheduler任务分配
+
+### 方案C：接受现状（无风险零回报）
+- **禁止**
+
+---
+
+## A方向候选：渐进式LaCAM2特性
+
+**想法**：能否在不完全实现LaCAM2的情况下，借鉴其思想改进frank_wolfe？
+
+LaCAM2的核心思想：
+1. **Conflict-based search** - 检测并解决冲突
+2. **Large neighborhood search** - 大规模邻域搜索
+3. **Minimal randomized techniques** - 随机化加速
+
+**可能的渐进式改进**：
+1. 在frank_wolfe之后添加conflict repair（已有A14的ConflictRepair后处理）
+2. 研究为什么A14只提升1%而不是更多
+3. 尝试不同的neighborhood生成策略
