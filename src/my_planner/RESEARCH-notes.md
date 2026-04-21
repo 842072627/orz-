@@ -205,3 +205,34 @@ while (std::chrono::steady_clock::now() < timelimit){
 - commit `5ece99f` - causalPIBT comparison + heuristics data structure
 
 _Last updated: 2026-04-21 07:42 GMT+8_
+
+---
+
+## A14 LNS???? (2026-04-21 16:30)
+
+### ??LNS?????
+`cpp
+// 1. ?????
+getInitialSolution(init_neighbor);
+
+// 2. ???
+while (!timeout) {
+    // ??neighborhoods
+    neighbor_generator->generate_parallel(time_limiter);
+    
+    // ??????neighborhood
+    #pragma omp parallel for
+    for (neighbor : neighbors) {
+        local_optimizers[i]->optimize(neighbor);
+    }
+    
+    // ??????
+    update(neighbor);
+}
+`
+
+### A14??
+- Day1: ??LNSWrapper.cpp,??LNS???
+- ???:????,??????
+
+_Last updated: 2026-04-21 16:30 GMT+8_
