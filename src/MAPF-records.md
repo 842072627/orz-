@@ -398,3 +398,37 @@
 ### ???
 - **?????**: ????????
 - **??????**: weeks of work (LNS???, single-step replanning)
+---
+
+## A14-A22 Experiment Summary (2026-04-21)
+
+### Experiment Results
+
+| Experiment | Change | Result | Status |
+|------------|--------|--------|--------|
+| A14 | ConflictRepair post-processing | **1.668** | Only success |
+| A15 | 10 agents + 2 iterations | 1.605 | Failed |
+| A16 | frank_wolfe_topk | 1.629 | Failed |
+| A17 | Periodic frank_wolfe | 1.553 | Failed |
+| A18 | Skip frank_wolfe | 0.785 | Catastrophic |
+| A19 | Double frank_wolfe | 1.639 | Failed |
+| A20 | Periodic ConflictRepair | Build error | Failed |
+| A21 | Time budget adjustment | Build error | Failed |
+| A22 | Random tie-breaking | 1.631 | Failed |
+
+### Key Conclusions
+
+**Frank-Wolfe ceiling confirmed (~1.6-1.7)**:
+- All frank_wolfe enhancement attempts failed
+- Skipping frank_wolfe caused fulfill collapse (-71%)
+- PIBT tie-breaking: deterministic is better than random
+- **Only success**: A14 ConflictRepair post-processing (+1%)
+
+### Current Best
+- **Commit**: `3ae0134`
+- **Result**: total=1.668 (random=0.523, fulfill=1.145)
+- **GAP**: 2.4x (vs champion 4.0+)
+
+### Next Steps
+- **Accept ceiling**: Simple experiments cannot break through
+- **Architecture change needed**: weeks of work (LNS main loop, single-step replanning)
