@@ -2,45 +2,34 @@
 
 ---
 
-## 核心原则
+## 目标
 
-**永远有事做，永远研究驱动，永远记录完整。**
-
-### 目标
 > **random + fulfill 总分达到 4.0 以上**
 
-### 精神
-> 深入研究官网 + 冠军代码 + 本地代码，实现**根本性突破**，而不是表面调参。
+---
+
+## 项目结构
+
+| 文件 | 路径 |
+|------|------|
+| Workflow | `src/MAPF-workflow.md` |
+| 实验记录 | `src/MAPF-records.md` |
+| 研究笔记 | `src/my_planner/RESEARCH-notes.md` |
+| 代码 | `src/my_planner/` |
+| 备份 | `default_planner/` |
+| 项目笔记 | `C:\Users\Administrator\Desktop\test-studio-mapf\项目笔记.md` |
+| **冠军代码** | `Best-Implementations-2024/Team_Kitty_Knight_da7d428b/` |
+| build | `build/lifelong.exe` |
 
 ---
 
-## 🔄 研究循环
+## 测试脚本
 
-每次触发：
-1. 读取 src/MAPF-records.md（当前状态）
-2. 明确最重要任务
-3. 执行实验（改代码 → 编译 → 测试 → 记录）
-4. 反思：失败原因？新方向？
-5. 继续下一个任务
-
----
-
-## 测试规则
-
-### 测试脚本
 - **默认**: `C:\Users\Administrator\Desktop\test-studio-mapf\test-scripts\run_mini_md5.ps1` (random + fulfill)
-记录存在C:\Users\Administrator\Desktop\test-studio-mapf\test-scripts\round_mini 里面
 - **方差**: `C:\Users\Administrator\Desktop\test-studio-mapf\test-scripts\run_mini_variance.ps1` (非必要不使用)
-build脚本： `C:\Users\Administrator\Desktop\test-studio-mapf\test-scripts\build.bat`
+- **build**: `C:\Users\Administrator\Desktop\test-studio-mapf\test-scripts\build.bat`
 
-### 分数记录
-- **必须记录 commit ID**
-- 两图分数同等重要
-- commit 时必须带上分数
-
-### MD5
-- 程序自己计算，写入 scores.txt
-- 禁止手动计算
+结果目录: `C:\Users\Administrator\Desktop\test-studio-mapf\test-scripts\round_mini\roundN\scores.txt`
 
 ---
 
@@ -48,10 +37,10 @@ build脚本： `C:\Users\Administrator\Desktop\test-studio-mapf\test-scripts\bui
 
 | 文件 | 职责 | 可重写函数 |
 |------|------|-----------|
-| `src/Entry.cpp` + `inc/Entry.h` | --- | `compute()`, `initialize()` |
-| `src/TaskScheduler.cpp` + `inc/TaskScheduler.h` | --- | `plan()`, `initialize()` |
-| `src/Executor.cpp` + `inc/Executor.h` | --- | `process_new_plan()`, `next_command()`, `initialize()` |
-| `src/MAPFPlanner.cpp` + `inc/MAPFPlanner.h` | --- | `plan()`, `initialize()` |
+| `src/Entry.cpp` + `inc/Entry.h` | 入口协调 | `compute()`, `initialize()` |
+| `src/TaskScheduler.cpp` + `inc/TaskScheduler.h` | 任务调度 | `plan()`, `initialize()` |
+| `src/Executor.cpp` + `inc/Executor.h` | 执行控制 | `process_new_plan()`, `next_command()`, `initialize()` |
+| `src/MAPFPlanner.cpp` + `inc/MAPFPlanner.h` | 路径规划 | `plan()`, `initialize()` |
 
 ---
 
@@ -94,16 +83,14 @@ build脚本： `C:\Users\Administrator\Desktop\test-studio-mapf\test-scripts\bui
 
 ---
 
-## 关键路径
+## 冠军代码分析（已研究）
 
-| 文件 | 路径 |
-|------|------|
-| Workflow | `src/MAPF-workflow.md` |
-| 实验记录 | `src/MAPF-records.md` |
-| 代码 | `src/my_planner/` |
-| 备份 | `default_planner/` |
-| 项目笔记 | `C:\Users\Administrator\Desktop\test-studio-mapf\项目笔记.md` |
-| **冠军代码** | `Best-Implementations-2024/` |
-| build | `build/lifelong.exe` |
+**Team_Kitty_Knight架构**：CausalPIBT + PLNS + TimeSpaceA* + GlobalManager
 
-> ⚠️ `Best-Implementations-2024/` 是 **2024年各地图世界冠军代码**，可借鉴算法思路。
+**关键发现**：
+- 冠军的astar是 `f=g+h+op_flow` 的flow-guided A*，不是真正的3D时空搜索
+- GlobalManager是LNS并行协调框架，不是简单的全局状态管理
+- PathTable是O(1)冲突检测表，LNS跨neighborhood协调关键
+- single-step vs multi-step：champion每步replan，我们window内stale
+
+详细分析见：`src/my_planner/RESEARCH-notes.md`
