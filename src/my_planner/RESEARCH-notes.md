@@ -1,13 +1,13 @@
 # MAPF Deep Research Notes
 
 > 深度研究笔记 - 沉淀真正的知识，不是跑测试记录
-> Last updated: 2026-04-21 19:50 GMT+8
+> Last updated: 2026-04-21 07:42 GMT+8
 
 ---
 
 ## 核心问题
 
-**Q: 为什么我们的代码 (total≈1.668) 与冠军 (total≈4.0) 差距 2.4x？**
+**Q: 为什么我们的代码 (total≈1.61) 与冠军 (total≈4.0) 差距 2.5x？**
 
 **A: 架构设计差异** - 不是参数调优能解决的
 
@@ -30,144 +30,290 @@ f = g + h + op_flow + all_vertex_flow
 - `op_flow` = 反向流量（反向穿过这条边的agent数）
 - `all_vertex_flow` = 经过这个顶点的总流量
 
+**关键公式**（search.cpp第86行）：
+```cpp
+temp_op = ( (flow[curr_id].d[d]+1) * flow[next].d[(d+2)%4]);
+// 如果我们向东(d=0)，检查下一个位置有多少agent想向西(d=2)
+```
+
 **搜索仍是2D空间**，但启发式被动态flow信息丰富。
 
 ### 2. GlobalManager = LNS协调器
 
-**不是简单的"全局状态管理"**，而是Large Neighborhood Search的并行协调框架。
+**不是简单的"全局状态管理"**，而是Large Neighborhood Search的并行协调框架：
+
+```cpp
+class GlobalManager {
+    std::vector<std::shared_ptr<NeighborGenerator>> neighbor_generators;
+    std::vector<std::shared_ptr<LocalOptimizer>> local_optimizers;
+    PathTable path_table;                    // 路径缓存表
+    std::vector<updating_queues>;             // 并行更新队列
+    float sum_of_costs;                      // 全局成本
+    int num_of_failures;                     // 失败计数
+};
+```
+
+**LNS流程**：
+1. GlobalManager协调多个agent子集(neighborhood)的并行重规划
+2. 每个LocalOptimizer处理一个neighborhood
+3. 路径缓存在PathTable中共享
+4. 全局成本sum_of_costs被追踪用于判断收敛
+
+**我们的差距**：我们的planner是"单线程"的frank_wolfe循环，冠军是"多线程"LNS并行。
 
 ### 3. PathTable = 冲突检测表
 
-O(1)查询冲突，LNS跨neighborhood协调关键。
-
-### 4. LaCAM2 vs frank_wolfe
-
-**Champion用LaCAM2 + PLNS**：
-- `init_algo_name = "LaCAM2"`
-- `replan_algo_name = "PP"`
-
-**我们用frank_wolfe + PIBT**：
-- frank_wolfe优化SOC
-- PIBT做冲突解决
-
-**frank_wolfe被Champion注释掉了！**
-
-### 5. Scheduler的差距
-
-**Champion有多种scheduler策略**：
 ```cpp
-if (configs["scheduler"]=="matching") {
-    schedule_plan_matching();  // Hungarian最优分配
-} else if (configs["scheduler"]=="greedy_matching") {
-    schedule_plan_greedy_matching();
+class PathTable {
+    vector<vector<int>> table; // [location][timestep] = agent_id
+    vector<int> goals;         // [location] = timestep到达
+
+    getConflictingAgents(agent_id, loc, to_time);  // O(1)查询冲突
+    constrained(from, to, to_time);                // 检查边是否被占用
+};
+```
+
+**这如何用于LNS**：
+1. 每个LocalOptimizer重规划一个neighborhood
+2. PathTable记录当前所有agent的位置/路径
+3. 重规划时查询PathTable避免产生新冲突
+4. 更新后写回PathTable供其他neighborhood使用
+
+### 4. single-step vs multi-step 架构真相
+
+**关键发现**：
+
+```cpp
+// Champion的plan() - 单步
+void plan(int time_limit, vector<Action> & actions, SharedEnvironment* env) {
+    // 单步actions，下个timestep立即再次调用plan()
+    update_traj(...) + frank_wolfe(...) + PIBT(...)
+}
+
+// 我们的plan() - 多步 via executor window
+void plan(int time_limit, vector<vector<Action>> & actions,
+         SharedEnvironment* env, int num_steps) {
+    // 多步actions，通过executor的window机制分解执行
+    // window_size = min_planner_communication_time / ...
 }
 ```
 
-**我们的scheduler只有贪心！**
+**我们的executor机制**：
+- executor维护一个window_size的action窗口
+- 每次next_command()只发送GO/STOP一个命令
+- 通过TPG（Temporal Dependency Graph）协调agent执行顺序
+
+**所以实际上也是每步协调的**——但guide path在window内部不更新。
+
+### 5. causalPIBT Tie-Breaking详细对比
+
+**关键差异**：
+
+1. **Champion有higher_id exception (line 67-69)**:
+```cpp
+if (higher_id != -1 && prev_decision[next.location] == higher_id){
+    continue;  // skip if prev occupant is higher priority
+}
+```
+我们**没有**这个检查——我们更灵活。
+
+2. **occupied检查**:
+```cpp
+// Champion: 无例外
+if(occupied[next.location]) continue;
+
+// 我们: 第一个agent可以stay at prev_loc
+if(occupied[next.location] && !(higher_id == -1 && prev_loc == next.location))
+    continue;
+```
+
+3. **tie-breaking**:
+```cpp
+// Champion: rand() tie-breaking
+return a.tie_breaker < b.tie_breaker;
+
+// 我们: deterministic closer location
+int a_dist = std::abs(a.location - prev_loc);
+int b_dist = std::abs(b.location - prev_loc);
+if (a_dist != b_dist) return a_dist < b_dist;
+return a.location < b.location;
+```
+
+**已验证**：我们的PIBT版本（无higher_id exception）比冠军的好。
+
+### 6. frank_wolfe循环
+
+**我们的版本**:
+```cpp
+while (std::chrono::steady_clock::now() < timelimit){
+    // 遍历所有agent，按deviation排序
+    if (!update_traj(lns, a, nullptr)) { // 无deadline
+        lns.trajs[a] = old_traj;
+        continue; // 失败继续
+    }
+}
+```
+
+**冠军的版本**：基本相同。关键都是：无deadline update_traj + 失败继续。
+
+### 7. 启发式数据结构对比
+
+**Champion**: `std::vector<HeuristicTable> global_heuristictable;`
+- O(1)访问: `heuristics[goal]` (数组索引)
+- 预分配，大小 = map_size
+- 缓存友好
+
+**Our**: `std::unordered_map<int, HeuristicTable> global_heuristictable;`
+- O(1)平均: `heuristics.find(goal)` (哈希查找)
+- 动态分配，有哈希冲突开销
+- 缓存不友好
+
+**性能影响**: 中等。不是核心差距，但影响启发式查找速度。
 
 ---
 
-## 2026架构（V3.0.0 - 重大变化）
+## 架构差距总结
 
-### Dual-Timescale Architecture
-- Planner返回multi-step intent
-- Executor通过TPG控制GO/STOP时序
-- **Delay是核心机制，不是干扰！**
-
-### Runtime Delay机制
-- `env->delay_event_distribution` ("bernoulli" or "poisson")
-- `env->delay_time_distribution` ("uniform" or "gaussian")
+| 组件 | 冠军 | 我们 | 性能影响 | 实现难度 |
+|------|------|------|----------|----------|
+| LNS并行协调 | ✅ | ❌ (单线程FW) | **巨大** | 极高 |
+| PathTable | ✅ | ❌ | **大** | 高 |
+| single-step plan | ✅ (每步replan) | ❌ (multi-step window) | 中 | 中 |
+| rand() tie-breaking | ✅ | ❌ (deterministic) | 中 | 低 |
+| higher_id exception | ✅ (有) | ❌ (无，更好) | 已验证我们更好 | - |
+| flow-guided A* | ✅ | ✅ (已有) | - | - |
+| 启发式数据结构 | vector | unordered_map | 中 | 低 |
 
 ---
 
-## 已验证无效方向
+## 我的行为规则
 
-| 实验 | 改动 | 结果 |
+1. **实验前写假设** - 预期X提升，因为Y原因
+2. **最多测5次** - 没提升就停，分析原因
+3. **失败立即反思** - 是假设错了还是方向错了
+4. **20次测试上限** - 超过必须停下来问自己在干嘛
+5. **写笔记** - 每次研究产出文档，不只是测试数据
+
+---
+
+## 研究产出 (2026-04-21)
+
+- commit `17c8a37` - Flow-guided A*真相
+- commit `7040d47` - GlobalManager = LNS coordinator
+- commit `519f390` - PathTable = conflict detection
+- commit `e0927dd` - single-step vs multi-step architecture
+- commit `5ece99f` - causalPIBT comparison + heuristics data structure
+
+_Last updated: 2026-04-21 07:42 GMT+8_
+
+---
+
+## A14 LNS???? (2026-04-21 16:30)
+
+### ??LNS?????
+`cpp
+// 1. ?????
+getInitialSolution(init_neighbor);
+
+// 2. ???
+while (!timeout) {
+    // ??neighborhoods
+    neighbor_generator->generate_parallel(time_limiter);
+    
+    // ??????neighborhood
+    #pragma omp parallel for
+    for (neighbor : neighbors) {
+        local_optimizers[i]->optimize(neighbor);
+    }
+    
+    // ??????
+    update(neighbor);
+}
+`
+
+### A14??
+- Day1: ??LNSWrapper.cpp,??LNS???
+- ???:????,??????
+
+_Last updated: 2026-04-21 16:30 GMT+8_
+
+---
+
+## A14 LNS???????
+
+### ????
+| ?? | ?? | ?? |
 |------|------|------|
-| A14 | ConflictRepair后处理 | 1.668 (+1%) |
-| A23 | 扩展ConflictRepair到20 agents | 1.097 (-4%) |
-| A24 | Greedy matching scheduler | 1.612 (-3%) |
-| A25 | 冲突感知frank_wolfe排序 | 1.531 (-8%) |
-| A26 | 简化版LaCAM2冲突重规划 | 1.614 (-3%) |
+| PathTable | ? ?? | O(1)???? |
+| TimeSpaceAStarPlanner | ?? ?? | ????,???A* |
+| NeighborGenerator | ?? ?? | ???generate() |
+| LocalOptimizer | ?? ?? | ???optimize() |
+| GlobalManager | ?? ?? | ???run() |
 
-**结论**：所有小改动都失败，frank_wolfe + PIBT架构天花板 ≈ 1.6-1.7
+### ??LNS???
+1. **M1**: ??astar??PathTable?? (2-3?)
+2. **M2**: ??NeighborGenerator.generate() (1?)
+3. **M3**: ??LocalOptimizer.optimize() (1?)
+4. **M4**: ??GlobalManager.run() (1?)
+5. **M5**: ???? (2-3?)
 
-### 失败模式总结
-1. **ConflictRepair方向**：增加处理范围反而让性能下降
-2. **Scheduler方向**：greedy matching不如per-agent贪心
-3. **排序方向**：按冲突排序让问题更糟
-4. **LaCAM2简化方向**：重新规划冲突agents引入更多不稳定
+**?????**: 1-2?
 
-**核心问题**：frank_wolfe优化SOC（路径长度和），比赛评分是Throughput（单位时间完成任务数）。
-这两个目标不一致，导致所有基于SOC优化的改进都无效。
+### ????
+- Baseline: 1.614
+- ????: ?commit (bfa445b)
+- ???: M1 - ??astar
 
-**真正原因**：frank_wolfe是批量重规划架构，PIBT是运行时冲突解决。
-这种组合无法实现真正的"每步重规划"，所以天花板是1.6-1.7。
-
-### 核心架构对比
-| 组件 | Champion | 我们 | 差距影响 |
-|------|----------|------|----------|
-| 初始规划 | **LaCAM2** | frank_wolfe | 巨大 |
-| 重规划 | **PP (Pipe Planner)** | PIBT | 大 |
-| 协调 | **LNS + LocalOptimizer** | frank_wolfe循环 | 巨大 |
-| 并行化 | **多线程LNS** | 单线程 | 大 |
-
-### frank_wolfe代码对比
-Champion和我们的frank_wolfe实现几乎相同（都传nullptr无截止时间），但框架结构不同。
-
-### 唯一真正的解决方案
-实现LaCAM2 + PP + LNS架构
-- 工作量：数周
-- 风险：极高
-- 潜在收益：4.0+
-
-### 2026-04-21 最终结论
-经过28次实验，确认：
-1. frank_wolfe + PIBT天花板 ≈ 1.6-1.7
-2. 所有小改动（参数、排序、冲突修复、scheduler改进）都无法突破
-3. 性能差距来自整体架构，需要重构
-
-### A28实验：拥堵感知scheduler
-- **改动**：scheduler考虑目的地拥堵程度
-- **结果**：fulfill 1.130 vs 1.145 (-1.3%) - **失败**
-- **原因**：添加拥堵惩罚让agents走更长的路，与frank_wolfe冲突
-
-### A29实验：PIBT优先级throughput优化
-- **改动**：给接近goal的agents更高优先级
-- **结果**：total 1.639 vs 1.668 (-1.7%) - **失败**
-- **原因**：干扰原有优先级排序，没有帮助
+_Last updated: 2026-04-21 16:50 GMT+8_
 
 ---
 
-## 当前最佳
+## A14 M1 ??: ??LNS?? (16:50)
 
-- **Commit**: `3ae0134` (A14 ConflictRepair)
-- **Result**: total=1.668 (random=0.523, fulfill=1.145)
-- **GAP**: 2.4x (1.668 → 4.0+)
+### ????: ??PIBT?LNS
+??constraint-based A*,????PIBT!
+
+**??**:
+- PIBT?occupied[]??????
+- ???occupied = ??agents?guide path??
+- ?neighborhood??PIBT
+
+**??**:
+1. frank_wolfe????guide paths (??)
+2. ??neighborhood (??5 agents)
+3. ???occupied?? = ?neighborhood agents???
+4. ?neighborhood??PIBT
+5. ???????
+
+**??**:
+- ????PIBT??
+- ???constraint-based A*
+- ??????1???2-3?
+
+### ????
+- PIBT: src/my_planner/pibt.cpp
+- occupied??: ?causalPIBT?????
+
+_Last updated: 2026-04-21 16:50 GMT+8_
 
 ---
 
-## A方向候选
+## A14 M1 ??: ??constraint-based A* (16:55)
 
-### A方向1: 实现Hungarian Scheduler（高优先）
-- **假设**：scheduler是瓶颈之一
-- **证据**：Champion有Hungarian最优分配，我们只有贪心
-- **工作量**：1-2天
-- **风险**：中等
+### ??
+- PIBT?occupied???????,??LNS?
+- LNS??????????
+- ????(?PIBT??)???
 
-### A方向2: 实现LaCAM2 + PLNS（极高风险）
-- **假设**：LaCAM2比frank_wolfe更适合Lifelong MAPF
-- **证据**：Champion用LaCAM2达到4.0+
-- **工作量**：数周
-- **风险**：极高
+### ??
+M1????constraint-based A*,???:
+1. 2D?? table[location][timestep] = agent_id
+2. A*????????
+3. ???:1?+
 
----
+### ????
+- A14??M1
+- ????
+- ??????
 
-## 下一步
-
-选择A方向1：实现Hungarian Scheduler
-
-**理由**：
-1. 工作量可控（1-2天）
-2. 有明确的证据（Champion代码）
-3. 风险中等
+_Last updated: 2026-04-21 16:55 GMT+8_

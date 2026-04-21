@@ -15,8 +15,6 @@
 | Workflow | `src/MAPF-workflow.md` |
 | 实验记录 | `src/MAPF-records.md` |
 | 研究笔记 | `src/my_planner/RESEARCH-notes.md` |
-| **2026架构研究** | `src/my_planner/2026-ARCHITECTURE-CHANGES.md` |
-| **Pre实验检查清单** | `src/my_planner/PRE-EXPERIMENT-CHECKLIST.md` |
 | 代码 | `src/my_planner/` |
 | 备份 | `default_planner/` |
 | 项目笔记 | `C:\Users\Administrator\Desktop\test-studio-mapf\项目笔记.md` |
