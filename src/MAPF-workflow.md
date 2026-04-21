@@ -25,11 +25,35 @@
 
 ## 测试脚本
 
+| 脚本 | 用途 | 说明 |
+|------|------|------|
+| `run_mini_md5.ps1` | **默认测试** | random + fulfill，2个地图 |
+| `run_quick_test_md5.ps1` | **全地图测试** | 7个地图全部测试，含MD5缓存 |
+| `run_mini_variance.ps1` | 方差测试 | 非必要不使用 |
+| `build.bat` | 编译 | 构建lifelong.exe |
+
 - **默认**: `C:\Users\Administrator\Desktop\test-studio-mapf\test-scripts\run_mini_md5.ps1` (random + fulfill)
+- **全地图**: `C:\Users\Administrator\Desktop\test-studio-mapf\test-scripts\run_quick_test_md5.ps1` (7地图)
 - **方差**: `C:\Users\Administrator\Desktop\test-studio-mapf\test-scripts\run_mini_variance.ps1` (非必要不使用)
 - **build**: `C:\Users\Administrator\Desktop\test-studio-mapf\test-scripts\build.bat`
 
 结果目录: `C:\Users\Administrator\Desktop\test-studio-mapf\test-scripts\round_mini\roundN\scores.txt`
+全地图结果: `C:\Users\Administrator\Desktop\test-studio-mapf\test-scripts\round\round1\scores.txt`
+
+### 测试地图
+
+**mini (random + fulfill)**:
+- random
+- fulfill
+
+**全地图测试**:
+- random
+- bos
+- room
+- maze
+- fulfill
+- orz
+- iron
 
 ---
 
@@ -94,3 +118,43 @@
 - single-step vs multi-step：champion每步replan，我们window内stale
 
 详细分析见：`src/my_planner/RESEARCH-notes.md`
+
+---
+
+## 当前方案（2026-04-21）
+
+### 地图分流策略
+
+由于room/maze/iron/orz地图会导致崩溃，采用按地图选择planner的策略：
+
+| 地图类型 | Planner | 说明 |
+|---------|---------|------|
+| fulfill/warehouse | **MyPlanner** | 我们优化的代码 |
+| 其他所有地图 | **DefaultPlanner** | starkit原始planner |
+
+### 实现
+
+`src/MAPFPlanner.cpp`中的`should_use_my_planner()`函数根据`env->map_name`判断。
+
+### 测试结果
+
+**全地图测试** (commit 38955c8):
+```
+random: 0.523 | bos: 0.310 | room: 0.180 | maze: 0.100
+fulfill: 1.131 | orz: 0.220 | iron: 0.143
+Total: 2.607
+```
+
+### 分数对比
+
+| Map | 我们 | 云端冠军 | GAP |
+|-----|------|----------|-----|
+| random | 0.523 | 0.985 | -47% |
+| bos | 0.310 | 1.000 | -69% |
+| room | 0.180 | 0.880 | -80% |
+| maze | 0.100 | 0.727 | -86% |
+| fulfill | 1.131 | 0.825 | +37% ✅ |
+| orz | 0.220 | 0.863 | -75% |
+| iron | 0.143 | 0.860 | -83% |
+
+**结论**：fulfill唯一超过冠军，其他地图差距巨大。
