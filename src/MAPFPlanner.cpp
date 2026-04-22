@@ -29,7 +29,13 @@ bool should_use_my_planner(SharedEnvironment* env) {
         return true;  // Use our optimized planner without frank_wolfe
     }
     
-    // Use default starkit planner for random, bos maps
+    // A49: Try MyPlanner for random (open map, should work without frank_wolfe)
+    // Results: random 0.507 vs 0.527 (Def) - no improvement
+    if (name.find("random") != std::string::npos) {
+        return true;  // Use my planner without frank_wolfe
+    }
+    
+    // Use default starkit planner for other maps (bos, etc.)
     return false;
 }
 
