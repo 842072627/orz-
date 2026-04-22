@@ -7,6 +7,8 @@
 #include <unordered_set>
 #include <tuple>
 #include <cstdint>
+#include <algorithm>
+#include <string>
 #include "my_Types.h"
 #include "my_utils.h"
 #include "my_heuristics.h"
