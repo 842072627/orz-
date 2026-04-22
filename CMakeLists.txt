@@ -18,7 +18,7 @@ file(GLOB DEFAULT_PLANNER_SOURCES "default_planner/*.cpp")
 
 
 # Find Boost
-ADD_DEFINITIONS(-DBOOST_LOG_DYN_LINK)
+set(Boost_USE_STATIC_LIBS OFF)
 find_package( Boost 1.49.0 REQUIRED COMPONENTS program_options system filesystem log log_setup)
 include_directories( ${Boost_INCLUDE_DIRS} )
 
