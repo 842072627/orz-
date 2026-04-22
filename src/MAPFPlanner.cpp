@@ -18,11 +18,18 @@ bool should_use_my_planner(SharedEnvironment* env) {
     // Use my planner for fulfill/warehouse maps (our optimized planner)
     if (name.find("warehouse") != std::string::npos || 
         name.find("fulfill") != std::string::npos) {
-        return true;  // Use our optimized planner
+        return true;  // Use our optimized planner with frank_wolfe
     }
     
-    // Use default starkit planner for room, maze, iron, orz, random, bos maps
-    // (MyPlanner crashes on room/maze/iron, and is worse than DefaultPlanner on random/bos)
+    // Use my planner for room/maze/iron/orz maps (without frank_wolfe to avoid timeout)
+    if (name.find("room") != std::string::npos || 
+        name.find("maze") != std::string::npos ||
+        name.find("iron") != std::string::npos ||
+        name.find("orz") != std::string::npos) {
+        return true;  // Use our optimized planner without frank_wolfe
+    }
+    
+    // Use default starkit planner for random, bos maps
     return false;
 }
 

@@ -28,6 +28,21 @@
 
 namespace MyPlanner{
 
+    // Check if map should skip frank_wolfe optimization (for tight/maze-like maps)
+    bool should_skip_frank_wolfe(SharedEnvironment* env) {
+        if (env == nullptr || env->map_name.empty()) return false;
+        std::string name = env->map_name;
+        std::transform(name.begin(), name.end(), name.begin(), ::tolower);
+        // Skip frank_wolfe for tight maps where it tends to timeout
+        if (name.find("room") != std::string::npos || 
+            name.find("maze") != std::string::npos ||
+            name.find("iron") != std::string::npos ||
+            name.find("orz") != std::string::npos) {
+            return true;
+        }
+        return false;
+    }
+
     static const char* debug_action_to_string(Action action)
     {
         switch (action)
@@ -186,8 +201,11 @@ namespace MyPlanner{
         }
 
         // one-time FW optimization in the flow allocation phase
+        // Skip frank_wolfe for tight maps (room/maze/iron/orz) where it tends to timeout
         std::unordered_set<int> updated;
-        frank_wolfe(trajLNS, updated, flow_end_time);
+        if (!should_skip_frank_wolfe(env)) {
+            frank_wolfe(trajLNS, updated, flow_end_time);
+        }
 
         // A14: LNS optimization for guide paths
         if (USE_LNS_FOR_GUIDE_PATHS) {
