@@ -22,6 +22,7 @@ bool should_use_my_planner(SharedEnvironment* env) {
     }
     
     // Use my planner for maze/iron/orz maps (without frank_wolfe to avoid timeout)
+    // A114: room still uses DefaultPlanner (MyPlanner is worse for room)
     if (name.find("maze") != std::string::npos ||
         name.find("iron") != std::string::npos ||
         name.find("orz") != std::string::npos) {
