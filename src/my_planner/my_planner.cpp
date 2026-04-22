@@ -69,7 +69,7 @@ namespace MyPlanner{
         if (name.find("fulfill") != std::string::npos || name.find("warehouse") != std::string::npos) {
             return 6;
         }
-        // random: A91 found tolerance=8 better (0.533)
+        // random: A91 found tolerance=8 best (0.533)
         if (name.find("random") != std::string::npos) {
             return 8;
         }
