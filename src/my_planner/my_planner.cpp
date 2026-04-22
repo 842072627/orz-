@@ -43,6 +43,32 @@ namespace MyPlanner{
         return false;
     }
 
+    // A78: Map-specific PIBT runtime (ms per 100 agents)
+    int get_pibt_runtime_per_100_agents(SharedEnvironment* env) {
+        if (env == nullptr || env->map_name.empty()) return 1;
+        std::string name = env->map_name;
+        std::transform(name.begin(), name.end(), name.begin(), ::tolower);
+        // fulfill: A76 found optimal=2
+        if (name.find("fulfill") != std::string::npos || name.find("warehouse") != std::string::npos) {
+            return 2;
+        }
+        // Default
+        return 1;
+    }
+
+    // A78: Map-specific traffic flow assignment end time tolerance
+    int get_traffic_flow_tolerance(SharedEnvironment* env) {
+        if (env == nullptr || env->map_name.empty()) return 10;
+        std::string name = env->map_name;
+        std::transform(name.begin(), name.end(), name.begin(), ::tolower);
+        // fulfill: A77 found optimal=5
+        if (name.find("fulfill") != std::string::npos || name.find("warehouse") != std::string::npos) {
+            return 5;
+        }
+        // Default
+        return 10;
+    }
+
     static const char* debug_action_to_string(Action action)
     {
         switch (action)
@@ -430,11 +456,11 @@ namespace MyPlanner{
 
         const auto episode_start = std::chrono::steady_clock::now();
         const TimePoint episode_deadline = episode_start + std::chrono::milliseconds(std::max(0, time_limit));
-        int pibt_time = PIBT_RUNTIME_PER_100_AGENTS * env->num_of_agents/100;
+        int pibt_time = get_pibt_runtime_per_100_agents(env) * env->num_of_agents/100;
         if (pibt_time <= 0){
             pibt_time = 1;
         }
-        const int flow_budget_ms = std::max(0, time_limit - (pibt_time * num_steps) - TRAFFIC_FLOW_ASSIGNMENT_END_TIME_TOLERANCE);
+        const int flow_budget_ms = std::max(0, time_limit - (pibt_time * num_steps) - get_traffic_flow_tolerance(env));
         TimePoint flow_end_time = episode_start + std::chrono::milliseconds(flow_budget_ms);
 
         std::vector<double> local_priority = p;
