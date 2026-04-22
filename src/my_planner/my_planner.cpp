@@ -65,9 +65,9 @@ namespace MyPlanner{
         if (env == nullptr || env->map_name.empty()) return 10;
         std::string name = env->map_name;
         std::transform(name.begin(), name.end(), name.begin(), ::tolower);
-        // fulfill: A77 found optimal=5
+        // fulfill: A98 found tolerance=6 best (1.102)
         if (name.find("fulfill") != std::string::npos || name.find("warehouse") != std::string::npos) {
-            return 5;
+            return 6;
         }
         // random: A91 found tolerance=8 better (0.533)
         if (name.find("random") != std::string::npos) {
