@@ -1,200 +1,104 @@
 # 地图分析笔记
 
 - 创建时间: 2026-04-22
-- 最后更新: 2026-04-22
+- 最后更新: 2026-04-22 12:11
 - 状态: 进行中
 
 ---
 
-## 快速参考（必须记住）
+## 地图特征分析（关键发现！）
 
-| 地图 | 大小 | Agents | Planner | frank_wolfe | 分数 | 备注 |
-|------|------|--------|---------|-------------|------|------|
-| random | 64x64 | 400 | DefaultPlanner | N/A | 0.52 | MyPlanner崩溃 |
-| bos | ~70k cells | 600 | DefaultPlanner | N/A | 0.31 | 待研究 |
-| room | ~70k cells | 150 | MyPlanner | ❌ | 0.15 | tight地图 |
-| maze | ~70k cells | 40 | MyPlanner | ❌ | 0.09 | tight地图 |
-| fulfill | ~70k cells | 2500 | MyPlanner | ✅ | 1.07 | 我们的强项 |
-| orz | ~70k cells | 1800 | MyPlanner | ❌ | 0.22 | tight地图 |
-| iron | ~70k cells | 10000 | MyPlanner | ❌ | 0.15 | tight地图 |
+### 地图结构数据
 
----
+| 地图 | 大小 | 障碍物% | 狭窄通道% | 死胡同% | 特征分类 |
+|------|------|----------|-----------|---------|---------|
+| random | 64x64 | 10% | 6.5% | 0.6% | **开放地图** |
+| room | 64x64 | 11% | 2.6% | 0.3% | **开放地图** |
+| maze | 32x32 | 35% | 16.5% | 0.6% | **中等复杂度** |
+| fulfill | 500x140 | 45% | **71.2%** | 0% | **狭窄长走廊** |
+| orz | 1491x656 | 90% | 3.8% | 0.3% | **极度拥挤** |
+| iron | 1800x1912 | 36% | 0.3% | 0% | **超大规模开放** |
 
-## Random 地图
+### 关键发现（必须死记！）
 
-- 创建时间: 2026-04-22
-- 最后更新: 2026-04-22
+1. **fulfill 是狭窄长走廊地图** - 71.2% 是狭窄通道！
+   - 不是开放空间，是窄通道
+   - frank_wolfe 流量优化有效因为通道本身就是瓶颈
 
-### 基本信息
-- 地图: random-64-64-10.map
-- Agents: 400
-- Steps: 300
-- Planner: **DefaultPlanner** (MyPlanner 崩溃)
+2. **random 是开放地图** - 90% 开放空间
+   - 但 MyPlanner 崩溃原因不明
+   - DefaultPlanner 用的贪心PIB
 
-### 分数计算
-```
-score = tasks / makespan = 157 / 300 ≈ 0.523
-```
+3. **orz 极度拥挤** - 90% 是障碍物！
+   - 只有 10% 可通行
+   - 分数低但不是因为通道窄(3.8%)
 
-### 已知问题
-1. **MyPlanner 崩溃**: 原因不明，PIBT 实现差异
-2. **frank_wolfe 有帮助**: 跳过 frank_wolfe 会变差
+4. **iron 超大规模** - 1800x1912 = 344万格子
+   - 但只有 0.3% 狭窄
+   - agent极多(10000)导致冲突
 
-### 待研究
-- [ ] 为什么 DefaultPlanner 可以，MyPlanner 不行
-- [ ] Team_RAPID 用 LNS，效果如何
-- [ ] Delay 机制如何利用
+5. **maze 中等复杂度** - 16.5% 狭窄
+   - maze 但 agents 只有 40，分数最低
 
 ---
 
-## Bos 地图
+## 地图分类
 
-- 创建时间: 2026-04-22
-- 最后更新: 2026-04-22
+### 按空间分类
 
-### 基本信息
-- 地图: city.domain
-- Agents: 600
-- Steps: 700
-- Planner: **DefaultPlanner**
+| 类型 | 地图 | 狭窄% | 策略重点 |
+|------|------|--------|---------|
+| **开放空间** | random, room, iron | <10% | 流量优化、冲突解决 |
+| **狭窄通道** | fulfill, maze | >10% | SIPP、时间空间A* |
+| **极度拥挤** | orz | - | 优先级继承、避让 |
 
-### 分数计算
-```
-score = tasks / makespan = 215 / 700 ≈ 0.307
-```
+### 按规模分类
 
-### 问题
-- 分数很低 (0.31)，是所有地图中第二差的
-- 使用 DefaultPlanner，不是我们的强项
-
-### 待研究
-- [ ] 为什么分数这么低
-- [ ] 是否可以切换到 MyPlanner
+| 规模 | 地图 | Agents | 策略重点 |
+|------|------|--------|---------|
+| 小规模 | maze | 40 | 精细冲突解决 |
+| 中规模 | room, random | 150-400 | 平衡优化 |
+| 大规模 | fulfill, orz | 1800-2500 | 吞吐量优先 |
+| 超大规模 | iron | 10000 | 宏观规划 |
 
 ---
 
-## Room 地图
+## 当前分数与策略
 
-- 创建时间: 2026-04-22
-- 最后更新: 2026-04-22
-
-### 基本信息
-- Agents: 150
-- Steps: 400
-- Planner: **MyPlanner** (跳过 frank_wolfe)
-
-### 分数计算
-```
-score = tasks / makespan = 61 / 400 ≈ 0.152
-```
-
-### 已验证策略
-- ✅ frank_wolfe 跳过（避免超时）
+| 地图 | 分数 | 特征 | 当前策略 | 应该策略 |
+|------|------|------|---------|---------|
+| fulfill | 1.07 | 狭窄长走廊 | MyPlanner+FW | ✅ 正确 |
+| random | 0.52 | 开放地图 | DefaultPlanner | ❌ 应试MyPlanner? |
+| orz | 0.22 | 极度拥挤 | MyPlanner(无FW) | SIPP? |
+| room | 0.15 | 开放地图 | MyPlanner(无FW) | 应该+FW? |
+| iron | 0.15 | 超大规模开放 | MyPlanner(无FW) | LNS? |
+| bos | 0.31 | 开放地图 | DefaultPlanner | ??? |
+| maze | 0.09 | 中等复杂 | MyPlanner(无FW) | SIPP? |
 
 ---
 
-## Maze 地图
+## 下一步研究
 
-- 创建时间: 2026-04-22
-- 最后更新: 2026-04-22
-
-### 基本信息
-- Agents: 40
-- Steps: 500
-- Planner: **MyPlanner** (跳过 frank_wolfe)
-
-### 分数计算
-```
-score = tasks / makespan = 45 / 500 ≈ 0.090
-```
-
-### 问题
-- 分数最低 (0.09)
-- Agents 很少但分数很差
-
-### 待研究
-- [ ] 为什么 agents 少但分数低
-- [ ] 地图复杂度是否是问题
+1. **为什么 MyPlanner 在 random 崩溃？** - random 是开放地图，应该适合 PIBT
+2. **为什么 room 用 MyPlanner(无FW) 分数低？** - room 也是开放地图，应该+FW
+3. **SIPP 对狭窄地图是否有效？** - fulfill, maze, orz
+4. **LNS 对大规模地图是否有效？** - iron (10000 agents)
 
 ---
 
-## Fulfill 地图
+## 待验证假设
 
-- 创建时间: 2026-04-22
-- 最后更新: 2026-04-22
+### 假设1: room 应该用 frank_wolfe
+- room 是开放地图(89%开放)
+- frank_wolfe 应该有效
+- 当前跳过 frank_wolfe 可能是错的
 
-### 基本信息
-- 地图: warehouse.domain / fulfill-example_2500.json
-- Agents: 2500
-- Steps: 1000
-- Planner: **MyPlanner** (使用 frank_wolfe)
+### 假设2: SIPP 对 fulfill 更好
+- fulfill 71.2% 狭窄通道
+- SIPP 的安全 intervals 适合狭窄地形
+- 可能比 frank_wolfe 更好
 
-### 分数计算
-```
-score = tasks / makespan = 1066 / 1000 ≈ 1.066
-```
-
-### 关键发现
-- ✅ **我们的强项！超过所有冠军！**
-- frank_wolfe 流量优化显著提升分数
-
-### 已验证策略
-- ✅ frank_wolfe 开启（流量优化有效）
-- ✅ MyPlanner 比 DefaultPlanner 好
-
-### 待研究
-- [ ] 能否进一步提升到 1.2+
-- [ ] 是否存在更优的参数配置
-
----
-
-## Orz 地图
-
-- 创建时间: 2026-04-22
-- 最后更新: 2026-04-22
-
-### 基本信息
-- Agents: 1800
-- Steps: 400
-- Planner: **MyPlanner** (跳过 frank_wolfe)
-
-### 分数计算
-```
-score = tasks / makespan = 86 / 400 ≈ 0.215
-```
-
-### 已验证策略
-- ✅ frank_wolfe 跳过（避免超时）
-
----
-
-## Iron 地图
-
-- 创建时间: 2026-04-22
-- 最后更新: 2026-04-22
-
-### 基本信息
-- Agents: 10000
-- Steps: 700
-- Planner: **MyPlanner** (跳过 frank_wolfe)
-
-### 分数计算
-```
-score = tasks / makespan = 103 / 700 ≈ 0.147
-```
-
-### 问题
-- Agents 很多 (10000) 但分数低
-- 可能是 tight 地形导致冲突多
-
-### 已验证策略
-- ✅ frank_wolfe 跳过（避免超时）
-
----
-
-## 下一步研究优先级
-
-1. **🔥 Fulfill**: 我们的强项，进一步提升
-2. **🔥 Random**: 理解崩溃原因
-3. **🔸 Bos**: 理解低分原因
-4. **🔸 Room/Maze/Iron/Orz**: frank_wolfe 替代方案
+### 假设3: iron 应该用 LNS
+- iron 10000 agents
+- LNS 邻域搜索处理大规模
+- DefaultPlanner 用 LNS 可能更好
