@@ -52,7 +52,7 @@ namespace MyPlanner{
         if (name.find("fulfill") != std::string::npos || name.find("warehouse") != std::string::npos) {
             return 2;
         }
-        // random: A84 found pibt_runtime=2 for open map
+        // random: A84 found pibt_runtime=2, A96 found 3 worse
         if (name.find("random") != std::string::npos) {
             return 2;
         }
@@ -69,9 +69,9 @@ namespace MyPlanner{
         if (name.find("fulfill") != std::string::npos || name.find("warehouse") != std::string::npos) {
             return 5;
         }
-        // random: A91 found tolerance=8 better (0.533 vs 0.517), trying 6
+        // random: A91 found tolerance=8 better (0.533)
         if (name.find("random") != std::string::npos) {
-            return 6;
+            return 8;
         }
         // Default
         return 10;
