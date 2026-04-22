@@ -144,28 +144,37 @@ void frank_wolfe(TrajLNS& lns,std::unordered_set<int>& updated, TimePoint timeli
             }
         }
     } else {
-        // Smaller maps: use neighbor_size=8 approach
+        // Smaller maps: use neighbor_size=8 approach (like Team_RAPID)
         const int neighbor_size = 8;
         int deadline_per_neighbor = std::max(10, (int)(remaining_ms / neighbor_size));
-        int processed = 0;
-        while (std::chrono::steady_clock::now() < timelimit && processed < neighbor_size) {
-            int a = replan_order[processed].id;
-            processed++;
-            if (lns.traj_dists[a].empty() || lns.trajs[a].empty()){
-                continue;
-            }
-            std::vector<int> old_traj = lns.trajs[a];
-            if (!lns.trajs[a].empty())
-                remove_traj(lns, a);
-            TimePoint agent_deadline = std::chrono::steady_clock::now() + 
-                std::chrono::milliseconds(deadline_per_neighbor);
-            if (!update_traj(lns, a, &agent_deadline)){
-                lns.trajs[a] = old_traj;
-                if (!old_traj.empty()){
-                    add_traj(lns,a);
+        int iteration = 0;
+        while (std::chrono::steady_clock::now() < timelimit) {
+            // Select up to neighbor_size agents starting from current position
+            int start_idx = (iteration % (agent_count / neighbor_size + 1)) * neighbor_size;
+            int end_idx = std::min(start_idx + neighbor_size, agent_count);
+            int processed = 0;
+            for (int idx = start_idx; idx < end_idx && std::chrono::steady_clock::now() < timelimit; idx++) {
+                int a = replan_order[idx].id;
+                processed++;
+                if (lns.traj_dists[a].empty() || lns.trajs[a].empty()){
+                    continue;
                 }
-                continue;
+                std::vector<int> old_traj = lns.trajs[a];
+                if (!lns.trajs[a].empty())
+                    remove_traj(lns, a);
+                TimePoint agent_deadline = std::chrono::steady_clock::now() + 
+                    std::chrono::milliseconds(deadline_per_neighbor);
+                if (!update_traj(lns, a, &agent_deadline)){
+                    lns.trajs[a] = old_traj;
+                    if (!old_traj.empty()){
+                        add_traj(lns,a);
+                    }
+                    continue;
+                }
             }
+            iteration++;
+            // Break if we've completed a full cycle
+            if (processed < neighbor_size) break;
         }
     }
     return;
