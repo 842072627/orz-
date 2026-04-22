@@ -9,8 +9,6 @@
 #include "planner.h"
 
 // Check if map should use our planner or default starkit planner
-// Our planner (MyPlanner) is optimized for fulfill/warehouse but crashes on room/maze/iron/orz
-// Default planner (DefaultPlanner) works on all maps but is less optimized
 bool should_use_my_planner(SharedEnvironment* env) {
     if (env == nullptr || env->map_name.empty()) return true;
     
@@ -23,7 +21,8 @@ bool should_use_my_planner(SharedEnvironment* env) {
         return true;  // Use our optimized planner
     }
     
-    // Use default starkit planner for room, maze, iron, bos, orz, random maps
+    // Use default starkit planner for room, maze, iron, orz, random, bos maps
+    // (MyPlanner crashes on room/maze/iron, and is worse than DefaultPlanner on random/bos)
     return false;
 }
 
