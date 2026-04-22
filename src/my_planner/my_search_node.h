@@ -15,6 +15,7 @@ struct s_node
     int all_vertex_flow = 0;
     bool closed = false;
     int depth = 0;
+    int timestep = 0;  // A138: time dimension for SIPP
     double tie_breaker = 0;
     s_node* parent = nullptr;
 
@@ -47,6 +48,7 @@ struct s_node
         all_vertex_flow = 0;
         closed = false;
         depth = 0;
+        timestep = 0;  // A138: reset timestep
         parent = nullptr;
         tie_breaker = 0;
 
