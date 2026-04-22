@@ -34,6 +34,9 @@ namespace MyPlanner{
         std::string name = env->map_name;
         std::transform(name.begin(), name.end(), name.begin(), ::tolower);
         // Skip frank_wolfe for maps where it tends to timeout
+        // room: A110 found frank_wolfe + MyPlanner crashes at 150 agents
+        // maze: A113 found frank_wolfe crashes even with 40 agents (narrow passages)
+        // iron/orz: too large, timeout
         if (name.find("room") != std::string::npos ||
             name.find("maze") != std::string::npos ||
             name.find("iron") != std::string::npos ||
@@ -55,6 +58,10 @@ namespace MyPlanner{
         // random: A84 found pibt_runtime=2, A96 found 3 worse
         if (name.find("random") != std::string::npos) {
             return 2;
+        }
+        // A113: maze needs more PIBT time for narrow passages
+        if (name.find("maze") != std::string::npos) {
+            return 3;
         }
         // Default
         return 1;
