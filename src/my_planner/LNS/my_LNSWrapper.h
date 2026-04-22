@@ -25,8 +25,8 @@ public:
     PathTable path_table;
     TimeSpaceAStar tsp;
     
-    int neighbor_size = 5;  // Number of agents to replan
-    int max_iterations = 10;
+    int neighbor_size = 10;  // A53: increased from 5 to 10
+    int max_iterations = 100;  // A52: optimal found: 100
     int window_size = 10;
     
     // Current paths for all agents
