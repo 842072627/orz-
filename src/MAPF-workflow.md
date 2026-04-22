@@ -41,6 +41,20 @@
 
 ---
 
+## 构建
+
+**构建脚本**: `test-scripts/build.bat`
+
+```batch
+# 用法
+cd C:\Users\Administrator\Desktop\test-studio-mapf\test-scripts
+build.bat
+```
+
+**注意**: 使用 Python311 (C:\Python311) 进行构建，避免 Python3.14 + MinGW 链接问题。
+
+---
+
 ## 测试脚本
 
 ### 独立测试脚本（每个地图一个）
@@ -59,6 +73,7 @@
 |------|------|
 | `run_mini_md5.ps1` | 默认测试 (random + fulfill) |
 | `run_quick_test_md5.ps1` | 全地图测试 (7个地图) |
+| `build.bat` | 构建 lifelong.exe |
 
 ### 源码MD5检测
 所有脚本使用源码MD5检测，不变则用缓存。

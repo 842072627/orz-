@@ -33,8 +33,8 @@ namespace MyPlanner{
         if (env == nullptr || env->map_name.empty()) return false;
         std::string name = env->map_name;
         std::transform(name.begin(), name.end(), name.begin(), ::tolower);
-        // Skip frank_wolfe for tight maps where it tends to timeout
-        if (name.find("room") != std::string::npos || 
+        // Skip frank_wolfe for maps where it tends to timeout
+        if (name.find("room") != std::string::npos ||
             name.find("maze") != std::string::npos ||
             name.find("iron") != std::string::npos ||
             name.find("orz") != std::string::npos) {
