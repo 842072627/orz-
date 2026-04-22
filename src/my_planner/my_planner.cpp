@@ -52,6 +52,10 @@ namespace MyPlanner{
         if (name.find("fulfill") != std::string::npos || name.find("warehouse") != std::string::npos) {
             return 2;
         }
+        // random: A84 found pibt_runtime=2 for open map
+        if (name.find("random") != std::string::npos) {
+            return 2;
+        }
         // Default
         return 1;
     }
