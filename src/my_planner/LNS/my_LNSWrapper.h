@@ -25,7 +25,7 @@ public:
     PathTable path_table;
     TimeSpaceAStar tsp;
     
-    int neighbor_size = 8;  // A53: optimal, Team_RAPID uses 8
+    int neighbor_size = 8;  // A53: optimal for fulfill
     int max_iterations = 100;  // A52: optimal found: 100
     int window_size = 10;  // A64: 10 is optimal, 15 is worse
     
