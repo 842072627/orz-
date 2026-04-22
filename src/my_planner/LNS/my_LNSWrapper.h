@@ -25,9 +25,9 @@ public:
     PathTable path_table;
     TimeSpaceAStar tsp;
     
-    int neighbor_size = 10;  // A53: increased from 5 to 10
+    int neighbor_size = 8;  // A53: optimal, Team_RAPID uses 8
     int max_iterations = 100;  // A52: optimal found: 100
-    int window_size = 10;
+    int window_size = 10;  // A64: 10 is optimal, 15 is worse
     
     // Current paths for all agents
     std::vector<std::vector<std::pair<int, int>>> current_paths;
