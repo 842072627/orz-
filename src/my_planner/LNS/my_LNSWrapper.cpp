@@ -1,9 +1,9 @@
 // LNSWrapper - LNS integration for guide path refinement
 // Uses TimeSpaceA* for replanning with PathTable constraints
 
-#include "LNS/Instance.h"
-#include "LNS/PathTable.h"
-#include "LNS/TimeSpaceAStar.h"
+#include "LNS/my_Instance.h"
+#include "LNS/my_PathTable.h"
+#include "LNS/my_TimeSpaceAStar.h"
 #include <iostream>
 #include <vector>
 #include <algorithm>

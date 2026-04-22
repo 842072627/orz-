@@ -4,7 +4,7 @@
 #include <vector>
 #include <iostream>
 
-#include "search_node.h"
+#include "my_search_node.h"
 
 namespace MyPlanner{
 

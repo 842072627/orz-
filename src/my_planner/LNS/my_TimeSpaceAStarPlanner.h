@@ -2,10 +2,10 @@
 #include <vector>
 #include <chrono>
 #include "../my_planner/my_Types.h"
-#include "../my_planner/search.h"
-#include "../my_planner/heuristics.h"
-#include "Instance.h"
-#include "PathTable.h"
+#include "../my_search.h"
+#include "../my_heuristics.h"
+#include "my_Instance.h"
+#include "my_PathTable.h"
 
 namespace LNS {
 

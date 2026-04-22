@@ -2,10 +2,10 @@
 #define TRAJ_LNS_H
 
 #include "my_Types.h"
-#include "Memory.h"
-#include "search_node.h"
-#include "heap.h"
-#include "heuristics.h"
+#include "my_Memory.h"
+#include "my_search_node.h"
+#include "my_heap.h"
+#include "my_heuristics.h"
 #include <iostream>
 
 #include <set>

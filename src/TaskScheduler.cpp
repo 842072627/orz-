@@ -1,7 +1,7 @@
 #include "TaskScheduler.h"
 
-#include "my_planner/scheduler.h"
-#include "my_planner/const.h"
+#include "my_planner/my_scheduler.h"
+#include "my_planner/my_const.h"
 
 
 // ============================================================

@@ -4,7 +4,7 @@
 // greedily matches each free agent to the task with minimum heuristic distance
 // makespan. This is intentionally simple and serves as a reference scheduler.
 
-#include "scheduler.h"
+#include "my_scheduler.h"
 
 namespace MyPlanner{
 

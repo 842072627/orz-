@@ -11,9 +11,9 @@
 //
 // Modified for search nodes used here. Mike
 
-#include "utils.h"
-#include "Memory.h"
-#include "search_node.h"
+#include "my_utils.h"
+#include "my_Memory.h"
+#include "my_search_node.h"
 #include "my_Types.h"
 #include <cassert>
 #include <iostream>

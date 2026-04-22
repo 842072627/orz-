@@ -9,7 +9,7 @@
 
 #include "my_Types.h"
 #include "SharedEnv.h"
-#include "heuristics.h"
+#include "my_heuristics.h"
 #include <random>
 
 namespace MyPlanner{

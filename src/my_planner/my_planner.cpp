@@ -15,13 +15,13 @@
 //   for iterative multi-agent path finding. Artificial Intelligence, Vol. 310.
 
 #include "my_planner.h"
-#include "heuristics.h"
+#include "my_heuristics.h"
 #include "SharedEnv.h"
-#include "pibt.h"
-#include "flow.h"
-#include "const.h"
-#include "LNS/LNSWrapper.h"
-#include "LNS/ConflictRepair.h"
+#include "my_pibt.h"
+#include "my_flow.h"
+#include "my_const.h"
+#include "LNS/my_LNSWrapper.h"
+#include "LNS/my_ConflictRepair.h"
 #include <chrono>
 #include <iostream>
 

@@ -1,8 +1,8 @@
 #pragma once
 
-#include "Instance.h"
-#include "PathTable.h"
-#include "TimeSpaceAStar.h"
+#include "my_Instance.h"
+#include "my_PathTable.h"
+#include "my_TimeSpaceAStar.h"
 #include <vector>
 #include <algorithm>
 #include <random>

@@ -3,7 +3,7 @@
 
 //my planner includes
 #include "my_planner/my_planner.h"
-#include "my_planner/const.h"
+#include "my_planner/my_const.h"
 
 // Default planner (starkit baseline)
 #include "planner.h"

@@ -8,10 +8,9 @@
 #include <tuple>
 #include <cstdint>
 #include "my_Types.h"
-#include "utils.h"
-#include "heuristics.h"
+#include "my_utils.h"
+#include "my_heuristics.h"
 #include "my_TrajLNS.h"
-#include "utils.h"
 
 
 

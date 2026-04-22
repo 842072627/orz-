@@ -3,11 +3,11 @@
 #define search_hpp
 
 #include "my_Types.h"
-#include "utils.h"
-#include "Memory.h"
-#include "heap.h"
-#include "search_node.h"
-#include "heuristics.h"
+#include "my_utils.h"
+#include "my_Memory.h"
+#include "my_heap.h"
+#include "my_search_node.h"
+#include "my_heuristics.h"
 
 namespace MyPlanner{
 //a astar minimized the opposide traffic flow with existing traffic flow

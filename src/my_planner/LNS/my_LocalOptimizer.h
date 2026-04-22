@@ -2,9 +2,9 @@
 #include <random>
 #include <vector>
 #include <unordered_set>
-#include "PathTable.h"
-#include "Instance.h"
-#include "TimeSpaceAStarPlanner.h"
+#include "my_PathTable.h"
+#include "my_Instance.h"
+#include "my_TimeSpaceAStarPlanner.h"
 
 namespace LNS {
 
