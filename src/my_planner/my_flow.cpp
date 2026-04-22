@@ -114,6 +114,7 @@ void frank_wolfe(TrajLNS& lns,std::unordered_set<int>& updated, TimePoint timeli
     // For large maps (>1000 agents): use all-agents approach (original)
     // For smaller maps: use neighbor-based approach (8 neighbors)
     const int agent_count = lns.env->num_of_agents;
+    const int neighbor_size = 8;  // default for all maps
     
     auto now = std::chrono::steady_clock::now();
     auto remaining_ms = std::chrono::duration<double, std::milli>(timelimit - now).count();
@@ -146,7 +147,6 @@ void frank_wolfe(TrajLNS& lns,std::unordered_set<int>& updated, TimePoint timeli
     } else {
         // Smaller maps (<1000 agents): use neighbor-based approach (like Team_RAPID)
         // A118 fix: Process top deviation agents with more time per agent
-        const int neighbor_size = 8;
         int processed_count = 0;
         
         while (std::chrono::steady_clock::now() < timelimit && processed_count < agent_count) {
