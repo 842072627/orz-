@@ -2,9 +2,12 @@
 
 ---
 
-## 目标
+## ⚠️ 重要提醒
 
-> **random + fulfill 总分达到 4.0 以上**
+1. **云端冠军不是一个！** 有6个团队的代码，每个用不同算法
+2. **笔记全部在 `src/notes/`**，不许到处留
+3. **地图判断用字符串包含**，不许写死地图名
+4. **分数公式**: `score = numTaskFinished / makespan`
 
 ---
 
@@ -12,59 +15,78 @@
 
 | 文件 | 路径 |
 |------|------|
-| Workflow | `src/MAPF-workflow.md` |
-| 实验记录 | `src/MAPF-records.md` |
-| 研究笔记 | `src/my_planner/RESEARCH-notes.md` |
+| **Workflow** | `src/MAPF-workflow.md` |
+| **笔记文件夹** | `src/notes/` |
+| 实验记录 | `src/notes/EXPERIMENTS/` |
+| 创意想法 | `src/notes/IDEAS/` |
+| 地图分析 | `src/notes/MAPS/` |
+| 研究资料 | `src/notes/RESEARCH/` |
 | 代码 | `src/my_planner/` |
 | 备份 | `default_planner/` |
-| 项目笔记 | `C:\Users\Administrator\Desktop\test-studio-mapf\项目笔记.md` |
-| **冠军代码** | `Best-Implementations-2024/Team_Kitty_Knight_da7d428b/` |
+| 冠军代码 | `Best-Implementations-2024/` (6个团队) |
 | build | `build/lifelong.exe` |
+
+---
+
+## 笔记规则（死记！）
+
+1. **所有想法必须写进 `src/notes/`**，不许留在别处
+2. **每次实验后立即记录**，不许"之后再写"
+3. **笔记按类别归档**：
+   - `EXPERIMENTS/` - 实验记录 (A42.md, A44.md...)
+   - `IDEAS/` - 创意想法 (delay-strategy.md...)
+   - `MAPS/` - 地图分析 (random.md, fulfill.md...)
+   - `RESEARCH/` - 研究资料 (champion-teams.md...)
+4. **查看笔记先看 INDEX.md**
 
 ---
 
 ## 测试脚本
 
-| 脚本 | 用途 | 说明 |
-|------|------|------|
-| `run_mini_md5.ps1` | **默认测试** | random + fulfill，2个地图 |
-| `run_quick_test_md5.ps1` | **全地图测试** | 7个地图全部测试，含MD5缓存 |
-| `run_mini_variance.ps1` | 方差测试 | 非必要不使用 |
-| `build.bat` | 编译 | 构建lifelong.exe |
+### 独立测试脚本（每个地图一个）
+| 脚本 | 地图 | 输出目录 |
+|------|------|----------|
+| `run_random_md5.ps1` | random | random_round/ |
+| `run_bos_md5.ps1` | bos | bos_round/ |
+| `run_room_md5.ps1` | room | room_round/ |
+| `run_maze_md5.ps1` | maze | maze_round/ |
+| `run_fulfill_md5.ps1` | fulfill | fulfill_round/ |
+| `run_orz_md5.ps1` | orz | orz_round/ |
+| `run_iron_md5.ps1` | iron | iron_round/ |
 
-- **默认**: `C:\Users\Administrator\Desktop\test-studio-mapf\test-scripts\run_mini_md5.ps1` (random + fulfill)
-- **全地图**: `C:\Users\Administrator\Desktop\test-studio-mapf\test-scripts\run_quick_test_md5.ps1` (7地图)
-- **方差**: `C:\Users\Administrator\Desktop\test-studio-mapf\test-scripts\run_mini_variance.ps1` (非必要不使用)
-- **build**: `C:\Users\Administrator\Desktop\test-studio-mapf\test-scripts\build.bat`
+### 其他脚本
+| 脚本 | 用途 |
+|------|------|
+| `run_mini_md5.ps1` | 默认测试 (random + fulfill) |
+| `run_quick_test_md5.ps1` | 全地图测试 (7个地图) |
 
-结果目录: `C:\Users\Administrator\Desktop\test-studio-mapf\test-scripts\round_mini\roundN\scores.txt`
-全地图结果: `C:\Users\Administrator\Desktop\test-studio-mapf\test-scripts\round\round1\scores.txt`
+### 源码MD5检测
+所有脚本使用源码MD5检测，不变则用缓存。
 
-### 测试地图
+---
 
-**mini (random + fulfill)**:
-- random
-- fulfill
+## 地图判断方式
 
-**全地图测试**:
-- random
-- bos
-- room
-- maze
-- fulfill
-- orz
-- iron
+```cpp
+// ✅ 正确：字符串包含判断
+std::string name = env->map_name;
+std::transform(name.begin(), name.end(), name.begin(), ::tolower);
+if (name.find("room") != std::string::npos) { ... }
+
+// ❌ 错误：写死地图名
+if (map_name == "room") { ... }
+```
 
 ---
 
 ## 核心接口文件（4个）
 
-| 文件 | 职责 | 可重写函数 |
-|------|------|-----------|
-| `src/Entry.cpp` + `inc/Entry.h` | 入口协调 | `compute()`, `initialize()` |
-| `src/TaskScheduler.cpp` + `inc/TaskScheduler.h` | 任务调度 | `plan()`, `initialize()` |
-| `src/Executor.cpp` + `inc/Executor.h` | 执行控制 | `process_new_plan()`, `next_command()`, `initialize()` |
-| `src/MAPFPlanner.cpp` + `inc/MAPFPlanner.h` | 路径规划 | `plan()`, `initialize()` |
+| 文件 | 职责 |
+|------|------|
+| `src/Entry.cpp` + `inc/Entry.h` | 入口协调 |
+| `src/TaskScheduler.cpp` + `inc/TaskScheduler.h` | 任务调度 |
+| `src/Executor.cpp` + `inc/Executor.h` | 执行控制 |
+| `src/MAPFPlanner.cpp` + `inc/MAPFPlanner.h` | 路径规划 |
 
 ---
 
@@ -76,7 +98,7 @@
 | `executor.cpp` | TPG执行控制 |
 | `scheduler.cpp` | 贪心调度 |
 | `pibt.cpp` | PIBT算法 |
-| `flow.cpp` | 流优化 |
+| `flow.cpp` | frank_wolfe流优化 |
 | `heuristics.cpp` | 启发式 |
 
 ---
@@ -96,65 +118,42 @@
 
 ---
 
-## 重要链接
+## 冠军团队（不只一个！）
 
-| 资源 | 地址 |
-|------|------|
-| 比赛官网 | https://www.leagueofrobotrunners.org/submission |
-| clawhub | https://clawhub.ai |
+| 团队 | 算法 | Random配置 |
+|------|------|------------|
+| Team_Kitty_Knight | CausalPIBT + PLNS | causal_pibt |
+| **Team_RAPID** | **LNS + LaCAM2** | **LNS** |
+| Team_No_Man_Sky (3版本) | 待研究 | 待研究 |
+| Team_SYSU-LCIS | 待研究 | 待研究 |
 
-> ⚠️ 比赛官网用 React 编写，只能用浏览器访问。
-
----
-
-## 冠军代码分析（已研究）
-
-**Team_Kitty_Knight架构**：CausalPIBT + PLNS + TimeSpaceA* + GlobalManager
-
-**关键发现**：
-- 冠军的astar是 `f=g+h+op_flow` 的flow-guided A*，不是真正的3D时空搜索
-- GlobalManager是LNS并行协调框架，不是简单的全局状态管理
-- PathTable是O(1)冲突检测表，LNS跨neighborhood协调关键
-- single-step vs multi-step：champion每步replan，我们window内stale
-
-详细分析见：`src/my_planner/RESEARCH-notes.md`
+**Team_RAPID 对 random 使用 LNS 算法！**
 
 ---
 
-## 当前方案（2026-04-21）
+## 当前分数 (commit 3f1c635)
 
-### 地图分流策略
+| 地图 | 分数 | Planner | frank_wolfe |
+|------|------|---------|-------------|
+| random | 0.52 | DefaultPlanner | N/A |
+| bos | 0.31 | DefaultPlanner | N/A |
+| room | 0.15 | MyPlanner | ❌跳过 |
+| maze | 0.09 | MyPlanner | ❌跳过 |
+| fulfill | 1.07 | MyPlanner | ✅ |
+| orz | 0.22 | MyPlanner | ❌跳过 |
+| iron | 0.15 | MyPlanner | ❌跳过 |
+| **Total** | **2.50** | - | - |
 
-由于room/maze/iron/orz地图会导致崩溃，采用按地图选择planner的策略：
+---
 
-| 地图类型 | Planner | 说明 |
-|---------|---------|------|
-| fulfill/warehouse | **MyPlanner** | 我们优化的代码 |
-| 其他所有地图 | **DefaultPlanner** | starkit原始planner |
+## 已验证策略
 
-### 实现
+| 实验 | 描述 | 结果 |
+|------|------|------|
+| A42 | 跳过frank_wolfe for tight maps | ✅ |
+| A44 | Random tie-breaking | ✅ |
+| A45 | MyPlanner for random | ❌崩溃 |
+| A46 | MIN_PIBT_TIME=100 | ❌变差 |
+| A47 | frank_wolfe skip for random | ❌变差 |
 
-`src/MAPFPlanner.cpp`中的`should_use_my_planner()`函数根据`env->map_name`判断。
-
-### 测试结果
-
-**全地图测试** (commit 38955c8):
-```
-random: 0.523 | bos: 0.310 | room: 0.180 | maze: 0.100
-fulfill: 1.131 | orz: 0.220 | iron: 0.143
-Total: 2.607
-```
-
-### 分数对比
-
-| Map | 我们 | 云端冠军 | GAP |
-|-----|------|----------|-----|
-| random | 0.523 | 0.985 | -47% |
-| bos | 0.310 | 1.000 | -69% |
-| room | 0.180 | 0.880 | -80% |
-| maze | 0.100 | 0.727 | -86% |
-| fulfill | 1.131 | 0.825 | +37% ✅ |
-| orz | 0.220 | 0.863 | -75% |
-| iron | 0.143 | 0.860 | -83% |
-
-**结论**：fulfill唯一超过冠军，其他地图差距巨大。
+详见：`src/notes/EXPERIMENTS/`
