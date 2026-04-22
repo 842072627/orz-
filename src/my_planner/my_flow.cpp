@@ -1,5 +1,5 @@
 #include "my_flow.h"
-
+#include "my_sipp.h"
 
 #include <random>
 #include <unordered_set>
@@ -208,10 +208,27 @@ void init_dist_table(TrajLNS& lns){
     }
 }
 
+//update traj and distance table for agent i (backward compatible 3-arg version)
+bool update_traj_3args(TrajLNS& lns, int i, const TimePoint* deadline){
+    return update_traj(lns, i, deadline, false);
+}
+
 //update traj and distance table for agent i
-bool update_traj(TrajLNS& lns, int i, const TimePoint* deadline){
+// use_sipp parameter controls whether to use SIPP (temporal conflict avoidance)
+bool update_traj(TrajLNS& lns, int i, const TimePoint* deadline, bool use_sipp){
     int start = lns.env->curr_states[i].location;
     int goal = lns.tasks[i];
+    
+    if (use_sipp) {
+        // A138: Use SIPP for maps that need temporal conflict handling
+        std::vector<int> path;
+        if (findPathSIPP(lns.env, start, goal, path, 500)) {
+            lns.trajs[i] = path;
+            return true;
+        }
+        return false;
+    }
+    
     s_node goal_node = astar(lns.env,lns.flow, lns.heuristics[goal],lns.trajs[i],lns.mem,start,goal, &(lns.neighbors), deadline);
     if (goal_node.id == -1){
         return false;

@@ -36,9 +36,8 @@ struct SIPPCompare {
     }
 };
 
-// Find path using SIPP (Safe Interval Path Planning)
-// Returns true if path found, fills path vector with positions
-bool findPathSIPP(
+// A138: Find SIPP path WITH ReservationTable (caller provides RT)
+bool findPathSIPPWithRT(
     SharedEnvironment* env,
     int start, 
     int goal, 
@@ -158,6 +157,18 @@ bool findPathSIPP(
     }
     
     return false;  // No path found
+}
+
+// A138: Wrapper for backward compatibility - creates empty ReservationTable
+bool findPathSIPP(
+    SharedEnvironment* env,
+    int start, 
+    int goal, 
+    std::vector<int>& path,
+    int max_timestep = 1000
+) {
+    ReservationTable rt;
+    return findPathSIPPWithRT(env, start, goal, rt, path, max_timestep);
 }
 
 }  // namespace MyPlanner

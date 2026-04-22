@@ -28,8 +28,16 @@ void update_dist_2_path(TrajLNS& lns, int i);
 //compute distance table for each traj
 void init_dist_table(TrajLNS& lns);
 
-//update traj and distance table for agent i
-bool update_traj(TrajLNS& lns, int i, const TimePoint* deadline = nullptr);
+//update traj and distance table for agent i (backward compatible 3-arg version)
+bool update_traj_3args(TrajLNS& lns, int i, const TimePoint* deadline);
+
+//update traj and distance table for agent i (with SIPP option)
+bool update_traj(TrajLNS& lns, int i, const TimePoint* deadline, bool use_sipp);
+
+//inline wrapper for backward compatibility
+inline bool update_traj(TrajLNS& lns, int i, const TimePoint* deadline) {
+    return update_traj_3args(lns, i, deadline);
+}
 
 
 }
