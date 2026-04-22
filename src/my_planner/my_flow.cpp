@@ -221,7 +221,8 @@ bool update_traj(TrajLNS& lns, int i, const TimePoint* deadline, bool use_sipp){
     
     if (use_sipp) {
         // A138: Use SIPP for maps that need temporal conflict handling
-        // Note: Current SIPP uses empty ReservationTable - needs proper integration
+        // IMPORTANT: Without proper ReservationTable, SIPP skeleton performs WORSE than baseline
+        // This is expected - skeleton SIPP has empty RT, no real temporal avoidance
         std::vector<int> path;
         if (findPathSIPP(lns.env, start, goal, path, 500)) {
             lns.trajs[i] = path;
