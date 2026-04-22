@@ -1,5 +1,3 @@
-
-
 #include "my_flow.h"
 
 
@@ -112,37 +110,62 @@ void frank_wolfe(TrajLNS& lns,std::unordered_set<int>& updated, TimePoint timeli
         return a.rand > b.rand;
     });
 
-    // A41: Use adaptive deadline for update_traj
-    // Calculate remaining time and allocate a fair share per agent
+    // A112: Use map-specific neighbor_size (like Team_RAPID)
+    // For large maps (>1000 agents): use all-agents approach (original)
+    // For smaller maps: use neighbor-based approach (8 neighbors)
+    const int agent_count = lns.env->num_of_agents;
+    
     auto now = std::chrono::steady_clock::now();
     auto remaining_ms = std::chrono::duration<double, std::milli>(timelimit - now).count();
-    // Give each update_traj a budget of remaining_time / num_agents, but at least 5ms
-    int agent_count = lns.env->num_of_agents;
-    int deadline_per_agent = std::max(5, (int)(remaining_ms / agent_count));
     
-    int count=0;
-    int a, index;
-    while (std::chrono::steady_clock::now() < timelimit){
-        index = count%lns.env->num_of_agents;
-        a = replan_order[index].id;
-        count++;
-        if (lns.traj_dists[a].empty() || lns.trajs[a].empty()){
-            continue;
-        }
-        std::vector<int> old_traj = lns.trajs[a];
-        if (!lns.trajs[a].empty())
-            remove_traj(lns, a);
-        
-        // A41: Pass adaptive deadline to prevent any single A* from taking too long
-        TimePoint agent_deadline = std::chrono::steady_clock::now() + 
-            std::chrono::milliseconds(deadline_per_agent);
-        if (!update_traj(lns, a, &agent_deadline)){
-            // Restore and continue
-            lns.trajs[a] = old_traj;
-            if (!old_traj.empty()){
-                add_traj(lns,a);
+    // Large maps need full coverage, use original all-agents approach
+    if (agent_count > 1000) {
+        int deadline_per_agent = std::max(5, (int)(remaining_ms / agent_count));
+        int count = 0;
+        int a, index;
+        while (std::chrono::steady_clock::now() < timelimit){
+            index = count % agent_count;
+            a = replan_order[index].id;
+            count++;
+            if (lns.traj_dists[a].empty() || lns.trajs[a].empty()){
+                continue;
             }
-            continue;
+            std::vector<int> old_traj = lns.trajs[a];
+            if (!lns.trajs[a].empty())
+                remove_traj(lns, a);
+            TimePoint agent_deadline = std::chrono::steady_clock::now() + 
+                std::chrono::milliseconds(deadline_per_agent);
+            if (!update_traj(lns, a, &agent_deadline)){
+                lns.trajs[a] = old_traj;
+                if (!old_traj.empty()){
+                    add_traj(lns,a);
+                }
+                continue;
+            }
+        }
+    } else {
+        // Smaller maps: use neighbor_size=8 approach
+        const int neighbor_size = 8;
+        int deadline_per_neighbor = std::max(10, (int)(remaining_ms / neighbor_size));
+        int processed = 0;
+        while (std::chrono::steady_clock::now() < timelimit && processed < neighbor_size) {
+            int a = replan_order[processed].id;
+            processed++;
+            if (lns.traj_dists[a].empty() || lns.trajs[a].empty()){
+                continue;
+            }
+            std::vector<int> old_traj = lns.trajs[a];
+            if (!lns.trajs[a].empty())
+                remove_traj(lns, a);
+            TimePoint agent_deadline = std::chrono::steady_clock::now() + 
+                std::chrono::milliseconds(deadline_per_neighbor);
+            if (!update_traj(lns, a, &agent_deadline)){
+                lns.trajs[a] = old_traj;
+                if (!old_traj.empty()){
+                    add_traj(lns,a);
+                }
+                continue;
+            }
         }
     }
     return;
