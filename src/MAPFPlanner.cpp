@@ -21,13 +21,22 @@ bool should_use_my_planner(SharedEnvironment* env) {
         return true;  // Use our optimized planner with frank_wolfe
     }
     
-    // Use my planner for maze/iron/orz maps (without frank_wolfe to avoid timeout)
-    // A114: room still uses DefaultPlanner (MyPlanner is worse for room)
-    if (name.find("maze") != std::string::npos ||
-        name.find("iron") != std::string::npos ||
+    // A151: maze uses DefaultPlanner to avoid MyPlanner timeout issues
+    // Use my planner for fulfill/warehouse maps (with frank_wolfe)
+    // iron/orz still use MyPlanner without frank_wolfe
+    if (name.find("warehouse") != std::string::npos || 
+        name.find("fulfill") != std::string::npos) {
+        return true;  // Use our optimized planner with frank_wolfe
+    }
+    
+    if (name.find("iron") != std::string::npos ||
         name.find("orz") != std::string::npos) {
         return true;  // Use our optimized planner without frank_wolfe
     }
+    
+    // maze uses DefaultPlanner (A151 fix for cloud timeout)
+    // Use default starkit planner for other maps (maze, room, bos, random, etc.)
+    return false;
     
     // A112: room tries DefaultPlanner
     // Use default starkit planner for other maps (room, bos, random, etc.)
