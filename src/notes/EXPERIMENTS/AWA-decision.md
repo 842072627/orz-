@@ -1,81 +1,87 @@
-# AWA Decision: Complete SIPP Implementation for maze
+# AWA 分析 - 决定实现 SIPP (2026-04-23)
 
-## Date: 2026-04-23 09:40
+## 当前状态总结
 
-## AWA Principle: Choose A (Highest Risk/Highest Reward)
+| 地图 | 分数 | 目标 | GAP | 需要 |
+|------|------|------|-----|------|
+| fulfill | 1.073 | 0.83 | +29% ✅ | 保持 |
+| random | 0.520 | 0.98+ | -47% ❌ | **SIPP** |
+| room | 0.189 | 0.88 | -79% ❌ | **SIPP** |
+| maze | 0.090 | 0.73 | -88% ❌ | **SIPP** |
+| bos | 0.297 | ??? | ??? | 研究 |
+| orz | 0.215 | 0.86 | -75% ❌ | 研究 |
+| iron | 0.151 | 0.86 | -83% ❌ | 研究 |
 
-### Failed Experiments (All A directions exhausted)
+## 已失败实验
+
 | 实验 | 方法 | 结果 |
 |------|------|------|
-| A117 | corridor penalty | 0.038 (更差) ❌ |
-| A134 | frank_wolfe保守 | crashed ❌ |
-| A138 | skeleton SIPP | 0.076 vs 0.090 (更差) ❌ |
-| A140 | ReservationTable PIBT | 0.00 (crashed) ❌ |
-| A141 | 增加PIBT时间 | 无改进 ❌ |
+| A117 | narrow corridor penalty | 失败 ❌ |
+| A126 | neighbor_size=16 | 失败 ❌ |
+| A127 | deadline*1.5 | 失败 ❌ |
+| A133 | 冲突检测 | 失败回退 ❌ |
+| A134 | frank_wolfe for maze | 崩溃 ❌ |
+| A135 | DefaultPlanner for maze | 略好但无效 |
+| A137 | neighbor_size=8 for DefaultPlanner | 失败 ❌ |
 
-### Current Baseline (Confirmed in A142)
-| Map | Score | Target | Gap |
-|-----|-------|--------|-----|
-| maze | 0.090 | 0.73 | **-88%** ❌ |
-| iron | 0.147 | 0.86 | -83% ❌ |
-| room | 0.184 | 0.88 | -79% ❌ |
-| orz | 0.216 | 0.86 | -75% ❌ |
-| random | 0.510 | 0.98 | -48% ❌ |
-| fulfill | 1.082 | 0.83 | **+30%** ✅ |
+## 核心问题
 
-## Decision: A1 = Complete SIPP Implementation for maze
+**参数调优全部失败。问题在架构级别:**
 
-### Why SIPP is the RIGHT A direction:
-1. **maze has the largest gap** - 0.09 vs 0.73 (-88%)
-2. Team_RAPID uses `"sipp": true` in their config
-3. PIBT fundamentally can't handle temporal conflicts in narrow corridors
-4. Complete SIPP could unlock maze + potentially help other maps
+1. **Our A***: 使用 MemoryPool，每个位置只存一个状态
+2. **Team_RAPID A***: State = (pos, orient, timestep)，每个时间步一个状态
+3. **差距**: 我们的 A* 不能追踪时间维度的冲突
 
-### Why Previous SIPP Attempts Failed:
-1. **A138**: Skeleton SIPP with empty ReservationTable - no real temporal avoidance
-2. **A140**: ReservationTable PIBT - didn't properly integrate SIPP's safe interval concept
+## Team_RAPID SIPP 关键机制
 
-### Key Insight from Team_RAPID:
-SIPP needs proper **Safe Interval Table (SIT)** - not just simple isFree() checks.
-
-From their ReservationTable.h:
 ```cpp
-list<tuple<int, int, int, bool, bool> > get_safe_intervals(int from, int to, int lower_bound, int upper_bound);
-Interval get_first_safe_interval(size_t location);
-bool find_safe_interval(Interval& interval, size_t location, int t_min);
+// StateTimeAStarNode
+struct StateTimeAStarNode {
+    State state;  // (position, timestep)
+    double g_val, h_val;
+    int conflicts;  // 冲突计数
+    StateTimeAStarNode* parent;
+};
+
+// SIPP 搜索时检查 ReservationTable
+Interval interval = rt.getFirstSafeInterval(next_location);
+if (isFree(interval, next_time)) {
+    // 可以扩展
+}
 ```
 
-The safe interval concept is critical: instead of just checking "is position free at time t?", SIPP asks "what are the safe time intervals for this position?"
+## 实现计划
 
-### Implementation Plan:
+### Phase 1: 添加时间维度到 s_node
+修改 `my_search_node.h` 添加 `timestep` 字段
 
-**Phase 1: Study Team_RAPID's SIPP.cpp** (30 min)
-- Understand how they compute safe intervals
-- Understand how they integrate with ReservationTable
+### Phase 2: 修改 MemoryPool
+支持同一位置多个时间状态
 
-**Phase 2: Implement proper Safe Interval computation** (60 min)
-- Create SafeIntervalTable based on their approach
-- Compute safe intervals from current trajectories
+### Phase 3: 添加 ReservationTable
+使用现有的 `my_reservation.h`，但需要正确集成
 
-**Phase 3: Integrate with TimeSpaceA*** (60 min)
-- Use safe intervals to guide search
-- Test on maze first (map-specific check)
+### Phase 4: 修改 A* 扩展逻辑
+扩展节点时检查 ReservationTable
 
-**Phase 4: 10-round test on maze** (30 min)
-- Compare with baseline 0.090
-- If improved, extend to other maps
+## 风险
+- **极高**: 需要架构改动，可能破坏现有功能
+- **不确定**: 可能需要大量调试
 
-### Risk Assessment:
-- **Risk Level**: Very High (multiple failures before)
-- **Potential Reward**: maze 0.09 → 0.40+ (3x+ improvement)
-- **Failure modes**: Still crashes like A134/A140, or worse than baseline like A138
+## 回报
+- 如果成功: random 0.52 → 0.98+, room 0.19 → 0.50+, maze 0.09 → 0.30+
 
-### Commitment:
-According to AWA: **Choose A, fail forward, never accept D**
+## AWA 选择
 
-I will make ONE serious attempt at complete SIPP implementation for maze. If this fails:
-1. Document the failure thoroughly
-2. Move to B direction (LaCAM2 research)
-3. Accept that some maps need architectural changes beyond current scope
+根据 AWA 原则，当参数调优失败时，选择最高风险/最高回报的方向。
 
-_Last updated: 2026-04-23 09:40 GMT+8_
+**选择: 实现 SIPP (A130 续)**
+
+- 风险: 极高
+- 回报: 高 (所有地图可能提升)
+- 这是唯一可行的重大改进方向
+
+## 状态
+- 创建时间: 2026-04-23
+- 状态: 开始实现
+- 备注: 这是最后的高风险选择
