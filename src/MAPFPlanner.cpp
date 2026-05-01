@@ -1,47 +1,9 @@
 #include <random>
 #include <Entry.h>
 
-//my planner includes
-#include "my_planner/my_planner.h"
-#include "my_planner/my_const.h"
-
-// Default planner (starkit baseline)
+//default planner includes
 #include "planner.h"
-
-// Check if map should use our planner or default starkit planner
-bool should_use_my_planner(SharedEnvironment* env) {
-    if (env == nullptr || env->map_name.empty()) return true;
-    
-    std::string name = env->map_name;
-    std::transform(name.begin(), name.end(), name.begin(), ::tolower);
-    
-    // Use my planner for fulfill/warehouse maps (our optimized planner)
-    if (name.find("warehouse") != std::string::npos || 
-        name.find("fulfill") != std::string::npos) {
-        return true;  // Use our optimized planner with frank_wolfe
-    }
-    
-    // A151: maze uses DefaultPlanner to avoid MyPlanner timeout issues
-    // Use my planner for fulfill/warehouse maps (with frank_wolfe)
-    // iron/orz still use MyPlanner without frank_wolfe
-    if (name.find("warehouse") != std::string::npos || 
-        name.find("fulfill") != std::string::npos) {
-        return true;  // Use our optimized planner with frank_wolfe
-    }
-    
-    if (name.find("iron") != std::string::npos ||
-        name.find("orz") != std::string::npos) {
-        return true;  // Use our optimized planner without frank_wolfe
-    }
-    
-    // maze uses DefaultPlanner (A151 fix for cloud timeout)
-    // Use default starkit planner for other maps (maze, room, bos, random, etc.)
-    return false;
-    
-    // A112: room tries DefaultPlanner
-    // Use default starkit planner for other maps (room, bos, random, etc.)
-    return false;
-}
+#include "const.h"
 
 /**
  * Initialises the MAPF planner with a given time limit for preprocessing.
@@ -53,20 +15,15 @@ bool should_use_my_planner(SharedEnvironment* env) {
 void MAPFPlanner::initialize(int preprocess_time_limit)
 {
     // use the remaining entry time limit (after task scheduling) for path planning, -PLANNER_TIMELIMIT_TOLERANCE for timing error tolerance;
-    int limit = preprocess_time_limit - std::chrono::duration_cast<milliseconds>(std::chrono::steady_clock::now() - env->plan_start_time).count() - MyPlanner::PLANNER_TIMELIMIT_TOLERANCE;
-    
-    if (should_use_my_planner(env)) {
-        MyPlanner::initialize(limit, env);
-    } else {
-        DefaultPlanner::initialize(limit, env);
-    }
+    int limit = preprocess_time_limit - std::chrono::duration_cast<milliseconds>(std::chrono::steady_clock::now() - env->plan_start_time).count() - DefaultPlanner::PLANNER_TIMELIMIT_TOLERANCE;
+    DefaultPlanner::initialize(limit, env);
     return;
 }
 
 /**
- * Plans a path using my planner (based on default planner)
+ * Plans a path using default planner
  * 
- * This function performs path planning within the timelimit given, and call the plan function in my planner.
+ * This function performs path planning within the timelimit given, and call the plan function in default planner.
  * The planned actions are output to the provided actions vector.
  * 
  * @param time_limit The time limit allocated for planning (in milliseconds).
@@ -75,14 +32,9 @@ void MAPFPlanner::initialize(int preprocess_time_limit)
 void MAPFPlanner::plan(int time_limit, Plan & plan) 
 {
     // use the remaining time after task schedule for path planning, -PLANNER_TIMELIMIT_TOLERANCE for timing error tolerance;
-    int limit = time_limit - std::chrono::duration_cast<milliseconds>(std::chrono::steady_clock::now() - env->plan_start_time).count() - MyPlanner::PLANNER_TIMELIMIT_TOLERANCE;
+    int limit = time_limit - std::chrono::duration_cast<milliseconds>(std::chrono::steady_clock::now() - env->plan_start_time).count() - DefaultPlanner::PLANNER_TIMELIMIT_TOLERANCE;
 
     int min_plan_steps = (int)(env->min_planner_communication_time/(env->action_time*env->max_counter)) + 1;
-    
-    if (should_use_my_planner(env)) {
-        MyPlanner::plan(limit, plan.actions, env, min_plan_steps);
-    } else {
-        DefaultPlanner::plan(limit, plan.actions, env, min_plan_steps);
-    }
+    DefaultPlanner::plan(limit, plan.actions, env,min_plan_steps);
     return;
 }

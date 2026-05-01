@@ -11,20 +11,15 @@ include_directories("inc")
 
 # default planner
 include_directories("default_planner")
-include_directories("src/my_planner")
 
-file(GLOB SOURCES "src/*.cpp" "default_planner/*.cpp" "src/my_planner/*.cpp" "src/my_planner/LNS/*.cpp" "src/my_planner/LNS/Parallel/*.cpp")
+file(GLOB SOURCES "src/*.cpp" "default_planner/*.cpp")
 file(GLOB DEFAULT_PLANNER_SOURCES "default_planner/*.cpp")
 
 
 # Find Boost
-set(Boost_USE_STATIC_LIBS OFF)
+ADD_DEFINITIONS(-DBOOST_LOG_DYN_LINK)
 find_package( Boost 1.49.0 REQUIRED COMPONENTS program_options system filesystem log log_setup)
 include_directories( ${Boost_INCLUDE_DIRS} )
-
-# Find OpenMP
-find_package(OpenMP REQUIRED)
-add_definitions(-DUSE_OPENMP)
 
 # pybind11 is a required dependency (needed for Python component support at runtime)
 find_package(pybind11 REQUIRED)
@@ -40,7 +35,7 @@ target_compile_definitions(MAPF PRIVATE MAPF_SHARED_MODULE)
 file(GLOB PY_BRIDGE_SOURCES "python/common/*.cpp")
 
 add_executable(lifelong ${PY_BRIDGE_SOURCES} ${SOURCES})
-target_link_libraries(lifelong PRIVATE pybind11::embed ${Boost_LIBRARIES} OpenMP::OpenMP_CXX)
+target_link_libraries(lifelong PRIVATE pybind11::embed ${Boost_LIBRARIES})
 
 if (COPY_PY_PATH_CONFIG)
     file(COPY "config.json" DESTINATION ${CMAKE_BINARY_DIR})

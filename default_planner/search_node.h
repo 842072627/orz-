@@ -17,10 +17,11 @@ struct s_node
     int depth = 0;
     double tie_breaker = 0;
     s_node* parent = nullptr;
-    unsigned int priority;
-    int timestep = 0; // A123: for SIPP support - timestep at this node
 
-    s_node(int id, int g, int h, int op_flow, int depth) : id(id), g(g), h(h), op_flow(op_flow),depth(depth), timestep(0) {};
+    unsigned int priority;
+
+
+    s_node(int id, int g, int h, int op_flow, int depth) : id(id), g(g), h(h), op_flow(op_flow),depth(depth) {};
     s_node() = default;
 
     int get_f() const { return g + h; }
@@ -34,7 +35,6 @@ struct s_node
     };
     int get_g() const { return g; }
     int get_h() const { return h; }
-    int get_timestep() const { return timestep; }
     unsigned int get_priority() const { return priority; }
     void set_priority(unsigned int p) { priority = p; }
 
@@ -49,7 +49,6 @@ struct s_node
         depth = 0;
         parent = nullptr;
         tie_breaker = 0;
-        timestep = 0;
 
     }
     /* data */
