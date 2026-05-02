@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <algorithm>
 
+// CONFIRM RUN: same algorithm as R218
 // Efficiency focus: prefer tasks that can be completed QUICKLY (short makespan) 
 // to maximize throughput per unit time
 static std::unordered_set<int> free_agents_set;
