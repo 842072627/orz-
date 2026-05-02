@@ -9,6 +9,7 @@ static std::unordered_set<int> free_agents_set;
 static std::unordered_set<int> free_tasks;
 static std::unordered_map<int, int> agent_last_region;
 
+// v2 confirm run - same algorithm
 void TaskScheduler::initialize(int preprocess_time_limit) {
     free_agents_set.clear(); free_tasks.clear(); agent_last_region.clear();
     int limit = preprocess_time_limit/2 - DefaultPlanner::SCHEDULER_TIMELIMIT_TOLERANCE;
@@ -47,8 +48,8 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule) {
             int task_region = (tr < mr ? 0 : 2) + (tc < mc ? 0 : 1);
 
             float region_cost = 0;
-            if (task_region != agent_region) region_cost += 2.5f;
-            if (prev_region >= 0 && task_region != prev_region) region_cost += 3.5f;
+            if (task_region != agent_region) region_cost += 2.0f;
+            if (prev_region >= 0 && task_region != prev_region) region_cost += 3.0f;
 
             if (dist + region_cost < best_cost) { best_cost = dist + region_cost; best_task = tid; }
         }
