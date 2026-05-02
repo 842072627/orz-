@@ -8,10 +8,9 @@
 static std::unordered_set<int> free_agents_set;
 static std::unordered_set<int> free_tasks;
 static std::unordered_map<int, int> agent_last_region;
-static std::unordered_map<int, float> loc_heat;
 
 void TaskScheduler::initialize(int preprocess_time_limit) {
-    free_agents_set.clear(); free_tasks.clear(); agent_last_region.clear(); loc_heat.clear();
+    free_agents_set.clear(); free_tasks.clear(); agent_last_region.clear();
     int limit = preprocess_time_limit/2 - DefaultPlanner::SCHEDULER_TIMELIMIT_TOLERANCE;
     DefaultPlanner::schedule_initialize(limit, env);
 }
@@ -21,11 +20,6 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule) {
     TimePoint endtime = std::chrono::steady_clock::now() + std::chrono::milliseconds(limit);
     free_agents_set.insert(env->new_freeagents.begin(), env->new_freeagents.end());
     free_tasks.insert(env->new_tasks.begin(), env->new_tasks.end());
-
-    // Decay heat map
-    for (auto& [loc, h] : loc_heat) h *= 0.92f;
-    for (int a = 0; a < env->num_of_agents; a++)
-        loc_heat[env->curr_states[a].location] += 1.0f;
 
     int cols = env->cols;
     int mr = env->rows / 2, mc = cols / 2;
@@ -47,15 +41,14 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule) {
             float dist = 0;
             for (int loc : env->task_pool[tid].locations) {
                 dist += DefaultPlanner::get_h(env, c_loc, loc); c_loc = loc;
-                dist += loc_heat[loc] * 2.0f; // congestion penalty on each errand location
             }
             int t_loc = env->task_pool[tid].locations[0];
             int tr = t_loc / cols, tc = t_loc % cols;
             int task_region = (tr < mr ? 0 : 2) + (tc < mc ? 0 : 1);
 
             float region_cost = 0;
-            if (task_region != agent_region) region_cost += 3.0f;
-            if (prev_region >= 0 && task_region != prev_region) region_cost += 5.0f;
+            if (task_region != agent_region) region_cost += 2.0f;
+            if (prev_region >= 0 && task_region != prev_region) region_cost += 3.0f;
 
             if (dist + region_cost < best_cost) { best_cost = dist + region_cost; best_task = tid; }
         }
