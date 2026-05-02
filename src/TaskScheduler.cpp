@@ -22,7 +22,7 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule) {
     free_tasks.insert(env->new_tasks.begin(), env->new_tasks.end());
 
     int cols = env->cols;
-    int mc = cols / 2; // vertical split
+    int mr = env->rows / 2, mc = cols / 2;
 
     std::vector<int> agents(free_agents_set.begin(), free_agents_set.end());
     std::sort(agents.begin(), agents.end());
@@ -32,8 +32,8 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule) {
         int best_task = -1;
         float best_cost = 1e9;
         int a_loc = env->curr_states.at(a).location;
-        int ac = a_loc % cols;
-        int agent_region = (ac < mc ? 0 : 1);
+        int ar = a_loc / cols, ac = a_loc % cols;
+        int agent_region = (ar < mr ? 0 : 2) + (ac < mc ? 0 : 1);
         int prev_region = agent_last_region.count(a) ? agent_last_region[a] : -1;
 
         for (int tid : free_tasks) {
@@ -43,19 +43,19 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule) {
                 dist += DefaultPlanner::get_h(env, c_loc, loc); c_loc = loc;
             }
             int t_loc = env->task_pool[tid].locations[0];
-            int tc2 = t_loc % cols;
-            int task_region = (tc2 < mc ? 0 : 1);
+            int tr = t_loc / cols, tc = t_loc % cols;
+            int task_region = (tr < mr ? 0 : 2) + (tc < mc ? 0 : 1);
 
             float region_cost = 0;
-            if (task_region != agent_region) region_cost += 2.0f;
-            if (prev_region >= 0 && task_region != prev_region) region_cost += 3.0f;
+            if (task_region != agent_region) region_cost += 2.5f;
+            if (prev_region >= 0 && task_region != prev_region) region_cost += 3.5f;
 
             if (dist + region_cost < best_cost) { best_cost = dist + region_cost; best_task = tid; }
         }
         if (best_task >= 0) {
             proposed_schedule[a] = best_task;
             int t_loc2 = env->task_pool[best_task].locations[0];
-            agent_last_region[a] = ((t_loc2 % cols) < mc ? 0 : 1);
+            agent_last_region[a] = (t_loc2 / cols < mr ? 0 : 2) + (t_loc2 % cols < mc ? 0 : 1);
             free_agents_set.erase(a);
             free_tasks.erase(best_task);
         } else proposed_schedule[a] = -1;
