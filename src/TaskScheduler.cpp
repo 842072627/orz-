@@ -1,40 +1,63 @@
 #include "TaskScheduler.h"
-
 #include "scheduler.h"
 #include "const.h"
+#include <unordered_set>
+#include <unordered_map>
+#include <algorithm>
 
-/**
- * Initializes the task scheduler with a given time limit for preprocessing.
- * 
- * This function prepares the task scheduler by allocating up to half of the given preprocessing time limit 
- * and adjust for a specified tolerance to account for potential timing errors. 
- * It ensures that initialization does not exceed the allocated time.
- * 
- * @param preprocess_time_limit The total time limit allocated for preprocessing (in milliseconds).
- *
- */
-void TaskScheduler::initialize(int preprocess_time_limit)
-{
-    //give at most half of the entry time_limit to scheduler;
-    //-SCHEDULER_TIMELIMIT_TOLERANCE for timing error tolerance
+static std::unordered_set<int> free_agents_set;
+static std::unordered_set<int> free_tasks;
+static std::unordered_map<int, int> agent_last_region;
+
+void TaskScheduler::initialize(int preprocess_time_limit) {
+    free_agents_set.clear(); free_tasks.clear(); agent_last_region.clear();
     int limit = preprocess_time_limit/2 - DefaultPlanner::SCHEDULER_TIMELIMIT_TOLERANCE;
-    DefaultPlanner::schedule_initialize(limit, env);    
+    DefaultPlanner::schedule_initialize(limit, env);
 }
 
-/**
- * Plans a task schedule within a specified time limit.
- * 
- * This function schedules tasks by calling shedule_plan function in default planner with half of the given time limit,
- * adjusted for timing error tolerance. The planned schedule is output to the provided schedule vector.
- * 
- * @param time_limit The total time limit allocated for scheduling (in milliseconds).
- * @param proposed_schedule A reference to a vector that will be populated with the proposed schedule (next task id for each agent).
- */
-
-void TaskScheduler::plan(int time_limit, std::vector<int> & proposed_schedule)
-{
-    //give at most half of the entry time_limit to scheduler;
-    //-SCHEDULER_TIMELIMIT_TOLERANCE for timing error tolerance
+void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule) {
     int limit = time_limit/2 - DefaultPlanner::SCHEDULER_TIMELIMIT_TOLERANCE;
-    DefaultPlanner::schedule_plan(limit, proposed_schedule, env);
+    TimePoint endtime = std::chrono::steady_clock::now() + std::chrono::milliseconds(limit);
+    free_agents_set.insert(env->new_freeagents.begin(), env->new_freeagents.end());
+    free_tasks.insert(env->new_tasks.begin(), env->new_tasks.end());
+
+    int cols = env->cols;
+    int mr = env->rows / 2, mc = cols / 2;
+
+    std::vector<int> agents(free_agents_set.begin(), free_agents_set.end());
+    std::sort(agents.begin(), agents.end());
+
+    for (int a : agents) {
+        if (std::chrono::steady_clock::now() > endtime) break;
+        int best_task = -1;
+        float best_cost = 1e9;
+        int a_loc = env->curr_states.at(a).location;
+        int ar = a_loc / cols, ac = a_loc % cols;
+        int agent_region = (ar < mr ? 0 : 2) + (ac < mc ? 0 : 1);
+        int prev_region = agent_last_region.count(a) ? agent_last_region[a] : -1;
+
+        for (int tid : free_tasks) {
+            int c_loc = a_loc;
+            float dist = 0;
+            for (int loc : env->task_pool[tid].locations) {
+                dist += DefaultPlanner::get_h(env, c_loc, loc); c_loc = loc;
+            }
+            int t_loc = env->task_pool[tid].locations[0];
+            int tr = t_loc / cols, tc = t_loc % cols;
+            int task_region = (tr < mr ? 0 : 2) + (tc < mc ? 0 : 1);
+
+            float region_cost = 0;
+            if (task_region != agent_region) region_cost += 3.0f;
+            if (prev_region >= 0 && task_region != prev_region) region_cost += 5.0f;
+
+            if (dist + region_cost < best_cost) { best_cost = dist + region_cost; best_task = tid; }
+        }
+        if (best_task >= 0) {
+            proposed_schedule[a] = best_task;
+            int t_loc2 = env->task_pool[best_task].locations[0];
+            agent_last_region[a] = (t_loc2 / cols < mr ? 0 : 2) + (t_loc2 % cols < mc ? 0 : 1);
+            free_agents_set.erase(a);
+            free_tasks.erase(best_task);
+        } else proposed_schedule[a] = -1;
+    }
 }
