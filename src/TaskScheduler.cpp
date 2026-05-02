@@ -4,14 +4,14 @@
 
 // Strategy selection: switch by editing this include
 // Available: "strategy_efficiency.h", "strategy_task_urgency.h"
-#include "strategy_efficiency_v2.h"
+#include "strategy_efficiency_v3.h"
 
 void TaskScheduler::initialize(int preprocess_time_limit) {
-    strategy_efficiency_v2::init();
+    strategy_efficiency_v3::init();
     int limit = preprocess_time_limit/2 - DefaultPlanner::SCHEDULER_TIMELIMIT_TOLERANCE;
     DefaultPlanner::schedule_initialize(limit, env);
 }
 
 void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule) {
-    strategy_efficiency_v2::plan(time_limit, env, proposed_schedule);
+    strategy_efficiency_v3::plan(time_limit, env, proposed_schedule);
 }
