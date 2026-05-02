@@ -47,8 +47,8 @@ void TaskScheduler::plan(int time_limit, std::vector<int>& proposed_schedule) {
             int task_region = (tr < mr ? 0 : 2) + (tc < mc ? 0 : 1);
 
             float region_cost = 0;
-            if (task_region != agent_region) region_cost += 2.0f;
-            if (prev_region >= 0 && task_region != prev_region) region_cost += 3.0f;
+            if (task_region != agent_region) region_cost += 1.0f;
+            // No penalty for switching regions (let the agent roam freely but prefer same quadrant)
 
             if (dist + region_cost < best_cost) { best_cost = dist + region_cost; best_task = tid; }
         }
