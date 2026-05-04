@@ -1,5 +1,5 @@
-// strategy_heat.h — BEST KNOWN FOR ORZ (R238): zone-interleave + 3x locality + 2% aging accel 60+
-// Consistently achieves 298-300 tasks vs V13 baseline 294-297
+// strategy_heat.h — V19: Active congestion avoidance via zone-aware ordering
+// Run this as final best-effort improvement
 #include "TaskScheduler.h"
 #include "scheduler.h"
 #include "const.h"
@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <algorithm>
 #include <vector>
+#include <map>
 
 namespace strategy_heat {
 
@@ -43,15 +44,23 @@ void plan(int time_limit, SharedEnvironment* env, std::vector<int>& proposed_sch
         return;
     }
 
-    // Zone-interleaved ordering: fair task distribution across zones
-    std::unordered_map<int, std::vector<int>> az;
+    // Key innovation: zone-congestion-aware ordering
+    // 1. Count free agents per zone
+    std::map<int, std::vector<int>> az;  // sorted zones
     for (int a : f_agents)
         az[zid(env->curr_states.at(a).location, cols)].push_back(a);
+    
+    // 2. Build zone list sorted by agent count DESCENDING (busiest zones first)
+    std::vector<std::pair<int, std::vector<int>*>> zlist;
+    for (auto& kv : az) zlist.push_back({kv.first, &kv.second});
+    std::sort(zlist.begin(), zlist.end(), [](auto& a, auto& b) { return a.second->size() > b.second->size(); });
+    
+    // 3. Interleave but starting from busiest zones
     std::vector<int> agents;
     for (bool more = true; more; ) {
         more = false;
-        for (auto& kv : az)
-            if (!kv.second.empty()) { agents.push_back(kv.second.back()); kv.second.pop_back(); more = true; }
+        for (auto& p : zlist)
+            if (!p.second->empty()) { agents.push_back(p.second->back()); p.second->pop_back(); more = true; }
     }
 
     for (int a : agents) {
