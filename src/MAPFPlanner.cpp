@@ -1,40 +1,38 @@
+// MAPFPlanner.cpp — Combined Track: ORZ用定制规划器，其他图用默认PIBT
 #include <random>
 #include <Entry.h>
-
-//default planner includes
+#include "config.h"
 #include "planner.h"
 #include "const.h"
 
-/**
- * Initialises the MAPF planner with a given time limit for preprocessing.
- * 
- * This function call the planner initialize function with a time limit fore preprocessing.
- * 
- * @param preprocess_time_limit The total time limit allocated for preprocessing (in milliseconds).
- */
-void MAPFPlanner::initialize(int preprocess_time_limit)
-{
-    // use the remaining entry time limit (after task scheduling) for path planning, -PLANNER_TIMELIMIT_TOLERANCE for timing error tolerance;
-    int limit = preprocess_time_limit - std::chrono::duration_cast<milliseconds>(std::chrono::steady_clock::now() - env->plan_start_time).count() - DefaultPlanner::PLANNER_TIMELIMIT_TOLERANCE;
-    DefaultPlanner::initialize(limit, env);
-    return;
+void MAPFPlanner::initialize(int preprocess_time_limit) {
+    int limit = preprocess_time_limit - 
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - env->plan_start_time).count() 
+        - DefaultPlanner::PLANNER_TIMELIMIT_TOLERANCE;
+    
+    if (has_custom_strategy(env)) {
+        // ORZ: 定制规划器初始化
+        // TODO: 实现ORZ专属规划器
+        DefaultPlanner::initialize(limit, env);
+    } else {
+        DefaultPlanner::initialize(limit, env);
+    }
 }
 
-/**
- * Plans a path using default planner
- * 
- * This function performs path planning within the timelimit given, and call the plan function in default planner.
- * The planned actions are output to the provided actions vector.
- * 
- * @param time_limit The time limit allocated for planning (in milliseconds).
- * @param actions A reference to a vector that will be populated with the planned actions (next action for each agent).
- */
-void MAPFPlanner::plan(int time_limit, Plan & plan) 
-{
-    // use the remaining time after task schedule for path planning, -PLANNER_TIMELIMIT_TOLERANCE for timing error tolerance;
-    int limit = time_limit - std::chrono::duration_cast<milliseconds>(std::chrono::steady_clock::now() - env->plan_start_time).count() - DefaultPlanner::PLANNER_TIMELIMIT_TOLERANCE;
-
-    int min_plan_steps = (int)(env->min_planner_communication_time/(env->action_time*env->max_counter)) + 1;
-    DefaultPlanner::plan(limit, plan.actions, env,min_plan_steps);
-    return;
+void MAPFPlanner::plan(int time_limit, Plan & plan) {
+    int limit = time_limit - 
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - env->plan_start_time).count() 
+        - DefaultPlanner::PLANNER_TIMELIMIT_TOLERANCE;
+    int min_plan_steps = (int)(env->min_planner_communication_time / 
+        (env->action_time * env->max_counter)) + 1;
+    
+    if (has_custom_strategy(env)) {
+        // ORZ: 定制规划器
+        // TODO: 实现ORZ专属规划器（基于Kitty Knight代码）
+        DefaultPlanner::plan(limit, plan.actions, env, min_plan_steps);
+    } else {
+        DefaultPlanner::plan(limit, plan.actions, env, min_plan_steps);
+    }
 }
