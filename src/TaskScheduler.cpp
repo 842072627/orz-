@@ -8,5 +8,5 @@
 void TaskScheduler::initialize(int pre) { strategy_heat::init(); int lim = pre/2 - DefaultPlanner::SCHEDULER_TIMELIMIT_TOLERANCE; DefaultPlanner::schedule_initialize(lim, env); }
 void TaskScheduler::plan(int tl, std::vector<int>& ps) { strategy_heat::plan(tl, env, ps); }
 #else
-#error "Define a strategy"
+#error "Define STRATEGY_HEAT"
 #endif
