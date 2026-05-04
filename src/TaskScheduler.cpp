@@ -1,4 +1,4 @@
-// TaskScheduler.cpp - Strategy: heat (V7 best: zone-interleave + 3x locality + 2% aging accel 60+)
+// TaskScheduler.cpp - Strategy: heat (V7 best)
 #define STRATEGY_HEAT
 #include "TaskScheduler.h"
 #include "scheduler.h"
