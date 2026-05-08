@@ -20,13 +20,9 @@
 namespace strategy_centerline {
 
 // ====== Config ======
-static constexpr int TOP_K = 30;           // top-K tasks per agent for Hungarian candidate set
-static constexpr int HUNGARIAN_MAX_N = 200; // max agents for Hungarian (>200 → greedy fallback)
 
 // ====== State ======
 static SharedEnvironment* g_env = nullptr;
-static std::unordered_map<int, float> tval;
-static std::unordered_map<int, int> tbirth;
 
 static inline int zid(int loc, int cols) { return (loc/cols/100)*100 + (loc%cols/100); }
 static inline int zh_dist(int z1, int z2) {
@@ -64,12 +60,9 @@ static inline float base_score(int a_loc, int tid, int step) {
 }
 
 // ====== Plan: pure greedy (no Hungarian, no bonuses) ======
-void plan(int time_limit, SharedEnvironment* env, std::vector<int>& proposed_schedule) {
-    int limit = time_limit - DefaultPlanner::SCHEDULER_TIMELIMIT_TOLERANCE;
+void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule) {
     TimePoint endtime = std::chrono::steady_clock::now() + std::chrono::milliseconds(limit);
     int cols = env->cols, step = env->curr_timestep;
-    
-    // ---- Pre-tick: precompute new task projections ----
     
     // ---- Collect free agents + tasks ----
     std::vector<int> free_agents;
@@ -119,7 +112,7 @@ void plan(int time_limit, SharedEnvironment* env, std::vector<int>& proposed_sch
         
         std::unordered_set<int> done_tasks;
         for (int a : free_agents) {
-            if (std::chrono::steady_clock::now() > endtime) break;
+
             if (proposed_schedule[a] >= 0) continue;
             
             int a_loc = env->curr_states[a].location;
