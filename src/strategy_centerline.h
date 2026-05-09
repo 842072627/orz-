@@ -108,15 +108,16 @@ static inline float base_score(int a_loc, int tid, int step) {
         int d = Centerline::g_zone24_density[zid];
         if (d > d_max) d_max = d;
 
-        // 方向硬约束：热区只允许顺流
-        int f = (zid < (int)Centerline::g_zone_direction.size())
-                ? Centerline::g_zone_direction[zid] : 0;
-        if (f != 0 && f != intent && d >= Centerline::HOT_LOCK_DENSITY)
+        // 方向硬约束：热 segment 只允许顺流（纯 1D）
+        int f = Centerline::g_seg_lock_dir[si];
+        if (f != 0 && f != intent)
             return -1e9f;
 
-        // 方向微操（仅顺流时）
-        if (f == intent) dir_bonus += DIR_MATCH_WEIGHT;
-        else if (f != 0) dir_cross += CROSS_WEIGHT;
+        // 方向微操
+        if (f != 0) {
+            if (f == intent) dir_bonus += DIR_MATCH_WEIGHT;
+            else             dir_cross += CROSS_WEIGHT;
+        }
     }
 
     // 除数：d=20→1.0, d=40→3.0
