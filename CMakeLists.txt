@@ -14,6 +14,7 @@ include_directories("default_planner")
 include_directories("src/my_planner")
 
 file(GLOB SOURCES "src/*.cpp" "default_planner/*.cpp" "src/my_planner/*.cpp")
+list(REMOVE_ITEM SOURCES "${CMAKE_SOURCE_DIR}/src/driver_nopython.cpp")
 file(GLOB DEFAULT_PLANNER_SOURCES "default_planner/*.cpp")
 
 
@@ -90,4 +91,3 @@ if(BUILD_TESTS)
     add_test(NAME python_interface_test COMMAND python_interface_test
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 endif()
-

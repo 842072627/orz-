@@ -42,14 +42,14 @@ namespace MyPlanner{
 
 	typedef std::vector<int> Traj;
 
-	struct PIBT_C{
+	struct MY_PIBT_C{
 		int location;
 		int heuristic;
 		int orientation;  // 0:east, 1:south, 2:west, 3:north
 		int tie_breaker;
 
 		//constructor
-		PIBT_C(int location, int heuristic, int orientation, int tie_breaker):
+		MY_PIBT_C(int location, int heuristic, int orientation, int tie_breaker):
 			location(location), heuristic(heuristic), orientation(orientation), tie_breaker(tie_breaker) {};
 	};
 

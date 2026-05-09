@@ -1,5 +1,5 @@
-#ifndef SEARCH_NODE_H
-#define SEARCH_NODE_H
+#ifndef MY_SEARCH_NODE_H
+#define MY_SEARCH_NODE_H
 
 #include <vector>
 #include <iostream>

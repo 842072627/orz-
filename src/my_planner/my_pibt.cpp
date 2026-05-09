@@ -41,12 +41,12 @@ int get_gp_h(TrajLNS& lns, int ai, int target){
 	}
 }
 
-bool causalPIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
+bool causalMY_PIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
 	  std::vector<State>& next_states,
       std::vector<int>& prev_decision, std::vector<int>& decision, 
 	  std::vector<bool>& occupied, TrajLNS& lns
 	  ){
-	// The PIBT works like a causal PIBT when using MAPF-T model. But a normal PIBT when using MAPF model.
+	// The MY_PIBT works like a causal MY_PIBT when using MAPF-T model. But a normal MY_PIBT when using MAPF model.
 	
 	assert(next_states[curr_id].location == -1);
     int prev_loc = prev_states[curr_id].location;
@@ -65,7 +65,7 @@ bool causalPIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
 
 	// for each neighbor of (prev_loc,prev_direction), and a wait copy of current location, generate a successor
 	std::vector<int> neighbors;
-	std::vector<PIBT_C> successors;
+	std::vector<MY_PIBT_C> successors;
 	getNeighborLocs(&(lns.neighbors),neighbors,prev_loc);
 	for (auto& neighbor: neighbors){
 
@@ -82,7 +82,7 @@ bool causalPIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
 
 
 	std::sort(successors.begin(), successors.end(), 
-		[&](PIBT_C& a, PIBT_C& b)
+		[&](MY_PIBT_C& a, MY_PIBT_C& b)
 		{
 			int diff[4] = {1,lns.env->cols,-1,-lns.env->cols};
 			if (a.heuristic == b.heuristic){
@@ -117,7 +117,7 @@ bool causalPIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
         if (prev_decision.at(next.location) != -1 && 
 			next_states.at(prev_decision.at(next.location)).location == -1){
             int lower_id = prev_decision.at(next.location);
-            if (!causalPIBT(lower_id,curr_id,prev_states,next_states, prev_decision,decision, occupied,lns)){
+            if (!causalMY_PIBT(lower_id,curr_id,prev_states,next_states, prev_decision,decision, occupied,lns)){
 				continue;
             }
         }

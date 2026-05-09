@@ -1,7 +1,7 @@
 // Default planner baseline implementation.
 //
 // For each planning episode, this module updates guide paths with a bounded
-// traffic-flow phase (Frank-Wolfe optimisation), then runs PIBT to produce
+// traffic-flow phase (Frank-Wolfe optimisation), then runs MY_PIBT to produce
 // a multi-step plan. Internal rollout builds future steps; the environment
 // snapshot is restored after planning.
 //
@@ -11,7 +11,7 @@
 //   Artificial Intelligence, Vol. 38, No. 18, pp. 20674-20682.
 //   https://ojs.aaai.org/index.php/AAAI/article/view/30054/31856
 //
-//   Okumura, K., et al. (2022). Priority Inheritance with Backtracking (PIBT)
+//   Okumura, K., et al. (2022). Priority Inheritance with Backtracking (MY_PIBT)
 //   for iterative multi-agent path finding. Artificial Intelligence, Vol. 310.
 
 #include "my_planner.h"
@@ -121,7 +121,7 @@ namespace MyPlanner{
 
             // set goals/tasks
             if (env->goal_locations[i].empty()){
-                trajLNS.tasks[i] = prev_states[i].location;  // wait in place
+                trajLNS.tasks[i] = dummy_goals.at(i);
                 local_priority[i] = p_copy[i];
             }
             else{
@@ -195,7 +195,7 @@ namespace MyPlanner{
         for(int i=0; i<env->num_of_agents; i++)
         {
             if (env->goal_locations[i].empty()){
-                trajLNS.tasks[i] = env->curr_states[i].location;  // wait in place
+                trajLNS.tasks[i] = dummy_goals.at(i);
                 local_priority[i] = p_copy[i];
             }
             else{
@@ -239,7 +239,7 @@ namespace MyPlanner{
             }
             if (next_states[i].location==-1){
                 assert(prev_states[i].location >=0 && prev_states[i].location < env->map.size());
-                causalPIBT(i,-1,prev_states,next_states,
+                causalMY_PIBT(i,-1,prev_states,next_states,
                     prev_decision,decision,
                     occupied, trajLNS);
             }
@@ -337,7 +337,7 @@ namespace MyPlanner{
      * It computes the actions for the agents based on the current state of the environment.
      * The function first checks assignments/goal location changes and perform the necessary updates.
      * It then computes and optimises traffic flow optimised guide paths for the agents.
-     * Finally, it computes the actions for the agents using PIBT that follows the guide path heuristics and returns the actions.
+     * Finally, it computes the actions for the agents using MY_PIBT that follows the guide path heuristics and returns the actions.
      * Note that the default planner ignores the turning action costs, and post-processes turning actions as additional delays on top of original plan.
      */
     void plan(int time_limit, std::vector<std::vector<Action>> & actions,
@@ -387,7 +387,7 @@ namespace MyPlanner{
                 break;
             }
             std::vector<Action> one_step_actions;
-            // After step 0, only run PIBT + rollout (no guide path recompute and no FW)
+            // After step 0, only run MY_PIBT + rollout (no guide path recompute and no FW)
             if (step > 0){
                 refresh_multistep_step_state(env, local_priority);
             }

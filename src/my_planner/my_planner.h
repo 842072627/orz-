@@ -1,10 +1,10 @@
-#ifndef PLANNER
-#define PLANNER
+#ifndef MY_PLANNER
+#define MY_PLANNER
 
 // Default planner baseline used by src/MAPFPlanner.cpp.
 //
-// Implements Traffic Flow Optimised Guided PIBT: an anytime planner that first
-// optimises traffic-flow guide paths, then runs PIBT to produce collision-free
+// Implements Traffic Flow Optimised Guided MY_PIBT: an anytime planner that first
+// optimises traffic-flow guide paths, then runs MY_PIBT to produce collision-free
 // multi-step actions. More planning time yields higher-quality solutions.
 //
 // References:
@@ -13,7 +13,7 @@
 //   Artificial Intelligence, Vol. 38, No. 18, pp. 20674-20682.
 //   https://ojs.aaai.org/index.php/AAAI/article/view/30054/31856
 //
-//   Okumura, K., et al. (2022). Priority Inheritance with Backtracking (PIBT)
+//   Okumura, K., et al. (2022). Priority Inheritance with Backtracking (MY_PIBT)
 //   for iterative multi-agent path finding. Artificial Intelligence, Vol. 310.
 
 #include "my_Types.h"

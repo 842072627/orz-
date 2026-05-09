@@ -1,5 +1,5 @@
-#ifndef SCHEDULER
-#define SCHEDULER
+#ifndef MY_SCHEDULER
+#define MY_SCHEDULER
 
 // Default scheduler baseline.
 //
