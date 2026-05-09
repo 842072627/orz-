@@ -397,4 +397,77 @@ inline void precompute_task_zones(int task_id, const SharedEnvironment* env) { p
 inline void refresh_congestion(const SharedEnvironment*) { }
 inline float get_task_congestion(int task_id) { return get_task_1d_congestion(task_id); }
 
+
+// ====== Zone-based direction tracking (V3) ======
+static constexpr int DIR_THRESHOLD = 10;
+
+static std::vector<int> g_zone_direction;   // [+1/-1/0] per zone
+static std::vector<int> g_agent_last_main;   // [aid] = last tick main distance
+
+struct TaskZoneInfo {
+    int m_start = -1, m_end = -1;
+    int task_zone = -1;
+    std::vector<int> route_zones;
+};
+static std::unordered_map<int, TaskZoneInfo> g_task_zone_cache;
+
+// Tick call: compute agent count per 24x24 zone
+inline void update_zone24_density(const SharedEnvironment* env) {
+    int rows = env->rows, cols = env->cols;
+    int n24c = (cols + 23) / 24, n24r = (rows + 23) / 24;
+    if ((int)g_zone24_density.size() != n24c * n24r)
+        g_zone24_density.assign(n24c * n24r, 0);
+    else
+        std::fill(g_zone24_density.begin(), g_zone24_density.end(), 0);
+    for (int a = 0; a < env->num_of_agents; a++) {
+        int loc = env->curr_states[a].location;
+        if (loc < 0) continue;
+        int r = loc / cols, c = loc % cols;
+        int zi = (r / 24) * n24c + (c / 24);
+        if (zi >= 0 && zi < (int)g_zone24_density.size())
+            g_zone24_density[zi]++;
+    }
+}
+
+// Tick call: compute per-zone traffic direction
+inline void update_zone_direction(const SharedEnvironment* env) {
+    int rows = env->rows, cols = env->cols;
+    int n24c = (cols + 23) / 24, n24r = (rows + 23) / 24;
+    int nz = n24c * n24r;
+    if ((int)g_zone_direction.size() != nz)
+        g_zone_direction.assign(nz, 0);
+    if ((int)g_agent_last_main.size() != env->num_of_agents)
+        g_agent_last_main.assign(env->num_of_agents, -1);
+    
+    std::vector<int> flow_right(nz, 0), flow_left(nz, 0);
+    
+    for (int a = 0; a < env->num_of_agents; a++) {
+        int loc = env->curr_states[a].location;
+        if (loc < 0) continue;
+        int r = loc / cols, c = loc % cols;
+        int zi = (r / 24) * n24c + (c / 24);
+        if (zi < 0 || zi >= nz) continue;
+        
+        int m = -1, b;
+        project(loc, m, b);
+        int prev_m = g_agent_last_main[a];
+        g_agent_last_main[a] = m;
+        
+        if (prev_m >= 0 && m >= 0) {
+            int diff = m - prev_m;
+            if (diff >= 1)      flow_right[zi]++;
+            else if (diff <= -1) flow_left[zi]++;
+        }
+    }
+    
+    std::fill(g_zone_direction.begin(), g_zone_direction.end(), 0);
+    for (int zi = 0; zi < nz; zi++) {
+        if (g_zone24_density[zi] < DIR_THRESHOLD) continue;
+        if (flow_right[zi] > flow_left[zi])
+            g_zone_direction[zi] = +1;
+        else if (flow_left[zi] > flow_right[zi])
+            g_zone_direction[zi] = -1;
+    }
+}
+
 } // namespace Centerline

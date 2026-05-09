@@ -9,10 +9,11 @@ ENDIF()
 
 include_directories("inc")
 
-# default planner
+# default planner + my_planner
 include_directories("default_planner")
+include_directories("src/my_planner")
 
-file(GLOB SOURCES "src/*.cpp" "default_planner/*.cpp")
+file(GLOB SOURCES "src/*.cpp" "default_planner/*.cpp" "src/my_planner/*.cpp")
 file(GLOB DEFAULT_PLANNER_SOURCES "default_planner/*.cpp")
 
 
