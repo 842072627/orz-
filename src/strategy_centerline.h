@@ -81,6 +81,7 @@ static inline float base_score(int a_loc, int tid, int step) {
         total += std::abs(cm - tm) + std::abs(cb - tb);
         cm = tm; cb = tb;
     }
+    
     float mb = 1.0f / (float)(total + 1);
     
     auto cit = Centerline::g_task_zone_cache.find(tid);
