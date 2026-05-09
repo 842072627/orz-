@@ -234,6 +234,7 @@ void init(const SharedEnvironment* env) {
 
     printf("Centerline: %zu cells, total_len=%d, zones=%dx%d (%d)\n",
            smooth.size(), g_total_len, g_n24c, g_n24r, g_n24c*g_n24r);
+    
     g_ready = true;
     
     // ====== Verification: project test points and print ======

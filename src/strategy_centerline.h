@@ -28,6 +28,10 @@ static constexpr float CROSS_WEIGHT = 0.010f;
 static constexpr int COLD_THRESHOLD = 15;
 static constexpr int HOT_THRESHOLD = 40;
 
+// ====== Direction enforcement (硬约束开关) ======
+static constexpr bool DIRECTION_ENFORCE_ENABLED = true;
+static constexpr int DIRECTION_THRESHOLD = 28;   // zone density >= this triggers direction enforcement
+
 // ====== Zone-at-main mapping (main_dist -> zone24 index) ======
 static std::vector<int> g_zone_at_main;
 
@@ -115,25 +119,48 @@ static inline float base_score(int a_loc, int tid, int step) {
         }
     }
     
-    // Layer 4: Direction bonus/penalty
+    // Layer 4 & 5: Direction bonus/penalty + enforcement
+    // Compute agent intent and path zones once, share across both layers
     float dir_b = 0, dir_p = 0;
+    int intent = 0;
+    std::unordered_set<int> path_zones;
     if (a_m >= 0) {
-        int intent = (info.m_start > a_m) ? +1 : -1;
+        intent = (info.m_start > a_m) ? +1 : -1;
         int rs = std::max(0, std::min(a_m, info.m_start));
         int re = std::min(Centerline::g_total_len, std::max(a_m, info.m_start));
-        std::unordered_set<int> path_zones;
         for (int m = rs; m <= re; m++) {
             if (m < (int)g_zone_at_main.size()) {
                 int z = g_zone_at_main[m];
                 if (z >= 0) path_zones.insert(z);
             }
         }
+    }
+    
+    // Layer 4: Direction bonus (matching flow) / penalty (opposing flow)
+    for (int z : path_zones) {
+        if (z >= 0 && z < (int)Centerline::g_zone_direction.size()) {
+            int f = Centerline::g_zone_direction[z];
+            if (f == 0) continue;
+            if (f == intent) dir_b += DIR_MATCH_WEIGHT;
+            else dir_p += CROSS_WEIGHT;
+        }
+    }
+    
+    // Layer 5: Direction enforcement (硬约束) - block if agent opposes hot-zone flow
+    if (DIRECTION_ENFORCE_ENABLED && intent != 0) {
         for (int z : path_zones) {
             if (z >= 0 && z < (int)Centerline::g_zone_direction.size()) {
                 int f = Centerline::g_zone_direction[z];
                 if (f == 0) continue;
-                if (f == intent) dir_b += DIR_MATCH_WEIGHT;
-                else dir_p += CROSS_WEIGHT;
+                int d = (z < (int)Centerline::g_zone24_density.size()) ? Centerline::g_zone24_density[z] : 0;
+                if (d >= DIRECTION_THRESHOLD && f != intent) {
+                    static int block_cnt = 0;
+                    block_cnt++;
+                    if (block_cnt <= 10 || (block_cnt % 100 == 0))
+                        fprintf(stderr, "[ENFORCE-BLOCK] #%d tick=%d a_m=%d intent=%+d zone=%d dir=%+d density=%d\n",
+                               block_cnt, g_env ? g_env->curr_timestep : -1, a_m, intent, z, f, d);
+                    return -1e9f;  // HARD BLOCK: agent going wrong way in hot zone
+                }
             }
         }
     }
@@ -146,6 +173,29 @@ static inline float base_score(int a_loc, int tid, int step) {
 void pre_tick_updates(SharedEnvironment* env) {
     Centerline::update_zone24_density(env);
     Centerline::update_zone_direction(env);
+    
+    // Debug: print zone density distribution at tick 500 to diagnose enforcement
+    static bool debug_printed = false;
+    if (!debug_printed && env->curr_timestep >= 500) {
+        debug_printed = true;
+        int total_zones = (int)Centerline::g_zone24_density.size();
+        std::vector<int> hist(51, 0);
+        int dir_set = 0, dir_blockable = 0;
+        for (int zi = 0; zi < total_zones; zi++) {
+            int d = Centerline::g_zone24_density[zi];
+            if (d >= 50) hist[50]++;
+            else hist[d]++;
+            if (Centerline::g_zone_direction[zi] != 0) dir_set++;
+            if (d >= DIRECTION_THRESHOLD && Centerline::g_zone_direction[zi] != 0) dir_blockable++;
+        }
+        fprintf(stderr, "[DEBUG-DENSITY] timestep=%d zones=%d dir_set=%d dir_blockable(>=%d)=%d\n",
+               env->curr_timestep, total_zones, dir_set, DIRECTION_THRESHOLD, dir_blockable);
+        fprintf(stderr, "[DEBUG-DENSITY] hist: ");
+        for (int i = 0; i <= 50; i += 5)
+            fprintf(stderr, "%d:%d ", i, hist[i]);
+        fprintf(stderr, "\n");
+        fflush(stderr);
+    }
     
     // Cache zone info for new tasks
     for (int tid : env->new_tasks) {
