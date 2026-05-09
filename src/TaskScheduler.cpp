@@ -5,6 +5,8 @@
 #include "const.h"
 #include "config.h"
 #include "strategy_centerline.h"
+#include "pibt_lock.h"
+namespace PIBT_Lock { int g_seg_lock_dir[256] = {0}; int g_agent_blocked[2000] = {0}; }
 
 void TaskScheduler::initialize(int preprocess_time_limit)
 {

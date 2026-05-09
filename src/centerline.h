@@ -28,6 +28,7 @@
 #include <climits>
 #include <cstdio>
 #include <map>
+#include "pibt_lock.h"
 
 namespace Centerline {
 
@@ -614,6 +615,10 @@ inline void update_zone_direction(const SharedEnvironment* env) {
             }
         }
     }
+
+    // Copy lock state to shared array for PIBT
+    for (size_t si = 0; si < g_segments.size() && si < (size_t)PIBT_Lock::MAX_SEGMENTS; si++)
+        PIBT_Lock::g_seg_lock_dir[si] = g_seg_lock_dir[si];
 }
 
 } // namespace Centerline

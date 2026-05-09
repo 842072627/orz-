@@ -8,6 +8,7 @@
 #include "utils.h"
 #include "config.h"
 #include "centerline.h"
+#include "pibt_lock.h"
 #include <unordered_set>
 #include <unordered_map>
 #include <algorithm>
@@ -140,6 +141,62 @@ void pre_tick_updates(SharedEnvironment* env) {
 // ====== Plan: greedy + V3 traffic scoring ======
 void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule) {
     pre_tick_updates(env);
+
+    // Set agent direction block flags for PIBT (2D line based)
+    int n24c = (env->cols + 23) / 24;
+    for (int a = 0; a < env->num_of_agents && a < PIBT_Lock::MAX_AGENTS; a++) {
+        PIBT_Lock::g_agent_blocked[a] = 0;
+        int tid = env->curr_task_schedule[a];
+        if (tid < 0) continue;
+        auto tit = env->task_pool.find(tid);
+        if (tit == env->task_pool.end() || tit->second.locations.empty()) continue;
+        int a_loc = env->curr_states[a].location;
+        if (a_loc < 0) continue;
+
+        int a_r = a_loc / env->cols, a_c = a_loc % env->cols;
+        int a_zone = (a_r / 24) * n24c + (a_c / 24);
+        if (a_zone >= 0 && a_zone < (int)Centerline::g_zone24_density.size() &&
+            Centerline::g_zone24_density[a_zone] >= 28)
+            continue;  // already in hot zone, don't block
+
+        int t_loc = tit->second.locations[0];
+        int t_r = t_loc / env->cols, t_c = t_loc % env->cols;
+
+        int dx = t_c - a_c, dy = t_r - a_r;
+        int max_steps = std::min(24, std::max(std::abs(dx), std::abs(dy)));
+        if (max_steps < 1) continue;
+
+        // Agent intent: along main_dist toward task
+        int a_m, a_b, t_m, t_b;
+        Centerline::project(a_loc, a_m, a_b);
+        Centerline::project(t_loc, t_m, t_b);
+        int intent = (t_m > a_m) ? +1 : -1;
+
+        bool blocked = false;
+        for (int s = 1; s <= max_steps; s++) {
+            int px = a_c + (dx * s) / max_steps;
+            int py = a_r + (dy * s) / max_steps;
+            int ploc = py * env->cols + px;
+            int zone = (py / 24) * n24c + (px / 24);
+            if (zone >= 0 && zone < (int)Centerline::g_zone24_density.size() &&
+                Centerline::g_zone24_density[zone] >= 28) {
+                // Check direction: only block if segment lock opposes intent
+                int pm, pb;
+                Centerline::project(ploc, pm, pb);
+                if (pm >= 0) {
+                    int si = Centerline::m_to_segment(pm);
+                    if (si >= 0 && si < (int)Centerline::g_seg_lock_dir.size() &&
+                        Centerline::g_seg_lock_dir[si] != 0 &&
+                        Centerline::g_seg_lock_dir[si] != intent) {
+                        blocked = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        PIBT_Lock::g_agent_blocked[a] = blocked ? 1 : 0;
+    }
     
     TimePoint endtime = std::chrono::steady_clock::now() + std::chrono::milliseconds(limit);
     int cols = env->cols, step = env->curr_timestep;
