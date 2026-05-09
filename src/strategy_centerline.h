@@ -16,38 +16,24 @@
 #include <chrono>
 #include <climits>
 #include <cmath>
+#include <bitset>
 
 namespace strategy_centerline {
 
 // ====== Traffic constants ======
-static constexpr float COLD_WEIGHT = 0.0f;
-static constexpr float HOT_WEIGHT = 0.002f;
-static constexpr float ROUTE_WEIGHT = 0.002f;
 static constexpr float DIR_MATCH_WEIGHT = 0.003f;
 static constexpr float CROSS_WEIGHT = 0.010f;
-static constexpr int COLD_THRESHOLD = 15;
-static constexpr int HOT_THRESHOLD = 40;
 
-// ====== Direction enforcement (硬约束开关) ======
-static constexpr bool DIRECTION_ENFORCE_ENABLED = true;
-static constexpr int DIRECTION_THRESHOLD = 28;   // zone density >= this triggers direction enforcement
-
-// ====== Zone-at-main mapping (main_dist -> zone24 index) ======
-static std::vector<int> g_zone_at_main;
-
-inline void build_zone_at_main(const SharedEnvironment* env) {
-    int cols = env->cols;
-    int n24c = (cols + 23) / 24;
-    g_zone_at_main.assign(Centerline::g_total_len + 1, -1);
-    for (int loc : Centerline::g_centerline_cells) {
-        if (loc < 0) continue;
-        int m = Centerline::g_main_dist[loc];
-        if (m >= 0 && m <= Centerline::g_total_len) {
-            int r = loc / cols, c = loc % cols;
-            g_zone_at_main[m] = (r / 24) * n24c + (c / 24);
-        }
-    }
-}
+// ====== Route penalty constants ======
+static constexpr int ROUTE_THRESHOLD = 20;     // d>=20 -> route penalty starts
+static constexpr int HARD_BLOCK = 35;
+// Precomputed 100*(1-exp(-0.15*(d-20))) for d=20..39
+static constexpr float ROUTE_PENALTIES[20] = {
+    0.0f, 13.9f, 25.9f, 36.2f, 45.1f,
+    52.8f, 59.4f, 65.1f, 70.1f, 74.4f,
+    78.1f, 81.4f, 84.2f, 86.7f, 88.8f,
+    90.7f, 92.3f, 93.7f, 94.9f, 96.0f
+};
 
 // ====== State ======
 static SharedEnvironment* g_env = nullptr;
@@ -61,12 +47,11 @@ static inline int zh_dist(int z1, int z2) {
 void init(SharedEnvironment* env) {
     g_env = env;
     Centerline::init(env);
-    build_zone_at_main(env);
-    printf("CENTERLINE_SCHEDULER: agents=%d, map=%dx%d\n",
-           env->num_of_agents, env->cols, env->rows);
+    printf("CENTERLINE_SCHEDULER: agents=%d, map=%dx%d, segments=%zu\n",
+           env->num_of_agents, env->cols, env->rows, Centerline::g_segments.size());
 }
 
-// ====== Base score: M+B + V3 5-layer traffic ======
+// ====== Base score: M+B + 全程穿越惩罚 + 方向微操 ======
 static inline float base_score(int a_loc, int tid, int step) {
     (void)step;
     auto it = g_env->task_pool.find(tid);
@@ -74,9 +59,12 @@ static inline float base_score(int a_loc, int tid, int step) {
         return -1e9f;
     if (!Centerline::g_ready) return 1.0f;
     auto& locs = it->second.locations;
+
     int a_m, a_b;
     Centerline::project(a_loc, a_m, a_b);
     if (a_m < 0) return 1.0f;
+
+    // M+B makespan
     int total = 0, cm = a_m, cb = a_b;
     for (int i = 0; i < (int)locs.size(); i++) {
         int tm, tb;
@@ -85,87 +73,57 @@ static inline float base_score(int a_loc, int tid, int step) {
         total += std::abs(cm - tm) + std::abs(cb - tb);
         cm = tm; cb = tb;
     }
-    
     float mb = 1.0f / (float)(total + 1);
-    
-    auto cit = Centerline::g_task_zone_cache.find(tid);
-    if (cit == Centerline::g_task_zone_cache.end() || Centerline::g_zone24_density.empty())
-        return mb;
-    auto& info = cit->second;
-    
-    // Layer 1: Cold bonus
-    float cold = 0;
-    if (info.task_zone >= 0 && info.task_zone < (int)Centerline::g_zone24_density.size()) {
-        int d = Centerline::g_zone24_density[info.task_zone];
-        if (d < COLD_THRESHOLD)
-            cold = (float)(COLD_THRESHOLD - d) * COLD_WEIGHT;
-    }
-    
-    // Layer 2: Hot penalty (task in hot zone)
-    float hot = 0;
-    if (info.task_zone >= 0 && info.task_zone < (int)Centerline::g_zone24_density.size()) {
-        int d = Centerline::g_zone24_density[info.task_zone];
-        if (d >= HOT_THRESHOLD)
-            hot = (float)(d - HOT_THRESHOLD) * HOT_WEIGHT;
-    }
-    
-    // Layer 3: Route penalty (path through hot zones)
-    float route = 0;
-    for (int z : info.route_zones) {
-        if (z >= 0 && z < (int)Centerline::g_zone24_density.size()) {
-            int d = Centerline::g_zone24_density[z];
-            if (d >= HOT_THRESHOLD)
-                route += (float)(d - HOT_THRESHOLD) * ROUTE_WEIGHT;
+
+    // Task waypoint main range
+    int task_min_m = INT_MAX/2, task_max_m = 0;
+    for (auto& loc : locs) {
+        int m, b;
+        Centerline::project(loc, m, b);
+        if (m >= 0) {
+            if (m < task_min_m) task_min_m = m;
+            if (m > task_max_m) task_max_m = m;
         }
     }
-    
-    // Layer 4 & 5: Direction bonus/penalty + enforcement
-    // Compute agent intent and path zones once, share across both layers
-    float dir_b = 0, dir_p = 0;
-    int intent = 0;
-    std::unordered_set<int> path_zones;
-    if (a_m >= 0) {
-        intent = (info.m_start > a_m) ? +1 : -1;
-        int rs = std::max(0, std::min(a_m, info.m_start));
-        int re = std::min(Centerline::g_total_len, std::max(a_m, info.m_start));
-        for (int m = rs; m <= re; m++) {
-            if (m < (int)g_zone_at_main.size()) {
-                int z = g_zone_at_main[m];
-                if (z >= 0) path_zones.insert(z);
-            }
+    if (task_min_m >= INT_MAX/2) return mb;
+
+    // 全程扫描：穿越惩罚 + 方向微操
+    float route_penalty = 0, dir_bonus = 0, dir_cross = 0;
+    int intent = (task_min_m > a_m) ? +1 : -1;
+    int rs = std::max(0, std::min(a_m, task_min_m - 24));
+    int re = std::min(Centerline::g_total_len, std::max(a_m, task_max_m + 24));
+
+    std::bitset<256> visited;
+    for (int m = rs; m <= re; m++) {
+        int si = Centerline::m_to_segment(m);
+        if (si < 0 || si >= (int)Centerline::g_segments.size() || visited[si])
+            continue;
+        visited[si] = true;
+
+        int zid = Centerline::g_segments[si].zone_id;
+        if (zid < 0 || zid >= (int)Centerline::g_zone24_density.size())
+            continue;
+
+        int d = Centerline::g_zone24_density[zid];
+
+        if (d >= HARD_BLOCK)
+            return -1e9f;
+        if (d >= ROUTE_THRESHOLD) {
+            int idx = d - ROUTE_THRESHOLD;
+            if (idx >= 20) idx = 19;  // cap at max penalty
+            route_penalty += ROUTE_PENALTIES[idx];
+        }
+
+        // 方向微操（照旧）
+        int f = (zid < (int)Centerline::g_zone_direction.size())
+                ? Centerline::g_zone_direction[zid] : 0;
+        if (f != 0) {
+            if (f == intent) dir_bonus += DIR_MATCH_WEIGHT;
+            else             dir_cross += CROSS_WEIGHT;
         }
     }
-    
-    // Layer 4: Direction bonus (matching flow) / penalty (opposing flow)
-    for (int z : path_zones) {
-        if (z >= 0 && z < (int)Centerline::g_zone_direction.size()) {
-            int f = Centerline::g_zone_direction[z];
-            if (f == 0) continue;
-            if (f == intent) dir_b += DIR_MATCH_WEIGHT;
-            else dir_p += CROSS_WEIGHT;
-        }
-    }
-    
-    // Layer 5: Direction enforcement (硬约束) - block if agent opposes hot-zone flow
-    if (DIRECTION_ENFORCE_ENABLED && intent != 0) {
-        for (int z : path_zones) {
-            if (z >= 0 && z < (int)Centerline::g_zone_direction.size()) {
-                int f = Centerline::g_zone_direction[z];
-                if (f == 0) continue;
-                int d = (z < (int)Centerline::g_zone24_density.size()) ? Centerline::g_zone24_density[z] : 0;
-                if (d >= DIRECTION_THRESHOLD && f != intent) {
-                    static int block_cnt = 0;
-                    block_cnt++;
-                    if (block_cnt <= 10 || (block_cnt % 100 == 0))
-                        fprintf(stderr, "[ENFORCE-BLOCK] #%d tick=%d a_m=%d intent=%+d zone=%d dir=%+d density=%d\n",
-                               block_cnt, g_env ? g_env->curr_timestep : -1, a_m, intent, z, f, d);
-                    return -1e9f;  // HARD BLOCK: agent going wrong way in hot zone
-                }
-            }
-        }
-    }
-    
-    return mb + cold - hot - route + dir_b - dir_p;
+
+    return mb - route_penalty + dir_bonus - dir_cross;
 }
 
 
@@ -173,64 +131,6 @@ static inline float base_score(int a_loc, int tid, int step) {
 void pre_tick_updates(SharedEnvironment* env) {
     Centerline::update_zone24_density(env);
     Centerline::update_zone_direction(env);
-    
-    // Debug: print zone density distribution at tick 500 to diagnose enforcement
-    static bool debug_printed = false;
-    if (!debug_printed && env->curr_timestep >= 500) {
-        debug_printed = true;
-        int total_zones = (int)Centerline::g_zone24_density.size();
-        std::vector<int> hist(51, 0);
-        int dir_set = 0, dir_blockable = 0;
-        for (int zi = 0; zi < total_zones; zi++) {
-            int d = Centerline::g_zone24_density[zi];
-            if (d >= 50) hist[50]++;
-            else hist[d]++;
-            if (Centerline::g_zone_direction[zi] != 0) dir_set++;
-            if (d >= DIRECTION_THRESHOLD && Centerline::g_zone_direction[zi] != 0) dir_blockable++;
-        }
-        fprintf(stderr, "[DEBUG-DENSITY] timestep=%d zones=%d dir_set=%d dir_blockable(>=%d)=%d\n",
-               env->curr_timestep, total_zones, dir_set, DIRECTION_THRESHOLD, dir_blockable);
-        fprintf(stderr, "[DEBUG-DENSITY] hist: ");
-        for (int i = 0; i <= 50; i += 5)
-            fprintf(stderr, "%d:%d ", i, hist[i]);
-        fprintf(stderr, "\n");
-        fflush(stderr);
-    }
-    
-    // Cache zone info for new tasks
-    for (int tid : env->new_tasks) {
-        if (Centerline::g_task_zone_cache.count(tid)) continue;
-        auto it = env->task_pool.find(tid);
-        if (it == env->task_pool.end() || it->second.locations.empty()) continue;
-        
-        Centerline::TaskZoneInfo info;
-        const auto& locs = it->second.locations;
-        int min_m = INT_MAX/2, max_m = 0;
-        for (size_t ei = 0; ei < locs.size(); ei++) {
-            int m, b;
-            Centerline::project(locs[ei], m, b);
-            if (m >= 0) { if (m < min_m) min_m = m; if (m > max_m) max_m = m; }
-        }
-        info.m_start = min_m; info.m_end = max_m;
-        
-        std::unordered_set<int> seen;
-        int m_lo = std::max(0, min_m - 24);
-        int m_hi = std::min(Centerline::g_total_len, max_m + 24);
-        for (int m = m_lo; m <= m_hi; m++) {
-            if (m < (int)g_zone_at_main.size()) {
-                int z = g_zone_at_main[m];
-                if (z >= 0 && !seen.count(z)) {
-                    seen.insert(z);
-                    info.route_zones.push_back(z);
-                }
-            }
-        }
-        
-        int tm, tb;
-        Centerline::project(locs[0], tm, tb);
-        info.task_zone = (tm >= 0 && tm < (int)g_zone_at_main.size()) ? g_zone_at_main[tm] : -1;
-        Centerline::g_task_zone_cache[tid] = info;
-    }
 }
 
 // ====== Plan: greedy + V3 traffic scoring ======

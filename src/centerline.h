@@ -27,6 +27,7 @@
 #include <cstring>
 #include <climits>
 #include <cstdio>
+#include <map>
 
 namespace Centerline {
 
@@ -44,6 +45,23 @@ static std::vector<int> g_branch_dist;     // [loc] = branch distance
 static std::vector<int> g_centerline_cells; // list of centerline cell locations
 static std::vector<int> g_zone24_density;  // [row*n24c+col] live agent count
 static int g_n24c = 0, g_n24r = 0;
+
+// ====== 1D main-line segments (agent→task 穿越惩罚) ======
+struct Segment {
+    float left_m, right_m;   // 70% 重叠边界
+    int zone_id;              // 对应的 2D grid zone
+};
+static std::vector<Segment> g_segments;
+static std::vector<int> g_main_to_seg;  // [main_dist] = segment index, O(1) lookup
+
+// ====== Hot zone direction lock state (declared before init()) ======
+static constexpr bool HOT_LOCK_ENABLED = true;
+static constexpr int HOT_LOCK_DENSITY = 28;
+static constexpr int HOT_LOCK_COOLDOWN = 30;
+static std::vector<int> g_zone_is_main;
+static std::vector<int> g_zone_hot_locked;
+static std::vector<int> g_zone_hot_lock_dir;
+static std::vector<int> g_zone_hot_lock_cooldown;
 
 // ====== BFS distance-to-wall ======
 static void compute_dtw(const SharedEnvironment* env, std::vector<int>& dtw) {
@@ -141,6 +159,10 @@ inline void project(int loc, int& main_dist, int& branch_dist) {
     main_dist = (branch_dist >= 0) ? g_main_dist[loc] : -1;
 }
 
+// Forward declarations for build_segments / m_to_segment (defined after init)
+inline void build_segments();
+inline int m_to_segment(int m);
+
 // ====== Init ======
 void init(const SharedEnvironment* env) {
     g_rows = env->rows; g_cols = env->cols;
@@ -235,6 +257,18 @@ void init(const SharedEnvironment* env) {
     printf("Centerline: %zu cells, total_len=%d, zones=%dx%d (%d)\n",
            smooth.size(), g_total_len, g_n24c, g_n24r, g_n24c*g_n24r);
     
+    // Mark main-line zones (centerline passes through)
+    g_zone_is_main.assign(g_n24c * g_n24r, 0);
+    for (int clloc : smooth) {
+        int r = clloc / g_cols, c = clloc % g_cols;
+        int zid = (r / 24) * g_n24c + (c / 24);
+        if (zid >= 0 && zid < (int)g_zone_is_main.size())
+            g_zone_is_main[zid] = 1;
+    }
+    g_zone_hot_locked.assign(g_n24c * g_n24r, 0);
+    g_zone_hot_lock_dir.assign(g_n24c * g_n24r, 0);
+    g_zone_hot_lock_cooldown.assign(g_n24c * g_n24r, 0);
+    
     g_ready = true;
     
     // ====== Verification: project test points and print ======
@@ -259,7 +293,63 @@ void init(const SharedEnvironment* env) {
         }
     }
     
+    build_segments();
     g_ready = true;
+}
+
+// ====== 1D main-line segments init ======
+inline void build_segments() {
+    std::map<int, std::pair<int,int>> zone_m_range;
+    for (int loc : g_centerline_cells) {
+        if (loc < 0) continue;
+        int m = g_main_dist[loc];
+        int r = loc / g_cols, c = loc % g_cols;
+        int zid = (r / 24) * g_n24c + (c / 24);
+        auto& p = zone_m_range[zid];
+        if (p.first == 0 || m < p.first) p.first = m;
+        if (m > p.second) p.second = m;
+    }
+
+    std::vector<int> sorted_zids;
+    for (auto& kv : zone_m_range) sorted_zids.push_back(kv.first);
+    std::sort(sorted_zids.begin(), sorted_zids.end(),
+        [&](int a, int b) { return zone_m_range[a].first < zone_m_range[b].first; });
+
+    struct ZoneInfo { int zid; float center; };
+    std::vector<ZoneInfo> zones;
+    for (int zid : sorted_zids) {
+        auto& r = zone_m_range[zid];
+        zones.push_back({zid, (float)(r.first + r.second) / 2.0f});
+    }
+
+    g_segments.clear();
+    g_segments.reserve(zones.size());
+    for (size_t i = 0; i < zones.size(); i++) {
+        float c = zones[i].center;
+        float left = (i == 0) ? 0.0f : c - 0.7f * (c - zones[i-1].center);
+        float right = (i == zones.size() - 1) ? (float)g_total_len + 0.001f : c + 0.7f * (zones[i+1].center - c);
+        g_segments.push_back({left, right, zones[i].zid});
+    }
+
+    g_main_to_seg.assign(g_total_len + 2, -1);
+    for (int m = 0; m <= g_total_len; m++) {
+        float mf = (float)m;
+        for (size_t i = 0; i < g_segments.size(); i++) {
+            if (mf >= g_segments[i].left_m && mf < g_segments[i].right_m) {
+                g_main_to_seg[m] = (int)i;
+                break;
+            }
+        }
+    }
+
+    printf("SEGMENTS: %zu built from %zu zones\n", g_segments.size(), zones.size());
+}
+
+inline int m_to_segment(int m) {
+    if (m < 0 || m > g_total_len) return -1;
+    if (g_main_to_seg.empty()) return -1;
+    if (m >= (int)g_main_to_seg.size()) return -1;
+    return g_main_to_seg[m];
 }
 
 // ====== 1D main-line congestion density (agent per main distance unit) ======
@@ -402,15 +492,10 @@ inline float get_task_congestion(int task_id) { return get_task_1d_congestion(ta
 // ====== Zone-based direction tracking (V3) ======
 static constexpr int DIR_THRESHOLD = 10;
 
-static std::vector<int> g_zone_direction;   // [+1/-1/0] per zone
-static std::vector<int> g_agent_last_main;   // [aid] = last tick main distance
+static std::vector<int> g_zone_direction;               // [+1/-1/0] per zone (may be overridden by lock)
+static std::vector<int> g_agent_last_main;           // [aid] = last tick main distance
 
-struct TaskZoneInfo {
-    int m_start = -1, m_end = -1;
-    int task_zone = -1;
-    std::vector<int> route_zones;
-};
-static std::unordered_map<int, TaskZoneInfo> g_task_zone_cache;
+
 
 // Tick call: compute agent count per 24x24 zone
 inline void update_zone24_density(const SharedEnvironment* env) {
@@ -468,6 +553,48 @@ inline void update_zone_direction(const SharedEnvironment* env) {
             g_zone_direction[zi] = +1;
         else if (flow_left[zi] > flow_right[zi])
             g_zone_direction[zi] = -1;
+    }
+    
+    // ====== Hot zone direction locking: density >= HOT_LOCK_DENSITY → lock immediately ======
+    if (HOT_LOCK_ENABLED) {
+        // Ensure lock arrays are sized
+        if ((int)g_zone_hot_locked.size() != nz) {
+            g_zone_hot_locked.assign(nz, 0);
+            g_zone_hot_lock_dir.assign(nz, 0);
+            g_zone_hot_lock_cooldown.assign(nz, 0);
+        }
+        
+        for (int zi = 0; zi < nz; zi++) {
+            if (!g_zone_is_main[zi]) continue;  // only main-line zones
+            
+            int d = g_zone24_density[zi];
+            
+            if (d >= HOT_LOCK_DENSITY) {
+                // Zone is hot
+                if (!g_zone_hot_locked[zi]) {
+                    // Lock to current direction, or +1 if undecided
+                    int cur_dir = g_zone_direction[zi];
+                    if (cur_dir == 0) cur_dir = +1;
+                    g_zone_hot_lock_dir[zi] = cur_dir;
+                    g_zone_hot_locked[zi] = 1;
+                }
+                // Override direction
+                g_zone_direction[zi] = g_zone_hot_lock_dir[zi];
+                // Reset cooldown
+                g_zone_hot_lock_cooldown[zi] = HOT_LOCK_COOLDOWN;
+            } else if (g_zone_hot_locked[zi]) {
+                // Density dropped: countdown before unlock
+                if (g_zone_hot_lock_cooldown[zi] > 0) {
+                    g_zone_hot_lock_cooldown[zi]--;
+                    // Keep locked during cooldown
+                    g_zone_direction[zi] = g_zone_hot_lock_dir[zi];
+                } else {
+                    // Cooldown expired: unlock
+                    g_zone_hot_locked[zi] = 0;
+                    // g_zone_direction[zi] already set by normal logic above
+                }
+            }
+        }
     }
 }
 
