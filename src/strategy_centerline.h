@@ -25,14 +25,14 @@ static constexpr float DIR_MATCH_WEIGHT = 0.003f;
 static constexpr float CROSS_WEIGHT = 0.010f;
 
 // ====== Route penalty constants ======
-static constexpr int ROUTE_THRESHOLD = 20;     // d>=20 -> route penalty starts
-static constexpr int HARD_BLOCK = 35;
-// Precomputed 100*(1-exp(-0.15*(d-20))) for d=20..39
-static constexpr float ROUTE_PENALTIES[20] = {
-    0.0f, 13.9f, 25.9f, 36.2f, 45.1f,
-    52.8f, 59.4f, 65.1f, 70.1f, 74.4f,
-    78.1f, 81.4f, 84.2f, 86.7f, 88.8f,
-    90.7f, 92.3f, 93.7f, 94.9f, 96.0f
+static constexpr int ROUTE_THRESHOLD = 20;
+// Divisor table: d=20 -> /1.0, d=40 -> /3.0
+static constexpr float DIVISOR_TABLE[21] = {
+    1.0f, 1.1f, 1.2f, 1.3f, 1.4f,
+    1.5f, 1.6f, 1.7f, 1.8f, 1.9f,
+    2.0f, 2.1f, 2.2f, 2.3f, 2.4f,
+    2.5f, 2.6f, 2.7f, 2.8f, 2.9f,
+    3.0f
 };
 
 // ====== State ======
@@ -88,7 +88,8 @@ static inline float base_score(int a_loc, int tid, int step) {
     if (task_min_m >= INT_MAX/2) return mb;
 
     // 全程扫描：穿越惩罚 + 方向微操
-    float route_penalty = 0, dir_bonus = 0, dir_cross = 0;
+    float dir_bonus = 0, dir_cross = 0;
+    int d_max = 0;
     int intent = (task_min_m > a_m) ? +1 : -1;
     int rs = std::max(0, std::min(a_m, task_min_m - 24));
     int re = std::min(Centerline::g_total_len, std::max(a_m, task_max_m + 24));
@@ -105,25 +106,27 @@ static inline float base_score(int a_loc, int tid, int step) {
             continue;
 
         int d = Centerline::g_zone24_density[zid];
+        if (d > d_max) d_max = d;
 
-        if (d >= HARD_BLOCK)
-            return -1e9f;
-        if (d >= ROUTE_THRESHOLD) {
-            int idx = d - ROUTE_THRESHOLD;
-            if (idx >= 20) idx = 19;  // cap at max penalty
-            route_penalty += ROUTE_PENALTIES[idx];
-        }
-
-        // 方向微操（照旧）
+        // 方向硬约束：热区只允许顺流
         int f = (zid < (int)Centerline::g_zone_direction.size())
                 ? Centerline::g_zone_direction[zid] : 0;
-        if (f != 0) {
-            if (f == intent) dir_bonus += DIR_MATCH_WEIGHT;
-            else             dir_cross += CROSS_WEIGHT;
-        }
+        if (f != 0 && f != intent && d >= Centerline::HOT_LOCK_DENSITY)
+            return -1e9f;
+
+        // 方向微操（仅顺流时）
+        if (f == intent) dir_bonus += DIR_MATCH_WEIGHT;
+        else if (f != 0) dir_cross += CROSS_WEIGHT;
     }
 
-    return mb - route_penalty + dir_bonus - dir_cross;
+    // 除数：d=20→1.0, d=40→3.0
+    float divisor = 1.0f;
+    if (d_max > ROUTE_THRESHOLD) {
+        int idx = (d_max > 40) ? 40 : d_max;
+        divisor = DIVISOR_TABLE[idx - ROUTE_THRESHOLD];
+    }
+
+    return (mb + dir_bonus - dir_cross) / divisor;
 }
 
 

@@ -54,14 +54,16 @@ struct Segment {
 static std::vector<Segment> g_segments;
 static std::vector<int> g_main_to_seg;  // [main_dist] = segment index, O(1) lookup
 
+// ====== 7-segment direction lock state ======
+static std::vector<int> g_seg_hot;         // [seg_idx] = 1 hot, 0 cool
+static std::vector<int> g_seg_lock_dir;     // [seg_idx] = +1/-1
+static std::vector<int> g_seg_cooldown;     // [seg_idx] = remaining ticks
+
 // ====== Hot zone direction lock state (declared before init()) ======
 static constexpr bool HOT_LOCK_ENABLED = true;
 static constexpr int HOT_LOCK_DENSITY = 28;
 static constexpr int HOT_LOCK_COOLDOWN = 30;
 static std::vector<int> g_zone_is_main;
-static std::vector<int> g_zone_hot_locked;
-static std::vector<int> g_zone_hot_lock_dir;
-static std::vector<int> g_zone_hot_lock_cooldown;
 
 // ====== BFS distance-to-wall ======
 static void compute_dtw(const SharedEnvironment* env, std::vector<int>& dtw) {
@@ -265,9 +267,6 @@ void init(const SharedEnvironment* env) {
         if (zid >= 0 && zid < (int)g_zone_is_main.size())
             g_zone_is_main[zid] = 1;
     }
-    g_zone_hot_locked.assign(g_n24c * g_n24r, 0);
-    g_zone_hot_lock_dir.assign(g_n24c * g_n24r, 0);
-    g_zone_hot_lock_cooldown.assign(g_n24c * g_n24r, 0);
     
     g_ready = true;
     
@@ -341,6 +340,10 @@ inline void build_segments() {
             }
         }
     }
+
+    g_seg_hot.assign(g_segments.size(), 0);
+    g_seg_lock_dir.assign(g_segments.size(), 0);
+    g_seg_cooldown.assign(g_segments.size(), 0);
 
     printf("SEGMENTS: %zu built from %zu zones\n", g_segments.size(), zones.size());
 }
@@ -557,42 +560,57 @@ inline void update_zone_direction(const SharedEnvironment* env) {
     
     // ====== Hot zone direction locking: density >= HOT_LOCK_DENSITY → lock immediately ======
     if (HOT_LOCK_ENABLED) {
-        // Ensure lock arrays are sized
-        if ((int)g_zone_hot_locked.size() != nz) {
-            g_zone_hot_locked.assign(nz, 0);
-            g_zone_hot_lock_dir.assign(nz, 0);
-            g_zone_hot_lock_cooldown.assign(nz, 0);
+        // === Collect hot segments ===
+        std::vector<int> hot_segs;
+        for (size_t si = 0; si < g_segments.size(); si++) {
+            int zid = g_segments[si].zone_id;
+            if (zid >= 0 && zid < (int)g_zone24_density.size() &&
+                g_zone24_density[zid] >= HOT_LOCK_DENSITY)
+                hot_segs.push_back((int)si);
         }
-        
-        for (int zi = 0; zi < nz; zi++) {
-            if (!g_zone_is_main[zi]) continue;  // only main-line zones
-            
-            int d = g_zone24_density[zi];
-            
-            if (d >= HOT_LOCK_DENSITY) {
-                // Zone is hot
-                if (!g_zone_hot_locked[zi]) {
-                    // Lock to current direction, or +1 if undecided
-                    int cur_dir = g_zone_direction[zi];
-                    if (cur_dir == 0) cur_dir = +1;
-                    g_zone_hot_lock_dir[zi] = cur_dir;
-                    g_zone_hot_locked[zi] = 1;
-                }
-                // Override direction
-                g_zone_direction[zi] = g_zone_hot_lock_dir[zi];
-                // Reset cooldown
-                g_zone_hot_lock_cooldown[zi] = HOT_LOCK_COOLDOWN;
-            } else if (g_zone_hot_locked[zi]) {
-                // Density dropped: countdown before unlock
-                if (g_zone_hot_lock_cooldown[zi] > 0) {
-                    g_zone_hot_lock_cooldown[zi]--;
-                    // Keep locked during cooldown
-                    g_zone_direction[zi] = g_zone_hot_lock_dir[zi];
-                } else {
-                    // Cooldown expired: unlock
-                    g_zone_hot_locked[zi] = 0;
-                    // g_zone_direction[zi] already set by normal logic above
-                }
+
+        // === Merge overlapping 7-segment ranges ===
+        for (size_t i = 0; i < hot_segs.size(); ) {
+            int lo = std::max(0, hot_segs[i] - 3);
+            int hi = std::min((int)g_segments.size() - 1, hot_segs[i] + 3);
+
+            size_t j = i + 1;
+            while (j < hot_segs.size() && hot_segs[j] - 3 <= hi) {
+                hi = std::max(hi, std::min((int)g_segments.size() - 1, hot_segs[j] + 3));
+                j++;
+            }
+
+            // Direction: pick the direction of the densest segment in the block
+            int best_dir = +1, max_d = -1;
+            for (size_t k = i; k < j; k++) {
+                int zid2 = g_segments[hot_segs[k]].zone_id;
+                int d2 = g_zone24_density[zid2];
+                if (d2 > max_d) { max_d = d2; best_dir = g_zone_direction[zid2]; if (!best_dir) best_dir = +1; }
+            }
+
+            // Lock all segments in the merged range
+            for (int si2 = lo; si2 <= hi; si2++) {
+                int zid2 = g_segments[si2].zone_id;
+                g_zone_direction[zid2] = best_dir;
+                g_seg_hot[si2] = 1;
+                g_seg_lock_dir[si2] = best_dir;
+                g_seg_cooldown[si2] = HOT_LOCK_COOLDOWN;
+            }
+
+            i = j;
+        }
+
+        // === Cooldown for segments no longer hot ===
+        for (size_t si = 0; si < g_segments.size(); si++) {
+            if (!g_seg_hot[si]) continue;
+            int zid2 = g_segments[si].zone_id;
+            int d2 = (zid2 >= 0 && zid2 < (int)g_zone24_density.size()) ? g_zone24_density[zid2] : 0;
+            if (d2 >= HOT_LOCK_DENSITY) {
+                g_seg_cooldown[si] = HOT_LOCK_COOLDOWN;
+            } else if (--g_seg_cooldown[si] <= 0) {
+                g_seg_hot[si] = 0;
+            } else {
+                g_zone_direction[zid2] = g_seg_lock_dir[si];
             }
         }
     }
