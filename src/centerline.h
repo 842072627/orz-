@@ -1,21 +1,6 @@
-﻿// centerline.h - ORZ centerline generation + BFS distance field projection
-//
-// Precomputation (init once):
-//   1. BFS distance-to-wall from all obstacle cells
-//   2. A* widest path: leftmost -> rightmost walkable cells
-//   3. Moving average smoothing + snap to walkable
-//   4. BFS from centerline cells -> branch_dist[]
-//   5. main_dist[] = cumulative distance along centerline
-//
-// Runtime:
-//   project(loc) -> (main_dist, branch_dist)  O(1)
-//   update_zone_density(env)                  O(N), call each tick
-//   get_congestion_factor(task_id, env)       O(Z), Z=zones on path
-//
-// Thresholds from heatmap analysis (R453, 1800 agents, last 300 ticks):
-//   CONGESTION_THRESHOLD = 44 (595,428 level, 24x24(576-599,408-431) = 13165/300)
-//   DEADLOCK_THRESHOLD   = 90 (635,491 level, 24x24(624-647,480-503) = 26865/300)
-
+// centerline.h - V3: BFS path + zone→main range + 2D heatmap
+// All density data comes from 2D zone heatmap (g_zone24_density).
+// 1D main_dist is used only for direction and zone-range overlap.
 #pragma once
 #include "SharedEnv.h"
 #include <vector>
@@ -24,7 +9,6 @@
 #include <cmath>
 #include <unordered_map>
 #include <unordered_set>
-#include <cstring>
 #include <climits>
 #include <cstdio>
 #include <map>
@@ -32,39 +16,36 @@
 
 namespace Centerline {
 
-// ====== Config (heatmap-calibrated, can be adapted per tick) ======
-static constexpr int CONGESTION_THRESHOLD = 40;   // agents/zone: start penalty
-static constexpr int DEADLOCK_THRESHOLD = 90;      // agents/zone: max penalty
-static constexpr float MAX_PENALTY = 100.0f;        // score / 3 at deadlock
+static constexpr int CONGESTION_THRESHOLD = 40;
+static constexpr int DEADLOCK_THRESHOLD = 90;
+static constexpr float MAX_PENALTY = 100.0f;
+static constexpr int HOT_LOCK_DENSITY = 20;   // 20+ direction lock
+static constexpr int HOT_BLOCK_DENSITY = 23;  // 23+ block ALL assignments through zone
+static constexpr int HOT_LOCK_COOLDOWN = 30;
+static constexpr int DIR_THRESHOLD = 10;
 
 // ====== State ======
 static bool g_ready = false;
 static int g_rows = 0, g_cols = 0;
 static int g_total_len = 0;
-static std::vector<int> g_main_dist;       // [loc] = main distance
-static std::vector<int> g_branch_dist;     // [loc] = branch distance
-static std::vector<int> g_centerline_cells; // list of centerline cell locations
-static std::vector<int> g_zone24_density;  // [row*n24c+col] live agent count
+static std::vector<int> g_main_dist;        // [loc] = main distance
+static std::vector<int> g_branch_dist;      // [loc] = branch distance
+static std::vector<int> g_centerline_cells;  // centerline cell locations
+static std::vector<int> g_zone24_density;   // 2D heatmap: [zid] = live agent count
 static int g_n24c = 0, g_n24r = 0;
+static std::vector<int> g_zone_is_main;     // [zid] = 1 if centerline passes through
 
-// ====== 1D main-line segments (agent→task 穿越惩罚) ======
-struct Segment {
-    float left_m, right_m;   // 70% 重叠边界
-    int zone_id;              // 对应的 2D grid zone
+// ====== Zone→main range (replaces segment system) ======
+struct ZoneMainRange {
+    int zone_id;      // 24×24 zone id
+    int min_m, max_m; // centerline cells' main_dist range in this zone
+    int lock_dir;     // direction lock: +1/-1/0
 };
-static std::vector<Segment> g_segments;
-static std::vector<int> g_main_to_seg;  // [main_dist] = segment index, O(1) lookup
+static std::vector<ZoneMainRange> g_zone_ranges;
 
-// ====== 7-segment direction lock state ======
-static std::vector<int> g_seg_hot;         // [seg_idx] = 1 hot, 0 cool
-static std::vector<int> g_seg_lock_dir;     // [seg_idx] = +1/-1
-static std::vector<int> g_seg_cooldown;     // [seg_idx] = remaining ticks
-
-// ====== Hot zone direction lock state (declared before init()) ======
-static constexpr bool HOT_LOCK_ENABLED = true;
-static constexpr int HOT_LOCK_DENSITY = 28;
-static constexpr int HOT_LOCK_COOLDOWN = 30;
-static std::vector<int> g_zone_is_main;
+// ====== Direction tracking ======
+static std::vector<int> g_zone_direction;    // [+1/-1/0] per zone
+static std::vector<int> g_agent_last_main;   // [aid] = last tick main distance
 
 // ====== BFS distance-to-wall ======
 static void compute_dtw(const SharedEnvironment* env, std::vector<int>& dtw) {
@@ -76,7 +57,6 @@ static void compute_dtw(const SharedEnvironment* env, std::vector<int>& dtw) {
     while (!q.empty()) {
         int cur = q.front(); q.pop();
         int nd = dtw[cur] + 1;
-        int r = cur / g_cols, c = cur % g_cols;
         int neigh[4] = {cur - g_cols, cur + g_cols, cur - 1, cur + 1};
         for (int n : neigh)
             if (n >= 0 && n < total && env->map[n] == 0 && nd < dtw[n])
@@ -84,7 +64,7 @@ static void compute_dtw(const SharedEnvironment* env, std::vector<int>& dtw) {
     }
 }
 
-// ====== A* widest path ======
+// ====== A* widest path (fallback only) ======
 static void widest_path(const SharedEnvironment* env, const std::vector<int>& dtw,
                          int sx, int sy, int gx, int gy, std::vector<int>& path) {
     int total = env->rows * env->cols;
@@ -125,7 +105,7 @@ static void widest_path(const SharedEnvironment* env, const std::vector<int>& dt
     if (path.size() < 2) { path.clear(); path.push_back(sloc); path.push_back(gloc); }
 }
 
-// ====== Smooth path ======
+// ====== Smooth path (fallback) ======
 static void smooth_path(const SharedEnvironment* env, const std::vector<int>& raw,
                          std::vector<int>& out) {
     int window = 1;
@@ -162,21 +142,40 @@ inline void project(int loc, int& main_dist, int& branch_dist) {
     main_dist = (branch_dist >= 0) ? g_main_dist[loc] : -1;
 }
 
-// Forward declarations for build_segments / m_to_segment (defined after init)
-inline void build_segments();
-inline int m_to_segment(int m);
+// ====== Build zone→main range map ======
+inline void build_zone_ranges() {
+    std::map<int, std::pair<int,int>> zm_range;
+    for (int loc : g_centerline_cells) {
+        if (loc < 0) continue;
+        int m = g_main_dist[loc];
+        int r = loc / g_cols, c = loc % g_cols;
+        int zid = (r / 24) * g_n24c + (c / 24);
+        auto& p = zm_range[zid];
+        if (p.first == 0 || m < p.first) p.first = m;
+        if (m > p.second) p.second = m;
+    }
+    g_zone_ranges.clear();
+    for (auto& kv : zm_range) {
+        int zid = kv.first;
+        int lock = (zid >= 0 && zid < (int)g_zone_direction.size()) ? g_zone_direction[zid] : 0;
+        g_zone_ranges.push_back({zid, kv.second.first, kv.second.second, lock});
+    }
+    std::sort(g_zone_ranges.begin(), g_zone_ranges.end(),
+        [](const ZoneMainRange& a, const ZoneMainRange& b) { return a.min_m < b.min_m; });
+    printf("ZONE_RANGES: %zu from %zu centerline cells\n", g_zone_ranges.size(), g_centerline_cells.size());
+}
 
-// ====== Init ======
+// ====== Init: BFS path + wall correction + build zone ranges ======
 void init(const SharedEnvironment* env) {
     g_rows = env->rows; g_cols = env->cols;
     g_n24c = env->cols / 24 + 1; g_n24r = env->rows / 24 + 1;
     int total = g_rows * g_cols;
-
+    
     // Distance to wall
     std::vector<int> dtw;
     compute_dtw(env, dtw);
-
-    // Leftmost / rightmost cells
+    
+    // Find leftmost / rightmost walkable cells
     int start_loc = -1, goal_loc = -1, best_sc = -1, best_gc = -1;
     int min_x = g_cols, max_x = 0;
     for (int i = 0; i < total; i++) {
@@ -188,323 +187,150 @@ void init(const SharedEnvironment* env) {
             { max_x = c; goal_loc = i; best_gc = dtw[i]; }
     }
     if (start_loc < 0 || goal_loc < 0) { fprintf(stderr, "Centerline: no walkable cells\n"); return; }
-
-    // Widest path A*
-    std::vector<int> raw;
-    widest_path(env, dtw, start_loc % g_cols, start_loc / g_cols,
-                goal_loc % g_cols, goal_loc / g_cols, raw);
-
-    // Smooth
-    std::vector<int> smooth;
-    smooth_path(env, raw, smooth);
-    g_centerline_cells = smooth;
-
-    // Main distances along centerline (compute first, BFS needs them)
-    std::unordered_map<int, int> cl_main; // loc -> cumulative
+    
+    // BFS shortest path
+    std::vector<int> came_from(total, -1);
+    std::queue<int> bfs_q;
+    bfs_q.push(start_loc);
+    came_from[start_loc] = start_loc;
+    int found_goal = -1;
+    while (!bfs_q.empty()) {
+        int cur = bfs_q.front(); bfs_q.pop();
+        if (cur == goal_loc) { found_goal = cur; break; }
+        int r = cur / g_cols, c = cur % g_cols;
+        int neigh[4] = {cur - g_cols, cur + g_cols, cur - 1, cur + 1};
+        for (int n : neigh)
+            if (n >= 0 && n < total && env->map[n] == 0 && came_from[n] == -1)
+                { came_from[n] = cur; bfs_q.push(n); }
+    }
+    
+    std::vector<int> base_path;
+    if (found_goal < 0) {
+        fprintf(stderr, "Centerline BFS failed, using A* fallback\n");
+        widest_path(env, dtw, start_loc % g_cols, start_loc / g_cols,
+                    goal_loc % g_cols, goal_loc / g_cols, base_path);
+        smooth_path(env, base_path, base_path);
+    } else {
+        int cur = goal_loc;
+        while (cur != start_loc) { base_path.push_back(cur); cur = came_from[cur]; }
+        base_path.push_back(start_loc);
+        std::reverse(base_path.begin(), base_path.end());
+    }
+    
+    // Wall correction: for DTW <= 2 cells, scan radius 5, snap to best zone
+    std::unordered_map<int, int> corrected_map; // path_idx -> corrected loc
+    for (size_t i = 0; i < base_path.size(); i++) {
+        int loc = base_path[i];
+        if (dtw[loc] > 2) continue;
+        int pr = loc / g_cols, pc = loc % g_cols;
+        std::unordered_map<int, int> zone_hits;
+        for (int dr = -5; dr <= 5; dr++) {
+            for (int dc = -5; dc <= 5; dc++) {
+                if (std::abs(dr) + std::abs(dc) < 1 || std::abs(dr) + std::abs(dc) > 5) continue;
+                int nr = pr + dr, nc = pc + dc;
+                if (nr >= 0 && nr < g_rows && nc >= 0 && nc < g_cols && env->map[nr*g_cols+nc] == 0) {
+                    int zid = (nr / 24) * g_n24c + (nc / 24);
+                    zone_hits[zid]++;
+                }
+            }
+        }
+        int best_zone = -1, best_cnt = -1;
+        for (auto& kv : zone_hits)
+            if (kv.second > best_cnt) { best_cnt = kv.second; best_zone = kv.first; }
+        if (best_zone >= 0) {
+            int replacement = loc, best_d = 999999;
+            for (size_t j = 0; j < base_path.size(); j++) {
+                int pz = (base_path[j] / g_cols / 24) * g_n24c + (base_path[j] % g_cols / 24);
+                if (pz == best_zone) {
+                    int d = std::abs(base_path[j] / g_cols - pr) + std::abs(base_path[j] % g_cols - pc);
+                    if (d < best_d) { best_d = d; replacement = base_path[j]; }
+                }
+            }
+            corrected_map[(int)i] = replacement;
+        }
+    }
+    
+    // Build final centerline
+    g_centerline_cells.clear();
+    for (size_t i = 0; i < base_path.size(); i++) {
+        int cell = base_path[i];
+        if (dtw[cell] <= 2 && corrected_map.count((int)i))
+            cell = corrected_map[(int)i];
+        if (g_centerline_cells.empty() || g_centerline_cells.back() != cell)
+            g_centerline_cells.push_back(cell);
+    }
+    
+    // Main distances along centerline
+    std::unordered_map<int, int> cl_main;
     int cumul = 0;
-    cl_main[smooth[0]] = cumul;
-    for (size_t i = 1; i < smooth.size(); i++) {
-        int r1 = smooth[i-1]/g_cols, c1 = smooth[i-1]%g_cols;
-        int r2 = smooth[i]/g_cols, c2 = smooth[i]%g_cols;
-        cumul += (int)std::round(std::sqrt((c2-c1)*(c2-c1) + (r2-r1)*(r2-r1)));
-        cl_main[smooth[i]] = cumul;
+    cl_main[g_centerline_cells[0]] = cumul;
+    for (size_t i = 1; i < g_centerline_cells.size(); i++) {
+        int r1 = g_centerline_cells[i-1]/g_cols, c1 = g_centerline_cells[i-1]%g_cols;
+        int r2 = g_centerline_cells[i]/g_cols, c2 = g_centerline_cells[i]%g_cols;
+        cumul += (int)std::round(std::sqrt((double)((c2-c1)*(c2-c1) + (r2-r1)*(r2-r1))));
+        cl_main[g_centerline_cells[i]] = cumul;
     }
     g_total_len = cumul;
-
-    // Multi-source BFS from centerline -> branch_dist + nearest main_dist
-    // BFS guarantees first visit = nearest centerline cell, so main_dist propagates directly
-    // Interpolate extra seeds between centerline cells for finer main distance precision
+    
+    // BFS from centerline -> branch_dist + main_dist
     g_branch_dist.assign(total, -1);
     g_main_dist.assign(total, -1);
-    std::queue<int> q;
-    const int SUB_SAMPLES = 20;  // higher sampling density for smoother centerline
-    for (size_t i = 0; i < smooth.size(); i++) {
-        int loc = smooth[i];
+    std::queue<int> seed_q;
+    for (size_t i = 0; i < g_centerline_cells.size(); i++) {
+        int loc = g_centerline_cells[i];
         g_branch_dist[loc] = 0;
         g_main_dist[loc] = cl_main[loc];
-        q.push(loc);
-        
-        // Add interpolated seeds between this cell and the next
-        if (i + 1 < smooth.size()) {
-            int nloc = smooth[i+1];
+        seed_q.push(loc);
+        if (i + 1 < g_centerline_cells.size()) {
+            int nloc = g_centerline_cells[i+1];
             int r1 = loc / g_cols, c1 = loc % g_cols;
             int r2 = nloc / g_cols, c2 = nloc % g_cols;
             int m1 = cl_main[loc], m2 = cl_main[nloc];
-            for (int k = 1; k < SUB_SAMPLES; k++) {
-                float t = (float)k / (float)SUB_SAMPLES;
+            for (int k = 1; k < 20; k++) {
+                float t = (float)k / 20.0f;
                 int ir = (int)std::round(r1 + (r2 - r1) * t);
                 int ic = (int)std::round(c1 + (c2 - c1) * t);
                 int iloc = ir * g_cols + ic;
                 if (iloc >= 0 && iloc < total && env->map[iloc] == 0 && g_branch_dist[iloc] == -1) {
                     g_branch_dist[iloc] = 0;
                     g_main_dist[iloc] = (int)std::round(m1 + (m2 - m1) * t);
-                    q.push(iloc);
+                    seed_q.push(iloc);
                 }
             }
         }
     }
-    while (!q.empty()) {
-        int cur = q.front(); q.pop();
+    while (!seed_q.empty()) {
+        int cur = seed_q.front(); seed_q.pop();
         int nd = g_branch_dist[cur] + 1;
         int nmain = g_main_dist[cur];
         int r = cur / g_cols, c = cur % g_cols;
         int neigh[4] = {cur - g_cols, cur + g_cols, cur - 1, cur + 1};
         for (int n : neigh)
             if (n >= 0 && n < total && env->map[n] == 0 && g_branch_dist[n] == -1)
-                { g_branch_dist[n] = nd; g_main_dist[n] = nmain; q.push(n); }
+                { g_branch_dist[n] = nd; g_main_dist[n] = nmain; seed_q.push(n); }
     }
-
+    
     // Zone density init
     g_zone24_density.assign(g_n24c * g_n24r, 0);
-
-    printf("Centerline: %zu cells, total_len=%d, zones=%dx%d (%d)\n",
-           smooth.size(), g_total_len, g_n24c, g_n24r, g_n24c*g_n24r);
     
-    // Mark main-line zones (centerline passes through)
+    printf("Centerline: %zu cells, total_len=%d\n", g_centerline_cells.size(), g_total_len);
+    
+    // Mark main-line zones
     g_zone_is_main.assign(g_n24c * g_n24r, 0);
-    for (int clloc : smooth) {
+    for (int clloc : g_centerline_cells) {
         int r = clloc / g_cols, c = clloc % g_cols;
         int zid = (r / 24) * g_n24c + (c / 24);
         if (zid >= 0 && zid < (int)g_zone_is_main.size())
             g_zone_is_main[zid] = 1;
     }
     
-    g_ready = true;
-    
-    // ====== Verification: project test points and print ======
-    {
-        int cols = g_cols;
-        struct TestPt { int x, y; };
-        TestPt pts[] = {{993,308},{1143,310},{468,370},{635,493}};
-        for (size_t pi = 0; pi < 4; pi++) {
-            int loc = pts[pi].y * cols + pts[pi].x;
-            int m, b;
-            project(loc, m, b);
-            int nx = -1, ny = -1;
-            int best_d = 999999;
-            for (size_t j = 0; j < smooth.size(); j++) {
-                int cr = smooth[j]/cols, cc = smooth[j]%cols;
-                int d = std::abs(pts[pi].y-cr) + std::abs(pts[pi].x-cc);
-                if (d < best_d) { best_d = d; nx = cc; ny = cr; }
-            }
-            float pct = (g_total_len > 0) ? (float)m * 100.0f / (float)g_total_len : 0.0f;
-            printf("CLVERIFY (%d,%d): M=%d (%.1f%%), B=%d, nearest=(%d,%d)\n",
-                   pts[pi].x, pts[pi].y, m, pct, b, nx, ny);
-        }
-    }
-    
-    build_segments();
+    build_zone_ranges();
     g_ready = true;
 }
 
-// ====== 1D main-line segments init ======
-inline void build_segments() {
-    std::map<int, std::pair<int,int>> zone_m_range;
-    for (int loc : g_centerline_cells) {
-        if (loc < 0) continue;
-        int m = g_main_dist[loc];
-        int r = loc / g_cols, c = loc % g_cols;
-        int zid = (r / 24) * g_n24c + (c / 24);
-        auto& p = zone_m_range[zid];
-        if (p.first == 0 || m < p.first) p.first = m;
-        if (m > p.second) p.second = m;
-    }
-
-    std::vector<int> sorted_zids;
-    for (auto& kv : zone_m_range) sorted_zids.push_back(kv.first);
-    std::sort(sorted_zids.begin(), sorted_zids.end(),
-        [&](int a, int b) { return zone_m_range[a].first < zone_m_range[b].first; });
-
-    struct ZoneInfo { int zid; float center; };
-    std::vector<ZoneInfo> zones;
-    for (int zid : sorted_zids) {
-        auto& r = zone_m_range[zid];
-        zones.push_back({zid, (float)(r.first + r.second) / 2.0f});
-    }
-
-    g_segments.clear();
-    g_segments.reserve(zones.size());
-    for (size_t i = 0; i < zones.size(); i++) {
-        float c = zones[i].center;
-        float left = (i == 0) ? 0.0f : c - 0.7f * (c - zones[i-1].center);
-        float right = (i == zones.size() - 1) ? (float)g_total_len + 0.001f : c + 0.7f * (zones[i+1].center - c);
-        g_segments.push_back({left, right, zones[i].zid});
-    }
-
-    g_main_to_seg.assign(g_total_len + 2, -1);
-    for (int m = 0; m <= g_total_len; m++) {
-        float mf = (float)m;
-        for (size_t i = 0; i < g_segments.size(); i++) {
-            if (mf >= g_segments[i].left_m && mf < g_segments[i].right_m) {
-                g_main_to_seg[m] = (int)i;
-                break;
-            }
-        }
-    }
-
-    g_seg_hot.assign(g_segments.size(), 0);
-    g_seg_lock_dir.assign(g_segments.size(), 0);
-    g_seg_cooldown.assign(g_segments.size(), 0);
-
-    printf("SEGMENTS: %zu built from %zu zones\n", g_segments.size(), zones.size());
-}
-
-inline int m_to_segment(int m) {
-    if (m < 0 || m > g_total_len) return -1;
-    if (g_main_to_seg.empty()) return -1;
-    if (m >= (int)g_main_to_seg.size()) return -1;
-    return g_main_to_seg[m];
-}
-
-// ====== 1D main-line congestion density (agent per main distance unit) ======
-// Each tick: project agents to main distance, build histogram
-// Task congestion: read density at task's main position
-static std::vector<int> g_main_density;  // [main_dist] = live agent count
-
-// Update 1D main-line density (call each tick)
-inline void update_main_density(const SharedEnvironment* env) {
-    if ((int)g_main_density.size() != g_total_len + 1)
-        g_main_density.assign(g_total_len + 1, 0);
-    else
-        std::fill(g_main_density.begin(), g_main_density.end(), 0);
-    
-    for (int a = 0; a < env->num_of_agents; a++) {
-        int loc = env->curr_states[a].location;
-        if (loc < 0) continue;
-        int m, b;
-        project(loc, m, b);
-        if (m >= 0 && m <= g_total_len) {
-            // Weight agents on/branch corridor more heavily
-            float w = 1.0f / (1.0f + (float)b * 0.05f);  // branch=0→1.0, branch=10→0.67, branch=50→0.29
-            // Distribute weight to adjacent bins for smoothness
-            int idx = m;
-            if (idx >= 0 && idx <= g_total_len) {
-                // Simple: just add to nearest bin (fast)
-                g_main_density[idx] += (int)(w + 0.5f);
-            }
-        }
-    }
-}
-
-// ====== Sliding window smoothed density (O(g_total_len) per tick) ======
-// Precomputed after update_main_density for O(1) range queries
-static std::vector<float> g_main_smoothed;
-
-inline void smooth_main_density() {
-    if ((int)g_main_smoothed.size() != g_total_len + 1)
-        g_main_smoothed.assign(g_total_len + 1, 0.0f);
-    
-    int half_w = 24;
-    // Sliding window sum
-    float sum = 0.0f;
-    int cnt = 0;
-    for (int i = 0; i <= half_w && i <= g_total_len; i++) {
-        sum += (float)g_main_density[i];
-        cnt++;
-    }
-    g_main_smoothed[0] = sum / (float)cnt;
-    
-    for (int m = 1; m <= g_total_len; m++) {
-        int lo = m - half_w - 1;
-        int hi = m + half_w;
-        if (lo >= 0) { sum -= (float)g_main_density[lo]; cnt--; }
-        if (hi <= g_total_len) { sum += (float)g_main_density[hi]; cnt++; }
-        g_main_smoothed[m] = sum / (float)cnt;
-    }
-}
-
-// ====== 1D task congestion cache with cached factor ======
-// Stores main range + cached congestion factor (refreshed each tick)
-struct Task1DCache {
-    int m_start, m_end;
-    float cached_factor;  // refreshed each tick
-    bool valid;
-};
-static std::unordered_map<int, Task1DCache> g_task1d_cache;
-
-// Precompute main range for a task (one-time, at task reveal)
-inline void precompute_task_1d(int task_id, const SharedEnvironment* env) {
-    if (g_task1d_cache.count(task_id)) return;
-    auto it = env->task_pool.find(task_id);
-    if (it == env->task_pool.end() || it->second.locations.size() < 1) return;
-    
-    const auto& locs = it->second.locations;
-    Task1DCache cache;
-    cache.valid = false;
-    cache.cached_factor = 1.0f;
-    cache.m_start = INT_MAX/2;
-    cache.m_end = 0;
-    
-    for (size_t e = 0; e < locs.size(); e++) {
-        int m, b;
-        project(locs[e], m, b);
-        if (m >= 0) {
-            if (m < cache.m_start) cache.m_start = m;
-            if (m > cache.m_end) cache.m_end = m;
-            cache.valid = true;
-        }
-    }
-    
-    if (cache.valid) {
-        cache.m_start = std::max(0, cache.m_start - 48);
-        cache.m_end = std::min(g_total_len, cache.m_end + 48);
-        g_task1d_cache[task_id] = cache;
-    }
-}
-
-// Refresh congestion factors for all cached tasks (O(N_tasks × range))
-// Call once per tick after update_main_density + smooth_main_density
-inline void refresh_task_1d_congestion() {
-    for (auto& kv : g_task1d_cache) {
-        Task1DCache& c = kv.second;
-        if (!c.valid || c.m_start > c.m_end) {
-            c.cached_factor = 1.0f;
-            continue;
-        }
-        // Find max smoothed density in range (no inner window loop!)
-        int worst = 0;
-        for (int m = c.m_start; m <= c.m_end; m++) {
-            int d = (int)(g_main_smoothed[m] + 0.5f);
-            if (d > worst) worst = d;
-        }
-        
-        if (worst < CONGESTION_THRESHOLD) {
-            c.cached_factor = 1.0f;
-        } else if (worst >= DEADLOCK_THRESHOLD) {
-            c.cached_factor = MAX_PENALTY;
-        } else {
-            float ratio = (float)(worst - CONGESTION_THRESHOLD) / (float)(DEADLOCK_THRESHOLD - CONGESTION_THRESHOLD);
-            c.cached_factor = 1.0f + ratio * (MAX_PENALTY - 1.0f);
-        }
-    }
-}
-
-// Get cached congestion factor for a task (O(1))
-inline float get_task_1d_congestion(int task_id) {
-    auto it = g_task1d_cache.find(task_id);
-    if (it == g_task1d_cache.end()) return 1.0f;
-    return it->second.cached_factor;
-}
-
-// ====== Backward compatibility aliases for strategy_tidal ======
-inline void update_zone_density(const SharedEnvironment* env) { update_main_density(env); }
-inline void precompute_task_zones(int task_id, const SharedEnvironment* env) { precompute_task_1d(task_id, env); }
-inline void refresh_congestion(const SharedEnvironment*) { }
-inline float get_task_congestion(int task_id) { return get_task_1d_congestion(task_id); }
-
-
-// ====== Zone-based direction tracking (V3) ======
-static constexpr int DIR_THRESHOLD = 10;
-
-static std::vector<int> g_zone_direction;               // [+1/-1/0] per zone (may be overridden by lock)
-static std::vector<int> g_agent_last_main;           // [aid] = last tick main distance
-
-
-
-// Tick call: compute agent count per 24x24 zone
+// ====== 2D zone density (tick call) ======
 inline void update_zone24_density(const SharedEnvironment* env) {
-    int rows = env->rows, cols = env->cols;
-    int n24c = (cols + 23) / 24, n24r = (rows + 23) / 24;
+    int n24c = (env->cols + 23) / 24, n24r = (env->rows + 23) / 24;
     if ((int)g_zone24_density.size() != n24c * n24r)
         g_zone24_density.assign(n24c * n24r, 0);
     else
@@ -512,113 +338,69 @@ inline void update_zone24_density(const SharedEnvironment* env) {
     for (int a = 0; a < env->num_of_agents; a++) {
         int loc = env->curr_states[a].location;
         if (loc < 0) continue;
-        int r = loc / cols, c = loc % cols;
+        int r = loc / env->cols, c = loc % env->cols;
         int zi = (r / 24) * n24c + (c / 24);
         if (zi >= 0 && zi < (int)g_zone24_density.size())
             g_zone24_density[zi]++;
     }
 }
 
-// Tick call: compute per-zone traffic direction
+// ====== Zone direction (tick call) ======
 inline void update_zone_direction(const SharedEnvironment* env) {
     int rows = env->rows, cols = env->cols;
     int n24c = (cols + 23) / 24, n24r = (rows + 23) / 24;
     int nz = n24c * n24r;
-    if ((int)g_zone_direction.size() != nz)
-        g_zone_direction.assign(nz, 0);
-    if ((int)g_agent_last_main.size() != env->num_of_agents)
-        g_agent_last_main.assign(env->num_of_agents, -1);
+    if ((int)g_zone_direction.size() != nz) g_zone_direction.assign(nz, 0);
+    if ((int)g_agent_last_main.size() != env->num_of_agents) g_agent_last_main.assign(env->num_of_agents, -1);
     
     std::vector<int> flow_right(nz, 0), flow_left(nz, 0);
-    
     for (int a = 0; a < env->num_of_agents; a++) {
         int loc = env->curr_states[a].location;
         if (loc < 0) continue;
         int r = loc / cols, c = loc % cols;
         int zi = (r / 24) * n24c + (c / 24);
         if (zi < 0 || zi >= nz) continue;
-        
         int m = -1, b;
         project(loc, m, b);
         int prev_m = g_agent_last_main[a];
         g_agent_last_main[a] = m;
-        
         if (prev_m >= 0 && m >= 0) {
-            int diff = m - prev_m;
-            if (diff >= 1)      flow_right[zi]++;
-            else if (diff <= -1) flow_left[zi]++;
+            if (m - prev_m >= 1)      flow_right[zi]++;
+            else if (m - prev_m <= -1) flow_left[zi]++;
         }
     }
     
+    // Zone direction: majority flow
     std::fill(g_zone_direction.begin(), g_zone_direction.end(), 0);
     for (int zi = 0; zi < nz; zi++) {
         if (g_zone24_density[zi] < DIR_THRESHOLD) continue;
-        if (flow_right[zi] > flow_left[zi])
-            g_zone_direction[zi] = +1;
-        else if (flow_left[zi] > flow_right[zi])
-            g_zone_direction[zi] = -1;
+        g_zone_direction[zi] = (flow_right[zi] > flow_left[zi]) ? +1 :
+                               (flow_left[zi] > flow_right[zi]) ? -1 : 0;
     }
     
-    // ====== Hot zone direction locking: density >= HOT_LOCK_DENSITY → lock immediately ======
-    if (HOT_LOCK_ENABLED) {
-        // === Collect hot segments ===
-        std::vector<int> hot_segs;
-        for (size_t si = 0; si < g_segments.size(); si++) {
-            int zid = g_segments[si].zone_id;
-            if (zid >= 0 && zid < (int)g_zone24_density.size() &&
-                g_zone24_density[zid] >= HOT_LOCK_DENSITY)
-                hot_segs.push_back((int)si);
-        }
-
-        // === Merge overlapping 7-segment ranges ===
-        for (size_t i = 0; i < hot_segs.size(); ) {
-            int lo = std::max(0, hot_segs[i] - 3);
-            int hi = std::min((int)g_segments.size() - 1, hot_segs[i] + 3);
-
-            size_t j = i + 1;
-            while (j < hot_segs.size() && hot_segs[j] - 3 <= hi) {
-                hi = std::max(hi, std::min((int)g_segments.size() - 1, hot_segs[j] + 3));
-                j++;
-            }
-
-            // Direction: pick the direction of the densest segment in the block
-            int best_dir = +1, max_d = -1;
-            for (size_t k = i; k < j; k++) {
-                int zid2 = g_segments[hot_segs[k]].zone_id;
-                int d2 = g_zone24_density[zid2];
-                if (d2 > max_d) { max_d = d2; best_dir = g_zone_direction[zid2]; if (!best_dir) best_dir = +1; }
-            }
-
-            // Lock all segments in the merged range
-            for (int si2 = lo; si2 <= hi; si2++) {
-                int zid2 = g_segments[si2].zone_id;
-                g_zone_direction[zid2] = best_dir;
-                g_seg_hot[si2] = 1;
-                g_seg_lock_dir[si2] = best_dir;
-                g_seg_cooldown[si2] = HOT_LOCK_COOLDOWN;
-            }
-
-            i = j;
-        }
-
-        // === Cooldown for segments no longer hot ===
-        for (size_t si = 0; si < g_segments.size(); si++) {
-            if (!g_seg_hot[si]) continue;
-            int zid2 = g_segments[si].zone_id;
-            int d2 = (zid2 >= 0 && zid2 < (int)g_zone24_density.size()) ? g_zone24_density[zid2] : 0;
-            if (d2 >= HOT_LOCK_DENSITY) {
-                g_seg_cooldown[si] = HOT_LOCK_COOLDOWN;
-            } else if (--g_seg_cooldown[si] <= 0) {
-                g_seg_hot[si] = 0;
-            } else {
-                g_zone_direction[zid2] = g_seg_lock_dir[si];
-            }
+    // Hot zone direction locking
+    static int zone_cooldown[2000] = {0};
+    static int zone_lock_dir[2000] = {0};
+    for (int zi = 0; zi < nz && zi < 2000; zi++) {
+        if (g_zone24_density[zi] >= HOT_LOCK_DENSITY) {
+            zone_lock_dir[zi] = g_zone_direction[zi] ? g_zone_direction[zi] : +1;
+            zone_cooldown[zi] = HOT_LOCK_COOLDOWN;
+        } else if (zone_cooldown[zi] > 0) {
+            zone_cooldown[zi]--;
+            if (zone_cooldown[zi] > 0)
+                g_zone_direction[zi] = zone_lock_dir[zi];
         }
     }
-
-    // Copy lock state to shared array for PIBT
-    for (size_t si = 0; si < g_segments.size() && si < (size_t)PIBT_Lock::MAX_SEGMENTS; si++)
-        PIBT_Lock::g_seg_lock_dir[si] = g_seg_lock_dir[si];
+    
+    // Sync zone direction to zone_ranges
+    for (auto& zr : g_zone_ranges) {
+        if (zr.zone_id >= 0 && zr.zone_id < nz)
+            zr.lock_dir = g_zone_direction[zr.zone_id];
+    }
+    
+    // Sync to PIBT lock
+    for (size_t si = 0; si < g_zone_ranges.size() && si < (size_t)PIBT_Lock::MAX_SEGMENTS; si++)
+        PIBT_Lock::g_seg_lock_dir[si] = g_zone_ranges[si].lock_dir;
 }
 
 } // namespace Centerline
