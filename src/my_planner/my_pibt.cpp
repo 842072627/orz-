@@ -58,12 +58,14 @@ bool causalMY_PIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
 
 	int target = lns.tasks.at(curr_id);
 
+#if ORZ_PIBT_DIRECTION_BLOCK
 	// If scheduler flagged this agent as direction-blocked, force wait
 	if (curr_id < PIBT_Lock::MAX_AGENTS && PIBT_Lock::g_agent_blocked[curr_id]) {
 		next_states.at(curr_id) = State(prev_loc, -1, -1);
 		decision.at(prev_loc) = curr_id;
 		return false;
 	}
+#endif
 
 	if (higher_id == -1){
 		//fist agent in the chain, disallow cyclic movments by preventing other agents moving to first agent's previous location

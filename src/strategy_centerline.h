@@ -142,8 +142,9 @@ void pre_tick_updates(SharedEnvironment* env) {
 void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule) {
     pre_tick_updates(env);
 
-    // Set agent direction block flags for PIBT (2D line based)
-    int n24c = (env->cols + 23) / 24;
+    // Set agent direction block flags for PIBT (disabled by config)
+    if (ORZ_PIBT_DIRECTION_BLOCK) {
+        int n24c = (env->cols + 23) / 24;
     for (int a = 0; a < env->num_of_agents && a < PIBT_Lock::MAX_AGENTS; a++) {
         PIBT_Lock::g_agent_blocked[a] = 0;
         int tid = env->curr_task_schedule[a];
@@ -196,6 +197,7 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
         }
 
         PIBT_Lock::g_agent_blocked[a] = blocked ? 1 : 0;
+        }
     }
     
     TimePoint endtime = std::chrono::steady_clock::now() + std::chrono::milliseconds(limit);

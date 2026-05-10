@@ -25,5 +25,8 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define ORZ_PLANNER     "default"       // ORZ规划器: 默认PIBT（待定制）
 #define ORZ_EXECUTOR    "default"       // ORZ执行器: 默认（待定制）
 
+// ========== 功能开关 ==========
+#define ORZ_PIBT_DIRECTION_BLOCK  false   // 调度器+PIBT方向阻塞联动
+
 // 运行时获取策略名（用于TaskScheduler.cpp）
 inline std::string get_orz_strategy() { return ORZ_SCHEDULER; }
