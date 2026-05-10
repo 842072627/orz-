@@ -24,7 +24,7 @@ static constexpr int HOT_BLOCK_DENSITY = 25;  // 14+ block ALL assignments throu
 // ====== Containment direction lock constants ======
 static constexpr int CONTAIN_LOCK_DENSITY = 20;   // density >= 20 triggers containment block
 static constexpr int CONTAIN_UNLOCK_DENSITY = 20;  // all zones in block < 20 to unlock
-static constexpr int CONTAIN_EXPAND = 2;           // expand hot zone Â±2 zones
+static constexpr int CONTAIN_EXPAND = 1;           // expand hot zone Â±2 zones
 static constexpr int HOT_LOCK_COOLDOWN = 30;
 static constexpr int DIR_THRESHOLD = 10;
 
