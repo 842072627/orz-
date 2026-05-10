@@ -5,6 +5,7 @@
 #include "utils.h"
 #include "config.h"
 #include "centerline.h"
+#include "connection_exempt.h"
 #include "pibt_lock.h"
 #include <unordered_set>
 #include <unordered_map>
@@ -113,6 +114,12 @@ static inline float base_score(int a_loc, int tid, int step) {
             }
             return total;
         }
+
+        // === Escape exemption: compute once before main route loop ===
+        float esc_score = connection_exempt_score(a_loc, it->second.locations,
+            Centerline::g_zone24_density, Centerline::g_zone_is_main,
+            g_env->map, g_env->cols, Centerline::g_n24c);
+        if (esc_score > 0) return esc_score;
     }
 
     int a_m, a_b;
@@ -139,10 +146,12 @@ static inline float base_score(int a_loc, int tid, int step) {
                 // Direction lock check (config-controlled)
                 if (ORZ_DIRECTION_LOCK && zr.lock_dir != 0 && zr.lock_dir != intent)
                     return -1e9f;
-                // Adaptive +2 (offset same as old 23 vs 25): HOT_BLOCK all assignments
+                // HOT_BLOCK (adaptive threshold): block all assignments through hot zone
                 int d = Centerline::g_zone24_density[zr.zone_id];
-                if (d >= Centerline::g_zone_threshold[zr.zone_id] + 2)
+                if (d >= Centerline::g_zone_threshold[zr.zone_id]) {
+                    // Esc exemption already computed above and didn't pass → block
                     return -1e9f;
+                }
                 if (d > d_max_seg) d_max_seg = d;
             }
         }
