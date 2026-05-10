@@ -27,6 +27,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 
 // ========== 功能开关 ==========
 #define ORZ_PIBT_DIRECTION_BLOCK  false   // 调度器+PIBT方向阻塞联动
+#define ORZ_DIRECTION_LOCK        false   // 方向锁（lock_dir），关闭后只保留HOT_BLOCK拥塞封锁
 
 // 运行时获取策略名（用于TaskScheduler.cpp）
 inline std::string get_orz_strategy() { return ORZ_SCHEDULER; }

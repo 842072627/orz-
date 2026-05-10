@@ -3,6 +3,7 @@
 // 1D main_dist is used only for direction and zone-range overlap.
 #pragma once
 #include "SharedEnv.h"
+#include "config.h"
 #include <vector>
 #include <queue>
 #include <algorithm>
@@ -19,8 +20,11 @@ namespace Centerline {
 static constexpr int CONGESTION_THRESHOLD = 40;
 static constexpr int DEADLOCK_THRESHOLD = 90;
 static constexpr float MAX_PENALTY = 100.0f;
-static constexpr int HOT_LOCK_DENSITY = 20;   // 20+ direction lock
-static constexpr int HOT_BLOCK_DENSITY = 23;  // 23+ block ALL assignments through zone
+static constexpr int HOT_BLOCK_DENSITY = 14;  // 14+ block ALL assignments through zone
+// ====== Containment direction lock constants ======
+static constexpr int CONTAIN_LOCK_DENSITY = 20;   // density >= 20 triggers containment block
+static constexpr int CONTAIN_UNLOCK_DENSITY = 20;  // all zones in block < 20 to unlock
+static constexpr int CONTAIN_EXPAND = 2;           // expand hot zone ±2 zones
 static constexpr int HOT_LOCK_COOLDOWN = 30;
 static constexpr int DIR_THRESHOLD = 10;
 
@@ -378,24 +382,82 @@ inline void update_zone_direction(const SharedEnvironment* env) {
                                (flow_left[zi] > flow_right[zi]) ? -1 : 0;
     }
     
-    // Hot zone direction locking
-    static int zone_cooldown[2000] = {0};
-    static int zone_lock_dir[2000] = {0};
-    for (int zi = 0; zi < nz && zi < 2000; zi++) {
-        if (g_zone24_density[zi] >= HOT_LOCK_DENSITY) {
-            zone_lock_dir[zi] = g_zone_direction[zi] ? g_zone_direction[zi] : +1;
-            zone_cooldown[zi] = HOT_LOCK_COOLDOWN;
-        } else if (zone_cooldown[zi] > 0) {
-            zone_cooldown[zi]--;
-            if (zone_cooldown[zi] > 0)
-                g_zone_direction[zi] = zone_lock_dir[zi];
+    if (ORZ_DIRECTION_LOCK) {
+        // Containment block lock: find contiguous hot zones, expand, merge
+        std::vector<int> hot_idx;
+        for (int i = 0; i < (int)g_zone_ranges.size(); i++) {
+            int zid = g_zone_ranges[i].zone_id;
+            if (zid >= 0 && zid < nz && g_zone24_density[zid] >= CONTAIN_LOCK_DENSITY)
+                hot_idx.push_back(i);
+        }
+        
+        if (hot_idx.empty()) {
+            // No hot zones → unlock all
+            for (auto& zr : g_zone_ranges) {
+                if (zr.zone_id >= 0 && zr.zone_id < nz)
+                    g_zone_direction[zr.zone_id] = 0;
+            }
+        } else {
+            // Build blocks: expand each hot run ±CONTAIN_EXPAND, merge overlapping
+            struct Block { int start, end, dir; };
+            std::vector<Block> blocks;
+            int st = std::max(0, hot_idx[0] - CONTAIN_EXPAND);
+            int en = std::min((int)g_zone_ranges.size() - 1, hot_idx[0] + CONTAIN_EXPAND);
+            for (size_t i = 1; i < hot_idx.size(); i++) {
+                int nst = std::max(0, hot_idx[i] - CONTAIN_EXPAND);
+                int nen = std::min((int)g_zone_ranges.size() - 1, hot_idx[i] + CONTAIN_EXPAND);
+                if (nst <= en + 1) {
+                    en = std::max(en, nen);
+                } else {
+                    blocks.push_back({st, en, 0});
+                    st = nst; en = nen;
+                }
+            }
+            blocks.push_back({st, en, 0});
+            
+            // Apply per-block direction
+            for (auto& block : blocks) {
+                // Find direction from first hot zone in this block (by order)
+                int dir = 0;
+                for (int i = block.start; i <= block.end && dir == 0; i++) {
+                    int zid = g_zone_ranges[i].zone_id;
+                    if (g_zone24_density[zid] >= CONTAIN_LOCK_DENSITY) {
+                        dir = g_zone_direction[zid];
+                        if (dir == 0)
+                            dir = (zid * 1103515245 + 12345) % 2 ? +1 : -1;
+                    }
+                }
+                if (dir == 0) dir = +1;
+                
+                // Check unlock: ALL zones in block must be < CONTAIN_LOCK_DENSITY
+                bool all_cool = true;
+                for (int i = block.start; i <= block.end; i++) {
+                    int zid = g_zone_ranges[i].zone_id;
+                    if (g_zone24_density[zid] >= CONTAIN_LOCK_DENSITY) {
+                        all_cool = false;
+                        break;
+                    }
+                }
+                
+                if (all_cool) {
+                    for (int i = block.start; i <= block.end; i++) {
+                        int zid = g_zone_ranges[i].zone_id;
+                        g_zone_direction[zid] = 0;
+                    }
+                } else {
+                    for (int i = block.start; i <= block.end; i++) {
+                        int zid = g_zone_ranges[i].zone_id;
+                        g_zone_direction[zid] = dir;
+                    }
+                }
+            }
         }
     }
     
     // Sync zone direction to zone_ranges
     for (auto& zr : g_zone_ranges) {
         if (zr.zone_id >= 0 && zr.zone_id < nz)
-            zr.lock_dir = g_zone_direction[zr.zone_id];
+            zr.lock_dir = ORZ_DIRECTION_LOCK ? g_zone_direction[zr.zone_id] : 0;
     }
     
     // Sync to PIBT lock

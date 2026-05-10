@@ -70,7 +70,8 @@ static inline float base_score(int a_loc, int tid, int step) {
         int d_max_seg = 0;
         for (auto& zr : Centerline::g_zone_ranges) {
             if (zr.min_m <= hi && zr.max_m >= lo) {
-                if (zr.lock_dir != 0 && zr.lock_dir != intent)
+                // Direction lock check (config-controlled)
+                if (ORZ_DIRECTION_LOCK && zr.lock_dir != 0 && zr.lock_dir != intent)
                     return -1e9f;
                 // HOT_BLOCK: density >= 23 blocks ALL assignments through this zone
                 int d = Centerline::g_zone24_density[zr.zone_id];
