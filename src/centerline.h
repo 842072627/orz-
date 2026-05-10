@@ -169,7 +169,6 @@ inline void build_zone_ranges() {
     }
     std::sort(g_zone_ranges.begin(), g_zone_ranges.end(),
         [](const ZoneMainRange& a, const ZoneMainRange& b) { return a.min_m < b.min_m; });
-    printf("ZONE_RANGES: %zu from %zu centerline cells\n", g_zone_ranges.size(), g_centerline_cells.size());
 }
 
 // ====== Init: BFS path + wall correction + build zone ranges ======
@@ -193,7 +192,7 @@ void init(const SharedEnvironment* env) {
         if (c > max_x || (c == max_x && dtw[i] > best_gc))
             { max_x = c; goal_loc = i; best_gc = dtw[i]; }
     }
-    if (start_loc < 0 || goal_loc < 0) { fprintf(stderr, "Centerline: no walkable cells\n"); return; }
+    if (start_loc < 0 || goal_loc < 0) { return; }
     
     // BFS shortest path
     std::vector<int> came_from(total, -1);
@@ -213,7 +212,6 @@ void init(const SharedEnvironment* env) {
     
     std::vector<int> base_path;
     if (found_goal < 0) {
-        fprintf(stderr, "Centerline BFS failed, using A* fallback\n");
         widest_path(env, dtw, start_loc % g_cols, start_loc / g_cols,
                     goal_loc % g_cols, goal_loc / g_cols, base_path);
         smooth_path(env, base_path, base_path);
@@ -321,7 +319,6 @@ void init(const SharedEnvironment* env) {
     g_zone24_density.assign(g_n24c * g_n24r, 0);
     g_zone_threshold.assign(g_n24c * g_n24r, 23);
     
-    printf("Centerline: %zu cells, total_len=%d\n", g_centerline_cells.size(), g_total_len);
     
     // Mark main-line zones
     g_zone_is_main.assign(g_n24c * g_n24r, 0);

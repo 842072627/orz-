@@ -279,24 +279,6 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
                 done_tasks.insert(best_tid);
                 phase2_assigned++;
             } else {
-                // Debug: check WHY first free agent gets -1 (do once)
-                static int s_debugged = 0;
-                if (a == 0 && !s_debugged && step >= 4) {
-                    s_debugged = 1;
-                    int probe_tid = -1;
-                    for (auto& kv : tasks_by_zone) {
-                        for (int tid : kv.second) {
-                            if (!done_tasks.count(tid)) { probe_tid = tid; break; }
-                        }
-                        if (probe_tid >= 0) break;
-                    }
-                    if (probe_tid >= 0) {
-                        float bs = base_score(a_loc, probe_tid, step);
-                        printf("[DEBUG] tick=%d a=%d loc=%d bs=%.1f\n",
-                               step, a, a_loc, bs);
-                        
-                    }
-                }
                 proposed_schedule[a] = -1;
             }
         }
@@ -306,43 +288,7 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
         if (proposed_schedule[a] < 0) proposed_schedule[a] = -1;
     }
     
-    // WHY-IT-STOPPED logging
-    if (step >= 40 && step % 10 == 0) {
-        // Check if Phase 2 is running or being skipped
-        int a_eg = free_agents.empty() ? -1 : free_agents[0];
-        int a_loc = (a_eg >= 0) ? env->curr_states[a_eg].location : -1;
-        int a_z = (a_eg >= 0) ? zid(a_loc, cols) : -1;
-        int n_blocks = 0, n_locked = 0;
-        int hot18 = 0;
-        for (auto& zr : Centerline::g_zone_ranges) {
-            int d = Centerline::g_zone24_density[zr.zone_id];
-            if (d >= Centerline::g_zone_threshold[zr.zone_id]) hot18++;  // direction-lock hot zones
-            if (zr.lock_dir != 0) { n_blocks++; if(zr.lock_dir) n_locked++; }
-        }
-        printf("[WHY] tick=%d free=%d tasks=%d p2_assigned=%d a_eg=%d a_z=%d hot18=%d locked_zones=%d tasks_by_zone=%zu\n",
-               step, (int)free_agents.size(), (int)free_tasks.size(), phase2_assigned, a_eg, a_z, hot18, n_locked, 0U);
-    }
     
-    auto t_end = std::chrono::steady_clock::now();
-    int elapsed = (int)std::chrono::duration_cast<std::chrono::milliseconds>(t_end - t0).count();
-    int pre_ms = (int)std::chrono::duration_cast<std::chrono::microseconds>(t_pre - t0).count();
-    if (step < 200 || step % 200 == 0 || elapsed >= limit) {
-        printf("[TIMING] tick=%d limit=%dms sched=%dms pre=%dus agents=%d free=%d tasks=%d\n",
-               step, limit, elapsed, pre_ms, env->num_of_agents, (int)free_agents.size(), (int)free_tasks.size());
-    }
-    // Dump zone densities at key ticks
-    if (step < 100) {
-        int max_d = 0, max_z = -1;
-        int over14 = 0, over20 = 0;
-        for (size_t zi = 0; zi < Centerline::g_zone24_density.size(); zi++) {
-            int d = Centerline::g_zone24_density[zi];
-            if (d > max_d) { max_d = d; max_z = (int)zi; }
-            if (d >= 14) over14++;
-            if (d >= 20) over20++;
-        }
-        printf("[DENSITY] tick=%d max_z=%d max_d=%d over14=%d over20=%d\n",
-               step, max_z, max_d, over14, over20);
-    }
 }
 
 } // namespace strategy_centerline
