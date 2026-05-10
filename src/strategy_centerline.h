@@ -64,7 +64,7 @@ static inline float base_score(int a_loc, int tid, int step) {
             if (z1 >= 0 && z1 < max_z) {
                 int d1 = Centerline::g_zone24_density[z1];
                 if (Centerline::g_zone_is_main[z1]) {
-                    if (d1 >= Centerline::CONTAIN_LOCK_DENSITY || d1 >= Centerline::HOT_BLOCK_DENSITY)
+                    if (d1 >= Centerline::g_zone_threshold[z1])
                         { is_branch = false; break; }
                 } else {
                     if (d1 >= 70) { is_branch = false; break; }
@@ -75,7 +75,7 @@ static inline float base_score(int a_loc, int tid, int step) {
             if (z2 >= 0 && z2 < max_z) {
                 int d2 = Centerline::g_zone24_density[z2];
                 if (Centerline::g_zone_is_main[z2]) {
-                    if (d2 >= Centerline::CONTAIN_LOCK_DENSITY || d2 >= Centerline::HOT_BLOCK_DENSITY)
+                    if (d2 >= Centerline::g_zone_threshold[z2])
                         { is_branch = false; break; }
                 } else {
                     if (d2 >= 70) { is_branch = false; break; }
@@ -139,9 +139,9 @@ static inline float base_score(int a_loc, int tid, int step) {
                 // Direction lock check (config-controlled)
                 if (ORZ_DIRECTION_LOCK && zr.lock_dir != 0 && zr.lock_dir != intent)
                     return -1e9f;
-                // HOT_BLOCK: density >= 23 blocks ALL assignments through this zone
+                // Adaptive +2 (offset same as old 23 vs 25): HOT_BLOCK all assignments
                 int d = Centerline::g_zone24_density[zr.zone_id];
-                if (d >= Centerline::HOT_BLOCK_DENSITY)
+                if (d >= Centerline::g_zone_threshold[zr.zone_id] + 2)
                     return -1e9f;
                 if (d > d_max_seg) d_max_seg = d;
             }
@@ -164,6 +164,7 @@ static inline float base_score(int a_loc, int tid, int step) {
 
 void pre_tick_updates(SharedEnvironment* env) {
     Centerline::update_zone24_density(env);
+    Centerline::update_zone_threshold();
     Centerline::update_zone_direction(env);
 }
 
@@ -306,7 +307,7 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
         int hot18 = 0;
         for (auto& zr : Centerline::g_zone_ranges) {
             int d = Centerline::g_zone24_density[zr.zone_id];
-            if (d >= Centerline::HOT_BLOCK_DENSITY) hot18++;
+            if (d >= Centerline::g_zone_threshold[zr.zone_id]) hot18++;  // direction-lock hot zones
             if (zr.lock_dir != 0) { n_blocks++; if(zr.lock_dir) n_locked++; }
         }
         printf("[WHY] tick=%d free=%d tasks=%d p2_assigned=%d a_eg=%d a_z=%d hot18=%d locked_zones=%d tasks_by_zone=%zu\n",

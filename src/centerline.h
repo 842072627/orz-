@@ -20,11 +20,13 @@ namespace Centerline {
 static constexpr int CONGESTION_THRESHOLD = 40;
 static constexpr int DEADLOCK_THRESHOLD = 90;
 static constexpr float MAX_PENALTY = 100.0f;
-static constexpr int HOT_BLOCK_DENSITY = 25;  // 14+ block ALL assignments through zone
-// ====== Containment direction lock constants ======
-static constexpr int CONTAIN_LOCK_DENSITY = 23;   // density >= 20 triggers containment block
-static constexpr int CONTAIN_UNLOCK_DENSITY = 20;  // all zones in block < 20 to unlock
-static constexpr int CONTAIN_EXPAND = 1;           // expand hot zone Â±2 zones
+// ====== Adaptive per-zone threshold (dynamic, replaces HOT_BLOCK + CONTAIN_LOCK) ======
+// target = 30.5 - density*0.5, thr = (thr*9 + target)/10, clamp(12,35)
+static constexpr float ADAPTIVE_ALPHA = 0.1f;
+static constexpr int ADAPTIVE_FLOOR = 12;
+static constexpr int ADAPTIVE_CEIL = 35;
+// Expansion for direction lock neighbors
+static constexpr int CONTAIN_EXPAND = 1;
 static constexpr int HOT_LOCK_COOLDOWN = 30;
 static constexpr int DIR_THRESHOLD = 10;
 
@@ -36,6 +38,7 @@ static std::vector<int> g_main_dist;        // [loc] = main distance
 static std::vector<int> g_branch_dist;      // [loc] = branch distance
 static std::vector<int> g_centerline_cells;  // centerline cell locations
 static std::vector<int> g_zone24_density;   // 2D heatmap: [zid] = live agent count
+static std::vector<int> g_zone_threshold;    // [zid] = adaptive threshold (12-35)
 static int g_n24c = 0, g_n24r = 0;
 static std::vector<int> g_zone_is_main;     // [zid] = 1 if centerline passes through
 
@@ -316,6 +319,7 @@ void init(const SharedEnvironment* env) {
     
     // Zone density init
     g_zone24_density.assign(g_n24c * g_n24r, 0);
+    g_zone_threshold.assign(g_n24c * g_n24r, 23);
     
     printf("Centerline: %zu cells, total_len=%d\n", g_centerline_cells.size(), g_total_len);
     
@@ -346,6 +350,21 @@ inline void update_zone24_density(const SharedEnvironment* env) {
         int zi = (r / 24) * n24c + (c / 24);
         if (zi >= 0 && zi < (int)g_zone24_density.size())
             g_zone24_density[zi]++;
+    }
+}
+
+// ====== Adaptive per-zone threshold update (must be called after update_zone24_density) ======
+// target = 30.5 - density*0.5 → density=15 gives 23, thr = (thr*9 + target)/10, clamp(12,35)
+// Direction lock uses thr, HOT_BLOCK uses thr+2 (same offset as old 23 vs 25)
+inline void update_zone_threshold() {
+    int nz = (int)g_zone24_density.size();
+    if ((int)g_zone_threshold.size() != nz) g_zone_threshold.assign(nz, 23);
+    for (int zid = 0; zid < nz; zid++) {
+        float target = 30.5f - (float)g_zone24_density[zid] * 0.5f;
+        int new_thr = (int)(g_zone_threshold[zid] * 0.9f + target * 0.1f + 0.5f);
+        if (new_thr < ADAPTIVE_FLOOR) new_thr = ADAPTIVE_FLOOR;
+        if (new_thr > ADAPTIVE_CEIL) new_thr = ADAPTIVE_CEIL;
+        g_zone_threshold[zid] = new_thr;
     }
 }
 
@@ -389,7 +408,7 @@ inline void update_zone_direction(const SharedEnvironment* env) {
         // Phase 1: Hot zones set direction (follow neighbor direction if exists)
         for (int i = 0; i < (int)g_zone_ranges.size(); i++) {
             int zid = g_zone_ranges[i].zone_id;
-            if (zid < 0 || zid >= nz || g_zone24_density[zid] < CONTAIN_LOCK_DENSITY)
+            if (zid < 0 || zid >= nz || g_zone24_density[zid] < g_zone_threshold[zid])
                 continue;
             if (g_zone_direction[zid] != 0)
                 continue; // Already has direction
@@ -420,7 +439,7 @@ inline void update_zone_direction(const SharedEnvironment* env) {
         // Phase 2: Hot zones lock themselves and neighbors unconditionally
         for (int i = 0; i < (int)g_zone_ranges.size(); i++) {
             int zid = g_zone_ranges[i].zone_id;
-            if (zid < 0 || zid >= nz || g_zone24_density[zid] < CONTAIN_LOCK_DENSITY)
+            if (zid < 0 || zid >= nz || g_zone24_density[zid] < g_zone_threshold[zid])
                 continue;
             int dir = g_zone_direction[zid];
             for (int d = -CONTAIN_EXPAND; d <= CONTAIN_EXPAND; d++) {
@@ -436,7 +455,7 @@ inline void update_zone_direction(const SharedEnvironment* env) {
         for (int i = 0; i < (int)g_zone_ranges.size(); i++) {
             int zid = g_zone_ranges[i].zone_id;
             if (zid < 0 || zid >= nz) continue;
-            if (g_zone24_density[zid] >= CONTAIN_LOCK_DENSITY)
+            if (g_zone24_density[zid] >= g_zone_threshold[zid])
                 continue; // Hot zone stays locked
             
             bool nearby_hot = false;
@@ -444,7 +463,7 @@ inline void update_zone_direction(const SharedEnvironment* env) {
                 int ni = i + d;
                 if (ni < 0 || ni >= (int)g_zone_ranges.size()) continue;
                 int nzid = g_zone_ranges[ni].zone_id;
-                if (nzid >= 0 && g_zone24_density[nzid] >= CONTAIN_LOCK_DENSITY) {
+                if (nzid >= 0 && g_zone24_density[nzid] >= g_zone_threshold[nzid]) {
                     nearby_hot = true;
                     break;
                 }
