@@ -1,5 +1,6 @@
 #include <random>
 #include <Entry.h>
+#include "config.h"
 
 //default planner includes
 #include "planner.h"
@@ -31,9 +32,7 @@ void MAPFPlanner::initialize(int preprocess_time_limit)
  */
 void MAPFPlanner::plan(int time_limit, Plan & plan) 
 {
-#ifdef SKIP_NON_ORZ_TEST
-    if (!is_ORZ(env)) return;
-#endif
+    if ( !is_ORZ(env)) return;
     // use the remaining time after task schedule for path planning, -PLANNER_TIMELIMIT_TOLERANCE for timing error tolerance;
     int limit = time_limit - std::chrono::duration_cast<milliseconds>(std::chrono::steady_clock::now() - env->plan_start_time).count() - DefaultPlanner::PLANNER_TIMELIMIT_TOLERANCE;
 

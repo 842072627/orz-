@@ -33,9 +33,7 @@ void TaskScheduler::initialize(int preprocess_time_limit)
 
 void TaskScheduler::plan(int time_limit, std::vector<int> &proposed_schedule)
 {
-#ifdef SKIP_NON_ORZ_TEST
-    if (!is_ORZ(env)) return;
-#endif
+    if (SKIP_NON_ORZ_TEST && !is_ORZ(env)) return;
     if (has_custom_strategy(env))
     {
         std::string strat = get_orz_strategy();
