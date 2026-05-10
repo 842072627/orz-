@@ -1,11 +1,11 @@
-// config.h — Combined Track 全局配置
-// 所有地图策略选择在此集中控制
+﻿// config.h â€” Combined Track å…¨å±€é…ç½®
+// æ‰€æœ‰åœ°å›¾ç­–ç•¥é€‰æ‹©åœ¨æ­¤é›†ä¸­æŽ§åˆ¶
 
 #pragma once
 #include <string>
 #include "SharedEnv.h"
 
-// ========== 地图识别 ==========
+// ========== åœ°å›¾è¯†åˆ« ==========
 inline bool is_ORZ(SharedEnvironment* env) {
     return env->map_name.find("orz") != std::string::npos;
 }
@@ -17,17 +17,20 @@ inline bool is_FULFILL(SharedEnvironment* env) {
     return env->map_name.find("fulfill") != std::string::npos;
 }
 inline bool has_custom_strategy(SharedEnvironment* env) {
-    return is_ORZ(env);  // 只有ORZ有定制策略
+    return is_ORZ(env);  // åªæœ‰ORZæœ‰å®šåˆ¶ç­–ç•¥
 }
 
-// ========== 策略选择 ==========
-#define ORZ_SCHEDULER   "centerline"    // ORZ调度器: centerline=中心线热力图+贪心匹配 (v2)
-#define ORZ_PLANNER     "default"       // ORZ规划器: 默认PIBT（待定制）
-#define ORZ_EXECUTOR    "default"       // ORZ执行器: 默认（待定制）
+// ========== ç­–ç•¥é€‰æ‹© ==========
+#define ORZ_SCHEDULER   "centerline"    // ORZè°ƒåº¦å™¨: centerline=ä¸­å¿ƒçº¿çƒ­åŠ›å›¾+è´ªå¿ƒåŒ¹é… (v2)
+#define ORZ_PLANNER     "default"       // ORZè§„åˆ’å™¨: é»˜è®¤PIBTï¼ˆå¾…å®šåˆ¶ï¼‰
+#define ORZ_EXECUTOR    "default"       // ORZæ‰§è¡Œå™¨: é»˜è®¤ï¼ˆå¾…å®šåˆ¶ï¼‰
 
-// ========== 功能开关 ==========
-#define ORZ_PIBT_DIRECTION_BLOCK  false   // 调度器+PIBT方向阻塞联动
-#define ORZ_DIRECTION_LOCK        false   // 方向锁（lock_dir），关闭后只保留HOT_BLOCK拥塞封锁
+// ========== åŠŸèƒ½å¼€å…³ ==========
+#define ORZ_PIBT_DIRECTION_BLOCK  true    // è°ƒåº¦å™¨+PIBTæ–¹å‘é˜»å¡žè”åŠ¨
+#define ORZ_DIRECTION_LOCK        true    // æ–¹å‘é”ï¼ˆlock_dirï¼‰ï¼Œå…³é—­åŽåªä¿ç•™HOT_BLOCKæ‹¥å¡žå°é”
 
-// 运行时获取策略名（用于TaskScheduler.cpp）
+// è¿è¡Œæ—¶èŽ·å–ç­–ç•¥åï¼ˆç”¨äºŽTaskScheduler.cppï¼‰
 inline std::string get_orz_strategy() { return ORZ_SCHEDULER; }
+
+
+

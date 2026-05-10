@@ -1,4 +1,4 @@
-// centerline.h - V3: BFS path + zone→main range + 2D heatmap
+﻿// centerline.h - V3: BFS path + zoneâ†’main range + 2D heatmap
 // All density data comes from 2D zone heatmap (g_zone24_density).
 // 1D main_dist is used only for direction and zone-range overlap.
 #pragma once
@@ -20,11 +20,11 @@ namespace Centerline {
 static constexpr int CONGESTION_THRESHOLD = 40;
 static constexpr int DEADLOCK_THRESHOLD = 90;
 static constexpr float MAX_PENALTY = 100.0f;
-static constexpr int HOT_BLOCK_DENSITY = 14;  // 14+ block ALL assignments through zone
+static constexpr int HOT_BLOCK_DENSITY = 25;  // 14+ block ALL assignments through zone
 // ====== Containment direction lock constants ======
 static constexpr int CONTAIN_LOCK_DENSITY = 20;   // density >= 20 triggers containment block
 static constexpr int CONTAIN_UNLOCK_DENSITY = 20;  // all zones in block < 20 to unlock
-static constexpr int CONTAIN_EXPAND = 2;           // expand hot zone ±2 zones
+static constexpr int CONTAIN_EXPAND = 2;           // expand hot zone Â±2 zones
 static constexpr int HOT_LOCK_COOLDOWN = 30;
 static constexpr int DIR_THRESHOLD = 10;
 
@@ -39,9 +39,9 @@ static std::vector<int> g_zone24_density;   // 2D heatmap: [zid] = live agent co
 static int g_n24c = 0, g_n24r = 0;
 static std::vector<int> g_zone_is_main;     // [zid] = 1 if centerline passes through
 
-// ====== Zone→main range (replaces segment system) ======
+// ====== Zoneâ†’main range (replaces segment system) ======
 struct ZoneMainRange {
-    int zone_id;      // 24×24 zone id
+    int zone_id;      // 24Ã—24 zone id
     int min_m, max_m; // centerline cells' main_dist range in this zone
     int lock_dir;     // direction lock: +1/-1/0
 };
@@ -146,7 +146,7 @@ inline void project(int loc, int& main_dist, int& branch_dist) {
     main_dist = (branch_dist >= 0) ? g_main_dist[loc] : -1;
 }
 
-// ====== Build zone→main range map ======
+// ====== Build zoneâ†’main range map ======
 inline void build_zone_ranges() {
     std::map<int, std::pair<int,int>> zm_range;
     for (int loc : g_centerline_cells) {
@@ -392,13 +392,13 @@ inline void update_zone_direction(const SharedEnvironment* env) {
         }
         
         if (hot_idx.empty()) {
-            // No hot zones → unlock all
+            // No hot zones â†’ unlock all
             for (auto& zr : g_zone_ranges) {
                 if (zr.zone_id >= 0 && zr.zone_id < nz)
                     g_zone_direction[zr.zone_id] = 0;
             }
         } else {
-            // Build blocks: expand each hot run ±CONTAIN_EXPAND, merge overlapping
+            // Build blocks: expand each hot run Â±CONTAIN_EXPAND, merge overlapping
             struct Block { int start, end, dir; };
             std::vector<Block> blocks;
             int st = std::max(0, hot_idx[0] - CONTAIN_EXPAND);
@@ -466,3 +466,5 @@ inline void update_zone_direction(const SharedEnvironment* env) {
 }
 
 } // namespace Centerline
+
+
