@@ -28,6 +28,7 @@ static constexpr float DIVISOR_TABLE[21] = {
 };
 
 static SharedEnvironment* g_env = nullptr;
+static std::vector<int> g_parked_task;  // per-agent parked second errand task id, -1=none
 
 static inline int zid(int loc, int cols) { return (loc/cols/100)*100 + (loc%cols/100); }
 static inline int zh_dist(int z1, int z2) {
@@ -43,12 +44,13 @@ void init(SharedEnvironment* env) {
 }
 
 // Per-errand base_score using zoneâ†’main range overlap
-static inline float base_score(int a_loc, int tid, int step) {
+static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) {
     (void)step;
     auto it = g_env->task_pool.find(tid);
     if (it == g_env->task_pool.end() || it->second.locations.empty())
         return -1e9f;
     if (!Centerline::g_ready) return 1.0f;
+    auto& locs = it->second.locations;
 
     // === Branch task check: ALL errands off-hot-main + obstacle-free line ===
     {
@@ -56,7 +58,8 @@ static inline float base_score(int a_loc, int tid, int step) {
         int check_prev = a_loc;
         int nzc = Centerline::g_n24c;
         int max_z = (int)Centerline::g_zone_is_main.size();
-        for (int loc : it->second.locations) {
+        for (size_t ei = (size_t)start_idx; ei < locs.size(); ei++) {
+            int loc = locs[ei];
             int cols = g_env->cols;
             int x1 = check_prev % cols, y1 = check_prev / cols;
             int x2 = loc % cols, y2 = loc / cols;
@@ -102,24 +105,33 @@ static inline float base_score(int a_loc, int tid, int step) {
             // Branch task: distance scoring, only block at >= 70
             float total = 0;
             int prev = a_loc;
-            for (int loc : it->second.locations) {
+            for (size_t ei = (size_t)start_idx; ei < locs.size(); ei++) {
+                int loc = locs[ei];
                 int r1 = prev / g_env->cols, c1 = prev % g_env->cols;
-                int r2 = loc / g_env->cols, c2 = loc % g_env->cols;
+                int r2 = locs[ei] / g_env->cols, c2 = locs[ei] % g_env->cols;
                 int z2 = (r2 / 24) * nzc + (c2 / 24);
                 if (z2 >= 0 && z2 < max_z && Centerline::g_zone24_density[z2] >= 70)
                     return -1e9f;
                 float dist = std::sqrt((float)((c2-c1)*(c2-c1) + (r2-r1)*(r2-r1)));
                 total += 1.0f / (dist + 1.0f);
-                prev = loc;
+                prev = locs[ei];
             }
             return total;
         }
 
-        // === Escape exemption: compute once before main route loop ===
-        float esc_score = connection_exempt_score(a_loc, it->second.locations,
-            Centerline::g_zone24_density, Centerline::g_zone_is_main,
-            g_env->map, g_env->cols, Centerline::g_n24c);
-        if (esc_score > 0) return esc_score;
+        // === Escape exemption: compute only remaining errands ===
+        if (start_idx == 0) {
+            float esc_score = connection_exempt_score(a_loc, locs,
+                Centerline::g_zone24_density, Centerline::g_zone_is_main,
+                g_env->map, g_env->cols, nzc);
+            if (esc_score > 0) return esc_score;
+        } else {
+            std::vector<int> remaining(locs.begin() + start_idx, locs.end());
+            float esc_score = connection_exempt_score(a_loc, remaining,
+                Centerline::g_zone24_density, Centerline::g_zone_is_main,
+                g_env->map, g_env->cols, nzc);
+            if (esc_score > 0) return esc_score;
+        }
     }
 
     int a_m, a_b;
@@ -128,9 +140,8 @@ static inline float base_score(int a_loc, int tid, int step) {
 
     float total_score = 0;
     int prev_m = a_m, prev_b = a_b;
-    auto& locs = it->second.locations;
 
-    for (size_t ei = 0; ei < locs.size(); ei++) {
+    for (size_t ei = (size_t)start_idx; ei < locs.size(); ei++) {
         int tm, tb;
         Centerline::project(locs[ei], tm, tb);
         if (tm < 0) continue;
@@ -143,13 +154,12 @@ static inline float base_score(int a_loc, int tid, int step) {
         int d_max_seg = 0;
         for (auto& zr : Centerline::g_zone_ranges) {
             if (zr.min_m <= hi && zr.max_m >= lo) {
-                // Direction lock check (config-controlled)
-                if (ORZ_DIRECTION_LOCK && zr.lock_dir != 0 && zr.lock_dir != intent)
-                    return -1e9f;
-                // HOT_BLOCK (adaptive threshold): block all assignments through hot zone
+                // V24: errand start segments (ei=0, ei=2) check direction; mid (ei=1) relaxed
                 int d = Centerline::g_zone24_density[zr.zone_id];
-                if (d >= Centerline::g_zone_threshold[zr.zone_id]) {
-                    // Esc exemption already computed above and didn't pass → block
+                int thr = Centerline::g_zone_threshold[zr.zone_id];
+                int effective_thr = 24;
+                bool is_errand_start = (ei == 0 || ei == 2);
+                if (d >= effective_thr) {
                     return -1e9f;
                 }
                 if (d > d_max_seg) d_max_seg = d;
@@ -182,13 +192,12 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
     pre_tick_updates(env);
     auto t_pre = std::chrono::steady_clock::now();
 
-    // PIBT direction block (disabled by config)
-    if (ORZ_PIBT_DIRECTION_BLOCK) {
-        int n24c = (env->cols + 23) / 24;
-        for (int a = 0; a < env->num_of_agents && a < PIBT_Lock::MAX_AGENTS; a++) {
-            PIBT_Lock::g_agent_blocked[a] = 0;
-        }
-    }
+    // Init parked task tracking
+    if ((int)g_parked_task.size() != env->num_of_agents)
+        g_parked_task.assign(env->num_of_agents, -1);
+    // Sync parked tasks to PIBT shared state
+    for (int a = 0; a < env->num_of_agents && a < PIBT_Lock::MAX_AGENTS; a++)
+        PIBT_Lock::g_parked_task[a] = g_parked_task[a];
 
     TimePoint endtime = t0 + std::chrono::milliseconds(limit);
     int cols = env->cols;
@@ -219,6 +228,25 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
     for (auto it = free_agents.begin(); it != free_agents.end(); ) {
         int a = *it;
         int cur = env->curr_task_schedule[a];
+        
+        // Check parked second errand first
+        int parked = (a < (int)g_parked_task.size()) ? g_parked_task[a] : -1;
+        if (parked >= 0) {
+            int a_loc = env->curr_states[a].location;
+            float bs = base_score(a_loc, parked, env->curr_timestep, 2);
+            if (bs > 0) {
+                proposed_schedule[a] = parked;
+                g_parked_task[a] = -1;  // clear park
+                free_tasks.erase(parked);
+                it = free_agents.erase(it);
+            } else {
+                // keep parked, agent waits
+                proposed_schedule[a] = -1;
+                ++it;
+            }
+            continue;
+        }
+        
         if (cur >= 0 && env->task_pool.count(cur) &&
             env->task_pool[cur].locations.size() > 1) {
             proposed_schedule[a] = cur;
@@ -276,6 +304,11 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
 
             if (best_tid >= 0) {
                 proposed_schedule[a] = best_tid;
+                // Park second errand for multi-location tasks
+                auto tit = env->task_pool.find(best_tid);
+                if (tit != env->task_pool.end() && tit->second.locations.size() > 2) {
+                    g_parked_task[a] = best_tid;
+                }
                 done_tasks.insert(best_tid);
                 phase2_assigned++;
             } else {

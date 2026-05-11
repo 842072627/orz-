@@ -470,6 +470,7 @@ inline void update_zone_direction(const SharedEnvironment* env) {
         }
     }
     // Sync zone direction to zone_ranges
+    // Sync zone direction to zone_ranges
     for (auto& zr : g_zone_ranges) {
         if (zr.zone_id >= 0 && zr.zone_id < nz)
             zr.lock_dir = ORZ_DIRECTION_LOCK ? g_zone_direction[zr.zone_id] : 0;

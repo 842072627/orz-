@@ -6,32 +6,38 @@
 #include "config.h"
 #include "strategy_centerline.h"
 #include "pibt_lock.h"
-#include "CompetitionSystem.h"
-#include <boost/program_options.hpp>
-#include <iostream>
+// #include "CompetitionSystem.h"
+// #include <boost/program_options.hpp>
+// #include <iostream>
 
-namespace po = boost::program_options;
-extern po::variables_map vm;
-extern std::unique_ptr<BaseSystem> system_ptr;
-extern void sigint_handler(int);
+// namespace po = boost::program_options;
+// extern po::variables_map vm;
+// extern std::unique_ptr<BaseSystem> system_ptr;
+// #include <cstdlib>
 
 namespace PIBT_Lock
 {
     int g_seg_lock_dir[256] = {0};
     int g_agent_blocked[2000] = {0};
+    int g_parked_task[2000];
 }
 
 void TaskScheduler::initialize(int preprocess_time_limit)
 {
 
-    if (env == nullptr || env->rows != 656 || env->cols != 1491)
+    if (!is_ORZ(env))
     {
-        std::cout << "TaskScheduler only supports orz map in this build: rows="
-                  << (env == nullptr ? -1 : env->rows)
-                  << ",cols=" << (env == nullptr ? -1 : env->cols) << std::endl;
-        sigint_handler(1);
-        return;
-    }
+        int limit = preprocess_time_limit / 2 - DefaultPlanner::SCHEDULER_TIMELIMIT_TOLERANCE;
+        DefaultPlanner::schedule_initialize(limit, env);
+    };
+    // if (env == nullptr || env->rows != 656 || env->cols != 1491)
+    // {
+    //     std::cout << "TaskScheduler only supports orz map in this build: rows="
+    //               << (env == nullptr ? -1 : env->rows)
+    //               << ",cols=" << (env == nullptr ? -1 : env->cols) << std::endl;
+    //     exit(1);
+    //     return;
+    // }
 
     if (has_custom_strategy(env))
     {
@@ -57,8 +63,10 @@ void TaskScheduler::initialize(int preprocess_time_limit)
 void TaskScheduler::plan(int time_limit, std::vector<int> &proposed_schedule)
 {
 
-    if (!is_ORZ(env))
-        return;
+    if (!is_ORZ(env)){
+              int limit = time_limit / 2 - DefaultPlanner::SCHEDULER_TIMELIMIT_TOLERANCE;
+        DefaultPlanner::schedule_plan(limit, proposed_schedule, env);
+    }
     if (has_custom_strategy(env))
     {
         std::string strat = get_orz_strategy();
