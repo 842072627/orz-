@@ -17,9 +17,9 @@
 
 namespace PIBT_Lock
 {
-    int g_seg_lock_dir[256] = {0};
-    int g_agent_blocked[2000] = {0};
-    int g_parked_task[2000];
+    int g_seg_lock_dir[PIBT_Lock::MAX_SEGMENTS] = {0};
+    int g_agent_blocked[PIBT_Lock::MAX_AGENTS] = {0};
+    int g_parked_task[PIBT_Lock::MAX_AGENTS];
 }
 
 void TaskScheduler::initialize(int preprocess_time_limit)
