@@ -68,7 +68,7 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
             if (z1 >= 0 && z1 < max_z) {
                 int d1 = Centerline::g_zone24_density[z1];
                 if (Centerline::g_zone_is_main[z1]) {
-                    if (d1 >= Centerline::g_zone_threshold[z1])
+                    if (d1 >= 24)
                         { is_branch = false; break; }
                 } else {
                     if (d1 >= 70) { is_branch = false; break; }
@@ -79,7 +79,7 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
             if (z2 >= 0 && z2 < max_z) {
                 int d2 = Centerline::g_zone24_density[z2];
                 if (Centerline::g_zone_is_main[z2]) {
-                    if (d2 >= Centerline::g_zone_threshold[z2])
+                    if (d2 >= 24)
                         { is_branch = false; break; }
                 } else {
                     if (d2 >= 70) { is_branch = false; break; }
@@ -154,12 +154,8 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
         int d_max_seg = 0;
         for (auto& zr : Centerline::g_zone_ranges) {
             if (zr.min_m <= hi && zr.max_m >= lo) {
-                // V24: errand start segments (ei=0, ei=2) check direction; mid (ei=1) relaxed
                 int d = Centerline::g_zone24_density[zr.zone_id];
-                int thr = Centerline::g_zone_threshold[zr.zone_id];
-                int effective_thr = 24;
-                bool is_errand_start = (ei == 0 || ei == 2);
-                if (d >= effective_thr) {
+                if (d >= 24) {
                     return -1e9f;
                 }
                 if (d > d_max_seg) d_max_seg = d;
@@ -198,6 +194,9 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
     // Sync parked tasks to PIBT shared state
     for (int a = 0; a < env->num_of_agents && a < PIBT_Lock::MAX_AGENTS; a++)
         PIBT_Lock::g_parked_task[a] = g_parked_task[a];
+    // Reset PIBT block flags
+    for (int a = 0; a < env->num_of_agents && a < PIBT_Lock::MAX_AGENTS; a++)
+        PIBT_Lock::g_agent_blocked[a] = 0;
 
     TimePoint endtime = t0 + std::chrono::milliseconds(limit);
     int cols = env->cols;
@@ -242,6 +241,7 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
             } else {
                 // keep parked, agent waits
                 proposed_schedule[a] = -1;
+                PIBT_Lock::g_agent_blocked[a] = 1;  // PIBT force wait
                 ++it;
             }
             continue;
@@ -306,8 +306,11 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
                 proposed_schedule[a] = best_tid;
                 // Park second errand for multi-location tasks
                 auto tit = env->task_pool.find(best_tid);
-                if (tit != env->task_pool.end() && tit->second.locations.size() > 2) {
-                    g_parked_task[a] = best_tid;
+                if (tit != env->task_pool.end()) {
+                    if (tit->second.locations.size() > 2)
+                        g_parked_task[a] = best_tid;
+                    else
+                        g_parked_task[a] = -1;  // clear stale park
                 }
                 done_tasks.insert(best_tid);
                 phase2_assigned++;
