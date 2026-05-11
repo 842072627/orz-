@@ -155,9 +155,9 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
         for (auto& zr : Centerline::g_zone_ranges) {
             if (zr.min_m <= hi && zr.max_m >= lo) {
                 int d = Centerline::g_zone24_density[zr.zone_id];
-                if (d >= ZONE_HARD_CAP) {
+                // Direction lock: block tasks against flow
+                if (ORZ_DIRECTION_LOCK && zr.lock_dir != 0 && zr.lock_dir != intent)
                     return -1e9f;
-                }
                 if (d > d_max_seg) d_max_seg = d;
             }
         }
@@ -291,7 +291,7 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
             if (best_tid < 0) {
                 for (auto& kv : tasks_by_zone) {
                     int z2 = kv.first;
-                    if (z2 == a_zone || zh_dist(a_zone, z2) > 3) continue;
+                    if (z2 == a_zone || zh_dist(a_zone, z2) > 1) continue;
                     int checked = 0;
                     for (int tid : kv.second) {
                         if (done_tasks.count(tid)) continue;
@@ -324,7 +324,15 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
         if (proposed_schedule[a] < 0) proposed_schedule[a] = -1;
     }
     
-    
+    // Timeout detection
+    static int timeout_counter = 0;
+    if (std::chrono::steady_clock::now() > endtime) {
+        timeout_counter++;
+        if (timeout_counter % 10 == 1) {
+            printf("[SCHEDULE TIMEOUT #%d] step=%d, free_agents=%zu, phase2_assigned=%d\n",
+                   timeout_counter, step, free_agents.size(), phase2_assigned);
+        }
+    }
 }
 
 } // namespace strategy_centerline

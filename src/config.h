@@ -26,7 +26,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define ORZ_EXECUTOR    "default"       // ORZ executor: default
 
 // ========== Density cap ==========
-#define ZONE_HARD_CAP  23       // 24x24 zone density cap, blocks when exceeded
+#define ZONE_HARD_CAP  15       // 24x24 zone density cap, blocks when exceeded
 
 // ========== Feature flags ==========
 #define ORZ_PIBT_DIRECTION_BLOCK  true    // scheduler + PIBT direction block linkage
