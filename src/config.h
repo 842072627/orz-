@@ -1,11 +1,11 @@
-﻿// config.h â€” Combined Track å…¨å±€é…ç½®
-// æ‰€æœ‰åœ°å›¾ç­–ç•¥é€‰æ‹©åœ¨æ­¤é›†ä¸­æŽ§åˆ¶
+// config.h - Combined Track global configuration
+// All map strategy selection controlled here
 
 #pragma once
 #include <string>
 #include "SharedEnv.h"
 
-// ========== åœ°å›¾è¯†åˆ« ==========
+// ========== Map detection ==========
 inline bool is_ORZ(SharedEnvironment* env) {
     return env->map_name.find("orz") != std::string::npos;
 }
@@ -17,20 +17,20 @@ inline bool is_FULFILL(SharedEnvironment* env) {
     return env->map_name.find("fulfill") != std::string::npos;
 }
 inline bool has_custom_strategy(SharedEnvironment* env) {
-    return is_ORZ(env);  // åªæœ‰ORZæœ‰å®šåˆ¶ç­–ç•¥
+    return is_ORZ(env);  // only ORZ has custom strategy
 }
 
-// ========== ç­–ç•¥é€‰æ‹© ==========
-#define ORZ_SCHEDULER   "centerline"    // ORZè°ƒåº¦å™¨: centerline=ä¸­å¿ƒçº¿çƒ­åŠ›å›¾+è´ªå¿ƒåŒ¹é… (v2)
-#define ORZ_PLANNER     "default"       // ORZè§„åˆ’å™¨: é»˜è®¤PIBTï¼ˆå¾…å®šåˆ¶ï¼‰
-#define ORZ_EXECUTOR    "default"       // ORZæ‰§è¡Œå™¨: é»˜è®¤ï¼ˆå¾…å®šåˆ¶ï¼‰
+// ========== Strategy selection ==========
+#define ORZ_SCHEDULER   "centerline"    // ORZ scheduler: centerline heatmap + greedy match (v2)
+#define ORZ_PLANNER     "default"       // ORZ planner: default PIBT
+#define ORZ_EXECUTOR    "default"       // ORZ executor: default
 
-// ========== åŠŸèƒ½å¼€å…³ ==========
-#define ORZ_PIBT_DIRECTION_BLOCK  true    // è°ƒåº¦å™¨+PIBTæ–¹å‘é˜»å¡žè”åŠ¨
-#define ORZ_DIRECTION_LOCK        true    // æ–¹å‘é”ï¼ˆlock_dirï¼‰ï¼Œå…³é—­åŽåªä¿ç•™HOT_BLOCKæ‹¥å¡žå°é”
+// ========== Density cap ==========
+#define ZONE_HARD_CAP  23       // 24x24 zone density cap, blocks when exceeded
 
-// è¿è¡Œæ—¶èŽ·å–ç­–ç•¥åï¼ˆç”¨äºŽTaskScheduler.cppï¼‰
+// ========== Feature flags ==========
+#define ORZ_PIBT_DIRECTION_BLOCK  true    // scheduler + PIBT direction block linkage
+#define ORZ_DIRECTION_LOCK        true    // direction lock (lock_dir)
+
+// Runtime strategy name getter (used by TaskScheduler.cpp)
 inline std::string get_orz_strategy() { return ORZ_SCHEDULER; }
-
-
-

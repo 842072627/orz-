@@ -1,0 +1,7 @@
+timestep cumulative_finished interval_finished
+500 280 280
+1000 583 303
+1500 796 213
+2000 1002 206
+2500 1193 191
+3000 1298 105

@@ -68,7 +68,7 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
             if (z1 >= 0 && z1 < max_z) {
                 int d1 = Centerline::g_zone24_density[z1];
                 if (Centerline::g_zone_is_main[z1]) {
-                    if (d1 >= 24)
+                    if (d1 >= ZONE_HARD_CAP)
                         { is_branch = false; break; }
                 } else {
                     if (d1 >= 70) { is_branch = false; break; }
@@ -79,7 +79,7 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
             if (z2 >= 0 && z2 < max_z) {
                 int d2 = Centerline::g_zone24_density[z2];
                 if (Centerline::g_zone_is_main[z2]) {
-                    if (d2 >= 24)
+                    if (d2 >= ZONE_HARD_CAP)
                         { is_branch = false; break; }
                 } else {
                     if (d2 >= 70) { is_branch = false; break; }
@@ -155,7 +155,7 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
         for (auto& zr : Centerline::g_zone_ranges) {
             if (zr.min_m <= hi && zr.max_m >= lo) {
                 int d = Centerline::g_zone24_density[zr.zone_id];
-                if (d >= 24) {
+                if (d >= ZONE_HARD_CAP) {
                     return -1e9f;
                 }
                 if (d > d_max_seg) d_max_seg = d;
@@ -291,7 +291,7 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
             if (best_tid < 0) {
                 for (auto& kv : tasks_by_zone) {
                     int z2 = kv.first;
-                    if (z2 == a_zone || zh_dist(a_zone, z2) > 1) continue;
+                    if (z2 == a_zone || zh_dist(a_zone, z2) > 3) continue;
                     int checked = 0;
                     for (int tid : kv.second) {
                         if (done_tasks.count(tid)) continue;
