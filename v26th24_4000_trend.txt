@@ -1,2 +1,0 @@
-timestep cumulative_finished interval_finished
-500 102 102
