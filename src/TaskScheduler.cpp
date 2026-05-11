@@ -50,8 +50,6 @@ void TaskScheduler::initialize(int preprocess_time_limit)
         {
             // strategy_tidal disabled
         }
-        int limit = preprocess_time_limit / 2 - DefaultPlanner::SCHEDULER_TIMELIMIT_TOLERANCE;
-        DefaultPlanner::schedule_initialize(limit, env);
     }
     else
     {
@@ -66,6 +64,7 @@ void TaskScheduler::plan(int time_limit, std::vector<int> &proposed_schedule)
     if (!is_ORZ(env)){
               int limit = time_limit / 2 - DefaultPlanner::SCHEDULER_TIMELIMIT_TOLERANCE;
         DefaultPlanner::schedule_plan(limit, proposed_schedule, env);
+        return;
     }
     if (has_custom_strategy(env))
     {
@@ -75,10 +74,6 @@ void TaskScheduler::plan(int time_limit, std::vector<int> &proposed_schedule)
             int limit = time_limit / 2 - DefaultPlanner::SCHEDULER_TIMELIMIT_TOLERANCE;
             strategy_centerline::plan(limit, env, proposed_schedule);
         }
-        else
-        {
-            // strategy_tidal disabled
-        }
     }
     else
     {
@@ -86,3 +81,4 @@ void TaskScheduler::plan(int time_limit, std::vector<int> &proposed_schedule)
         DefaultPlanner::schedule_plan(limit, proposed_schedule, env);
     }
 }
+

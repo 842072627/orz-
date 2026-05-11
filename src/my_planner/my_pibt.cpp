@@ -2,7 +2,7 @@
 
 
 #include "my_pibt.h"
-#include "pibt_lock.h"
+#include "../pibt_lock.h"
 #include <cstdint>
 
 
@@ -220,3 +220,4 @@ bool moveCheck(int id, std::vector<bool>& checked,
 }
 
 }
+

@@ -5,6 +5,7 @@
 // default planner includes
 #include "planner.h"
 #include "const.h"
+#include "my_planner.h"
 
 /**
  * Initialises the MAPF planner with a given time limit for preprocessing.
@@ -17,7 +18,10 @@ void MAPFPlanner::initialize(int preprocess_time_limit)
 {
     // use the remaining entry time limit (after task scheduling) for path planning, -PLANNER_TIMELIMIT_TOLERANCE for timing error tolerance;
     int limit = preprocess_time_limit - std::chrono::duration_cast<milliseconds>(std::chrono::steady_clock::now() - env->plan_start_time).count() - DefaultPlanner::PLANNER_TIMELIMIT_TOLERANCE;
-    DefaultPlanner::initialize(limit, env);
+    if (is_ORZ(env))
+        MyPlanner::initialize(limit, env);
+    else
+        DefaultPlanner::initialize(limit, env);
     return;
 }
 
@@ -38,11 +42,11 @@ void MAPFPlanner::plan(int time_limit, Plan &plan)
 
         int min_plan_steps = (int)(env->min_planner_communication_time / (env->action_time * env->max_counter)) + 1;
         DefaultPlanner::plan(limit, plan.actions, env, min_plan_steps);
-    };
-    // use the remaining time after task schedule for path planning, -PLANNER_TIMELIMIT_TOLERANCE for timing error tolerance;
+        return;
+    }
     int limit = time_limit - std::chrono::duration_cast<milliseconds>(std::chrono::steady_clock::now() - env->plan_start_time).count() - DefaultPlanner::PLANNER_TIMELIMIT_TOLERANCE;
 
     int min_plan_steps = (int)(env->min_planner_communication_time / (env->action_time * env->max_counter)) + 1;
-    DefaultPlanner::plan(limit, plan.actions, env, min_plan_steps);
+    MyPlanner::plan(limit, plan.actions, env, min_plan_steps);
     return;
 }
