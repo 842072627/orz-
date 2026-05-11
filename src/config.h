@@ -28,6 +28,13 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 // ========== Density cap ==========
 #define ZONE_HARD_CAP  15       // 24x24 zone density cap, blocks when exceeded
 
+// ========== 1D main zone exemption ==========
+#define EXEMPT_MAIN_THR  20      // main zone density below this exempts task from direction lock
+
+// ========== Hard density limit ==========
+#define USE_DENSITY_CAP_80  true   // enable hard density cap
+#define DENSITY_CAP_80      40     // zones at this density block ALL tasks (regardless of direction)
+
 // ========== Feature flags ==========
 #define ORZ_PIBT_DIRECTION_BLOCK  true    // scheduler + PIBT direction block linkage
 #define ORZ_DIRECTION_LOCK        true    // direction lock (lock_dir)

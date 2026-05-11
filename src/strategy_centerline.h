@@ -52,6 +52,45 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
     if (!Centerline::g_ready) return 1.0f;
     auto& locs = it->second.locations;
 
+    // === 1D main zone exemption: skip direction lock if all main zones along path are cool ===
+    {
+        int a_m, a_b;
+        Centerline::project(a_loc, a_m, a_b);
+        if (a_m >= 0) {
+            bool exempt = true;
+            int prev_m = a_m;
+            for (auto& loc : locs) {
+                int tm, tb;
+                Centerline::project(loc, tm, tb);
+                if (tm < 0) continue;
+                int lo = std::min(prev_m, tm);
+                int hi = std::max(prev_m, tm);
+                for (auto& zr : Centerline::g_zone_ranges) {
+                    if (zr.min_m <= hi && zr.max_m >= lo &&
+                        Centerline::g_zone_is_main[zr.zone_id] &&
+                        Centerline::g_zone24_density[zr.zone_id] >= EXEMPT_MAIN_THR) {
+                        exempt = false;
+                        break;
+                    }
+                }
+                if (!exempt) break;
+                prev_m = tm;
+            }
+            if (exempt) {
+                float total = 0;
+                int prev = a_loc;
+                for (auto& loc : locs) {
+                    int r1 = prev / g_env->cols, c1 = prev % g_env->cols;
+                    int r2 = loc / g_env->cols, c2 = loc % g_env->cols;
+                    float dist = std::sqrt((float)((c2-c1)*(c2-c1) + (r2-r1)*(r2-r1)));
+                    total += 1.0f / (dist + 1.0f);
+                    prev = loc;
+                }
+                return total;
+            }
+        }
+    }
+
     // === Branch task check: ALL errands off-hot-main + obstacle-free line ===
     {
         bool is_branch = true;
@@ -157,6 +196,9 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
                 int d = Centerline::g_zone24_density[zr.zone_id];
                 // Direction lock: block tasks against flow
                 if (ORZ_DIRECTION_LOCK && zr.lock_dir != 0 && zr.lock_dir != intent)
+                    return -1e9f;
+                // Hard density cap: block ALL tasks through severely congested zones
+                if (USE_DENSITY_CAP_80 && d >= DENSITY_CAP_80)
                     return -1e9f;
                 if (d > d_max_seg) d_max_seg = d;
             }
