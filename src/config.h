@@ -26,17 +26,23 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define ORZ_EXECUTOR    "default"       // ORZ executor: default
 
 // ========== Density cap ==========
-#define ZONE_HARD_CAP  15       // 24x24 zone density cap, blocks when exceeded
+#define ZONE_HARD_CAP  15  
+
+#define ZONE_EXEMPT_PIBT_CAP  15       // 24x24 zone density cap, blocks when exceeded
+// 24x24 zone density cap, blocks when exceeded
 
 // ========== 1D main zone exemption ==========
-#define EXEMPT_MAIN_THR  20      // main zone density below this exempts task from direction lock
+#define EXEMPT_MAIN_THR  23      // main zone density below this exempts task from direction lock
 
 // ========== Hard density limit ==========
 #define USE_DENSITY_CAP_80  true   // enable hard density cap
-#define DENSITY_CAP_80      40     // zones at this density block ALL tasks (regardless of direction)
+#define DENSITY_CAP_80      100     // zones at this density block ALL tasks (regardless of direction)
 
 // ========== Feature flags ==========
 #define ORZ_PIBT_DIRECTION_BLOCK  true    // scheduler + PIBT direction block linkage
+
+// ========== Hot zone exemption ==========
+#define USE_HOT_ZONE_EXEMPT  true   // 热区豁免：热区agent不设block，PIBT正常执行
 #define ORZ_DIRECTION_LOCK        true    // direction lock (lock_dir)
 
 // Runtime strategy name getter (used by TaskScheduler.cpp)

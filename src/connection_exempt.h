@@ -90,4 +90,14 @@ inline float connection_exempt_score(
     return total_score;
 }
 
+// ====== 热区豁免函数 ======
+// agent所在zone密度>=ZONE_HARD_CAP → 是热区，应豁免
+inline bool is_hot_zone_exempt(int loc, SharedEnvironment* env) {
+    if (loc < 0) return false;
+    int n24c = (env->cols + 23) / 24;
+    int zi = (loc / env->cols / 24) * n24c + (loc % env->cols / 24);
+    return (zi >= 0 && zi < (int)Centerline::g_zone24_density.size()
+            && Centerline::g_zone24_density[zi] >= ZONE_HARD_CAP);
+}
+
 #endif // CONNECTION_EXEMPT_H

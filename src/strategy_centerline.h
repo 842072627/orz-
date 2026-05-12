@@ -281,9 +281,12 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
                 free_tasks.erase(parked);
                 it = free_agents.erase(it);
             } else {
-                // keep parked, agent waits
                 proposed_schedule[a] = -1;
-                PIBT_Lock::g_agent_blocked[a] = 1;  // PIBT force wait
+                if (USE_HOT_ZONE_EXEMPT && is_hot_zone_exempt(a_loc, env)) {
+                    PIBT_Lock::g_agent_blocked[a] = 0; // 热区豁免：不堵
+                } else {
+                    PIBT_Lock::g_agent_blocked[a] = 1; // 原逻辑：原地等
+                }
                 ++it;
             }
             continue;
