@@ -7,9 +7,11 @@
 #include "centerline.h"
 #include "connection_exempt.h"
 #include "pibt_lock.h"
+#include "idle_cap.h"
 #include <unordered_set>
 #include <unordered_map>
 #include <algorithm>
+#include <random>
 #include <vector>
 #include <cstdint>
 #include <chrono>
@@ -313,12 +315,30 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
                 tasks_by_zone[zid(env->task_pool[tid].locations[0], cols)].push_back(tid);
         }
 
+        // ===== Idle cap: 8-bucket uniform capacity control =====
+        int idle_budgets[IDLE_NUM_BUCKETS] = {0};
+        if (USE_IDLE_CAP) {
+            IdleCap::compute_budgets(env, idle_budgets);
+            std::shuffle(free_agents.begin(), free_agents.end(),
+                         std::mt19937(std::random_device{}()));
+        }
+
         std::unordered_set<int> done_tasks;
         for (int a : free_agents) {
             if (proposed_schedule[a] >= 0) continue;
 
             int a_loc = env->curr_states[a].location;
             int a_zone = zid(a_loc, cols);
+
+            // ===== Idle cap: check bucket budget =====
+            if (USE_IDLE_CAP) {
+                int b = IdleCap::get_bucket(env, a);
+                if (idle_budgets[b] <= 0) {
+                    proposed_schedule[a] = -1;
+                    continue;
+                }
+            }
+
             int best_tid = -1;
             float best_score = -1e9f;
 
@@ -359,6 +379,10 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
                 }
                 done_tasks.insert(best_tid);
                 phase2_assigned++;
+                if (USE_IDLE_CAP) {
+                    int b = IdleCap::get_bucket(env, a);
+                    idle_budgets[b]--;
+                }
             } else {
                 proposed_schedule[a] = -1;
             }
