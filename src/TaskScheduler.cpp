@@ -8,17 +8,17 @@
 #include "pibt_lock.h"
 
 
-#include "CompetitionSystem.h"
-#include <boost/program_options.hpp>
+// #include "CompetitionSystem.h"
+// #include <boost/program_options.hpp>
 
 
 
 
-namespace po = boost::program_options;
+// namespace po = boost::program_options;
 
-extern po::variables_map vm;
-extern std::unique_ptr<BaseSystem> system_ptr;
-extern void sigint_handler(int);
+// extern po::variables_map vm;
+// extern std::unique_ptr<BaseSystem> system_ptr;
+// extern void sigint_handler(int);
 
 namespace PIBT_Lock
 {
@@ -74,6 +74,7 @@ void TaskScheduler::plan(int time_limit, std::vector<int> &proposed_schedule)
 {
 
     if (!is_ORZ(env)){
+        return;
               int limit = time_limit / 2 - DefaultPlanner::SCHEDULER_TIMELIMIT_TOLERANCE;
         DefaultPlanner::schedule_plan(limit, proposed_schedule, env);
         return;
