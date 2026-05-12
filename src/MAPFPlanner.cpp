@@ -37,7 +37,9 @@ void MAPFPlanner::initialize(int preprocess_time_limit)
 void MAPFPlanner::plan(int time_limit, Plan &plan)
 {
     if (!is_ORZ(env))
-    {
+    {      
+        DefaultPlanner::plan(0, plan.actions, env, min_plan_steps);
+        return;
         int limit = time_limit - std::chrono::duration_cast<milliseconds>(std::chrono::steady_clock::now() - env->plan_start_time).count() - DefaultPlanner::PLANNER_TIMELIMIT_TOLERANCE;
 
         int min_plan_steps = (int)(env->min_planner_communication_time / (env->action_time * env->max_counter)) + 1;
