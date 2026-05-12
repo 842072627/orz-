@@ -29,14 +29,14 @@ namespace PIBT_Lock
 
 void TaskScheduler::initialize(int preprocess_time_limit)
 {
-    if (env == nullptr || env->rows != 656 || env->cols != 1491)
-    {
-        std::cout << "TaskScheduler only supports orz map in this build: rows="
-                  << (env == nullptr ? -1 : env->rows)
-                  << ", cols=" << (env == nullptr ? -1 : env->cols) << std::endl;
-        sigint_handler(1);
-        return;
-    }
+    // if (env == nullptr || env->rows != 656 || env->cols != 1491)
+    // {
+    //     std::cout << "TaskScheduler only supports orz map in this build: rows="
+    //               << (env == nullptr ? -1 : env->rows)
+    //               << ", cols=" << (env == nullptr ? -1 : env->cols) << std::endl;
+    //     sigint_handler(1);
+    //     return;
+    // }
     if (!is_ORZ(env))
     {
         int limit = preprocess_time_limit / 2 - DefaultPlanner::SCHEDULER_TIMELIMIT_TOLERANCE;
