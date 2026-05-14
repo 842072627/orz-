@@ -46,7 +46,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 
 // ========== Idle capacity control (空载均匀空跑) ==========
 #define USE_IDLE_CAP         true   // 空载容量控制开关
-#define IDLE_RATIO           0.45f  // 最大活跃 agent 比例 (0~1.0)
+#define IDLE_RATIO           0.4f  // 最大活跃 agent 比例 (0~1.0)
 
 #define ORZ_DIRECTION_LOCK        true    // direction lock (lock_dir)
 
