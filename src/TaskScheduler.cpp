@@ -1,54 +1,40 @@
-// TaskScheduler.cpp — Combined Track: ORZ用strategy_centerline.h, 其他图用默认
-// V2: centerline贪心调度取代tidal走廊潮汐
 #include "TaskScheduler.h"
+
 #include "scheduler.h"
 #include "const.h"
-#include "config.h"
-#include "strategy_centerline.h"
-#include "pibt_lock.h"
-namespace PIBT_Lock { int g_seg_lock_dir[256] = {0}; int g_agent_blocked[2000] = {0}; }
 
+/**
+ * Initializes the task scheduler with a given time limit for preprocessing.
+ * 
+ * This function prepares the task scheduler by allocating up to half of the given preprocessing time limit 
+ * and adjust for a specified tolerance to account for potential timing errors. 
+ * It ensures that initialization does not exceed the allocated time.
+ * 
+ * @param preprocess_time_limit The total time limit allocated for preprocessing (in milliseconds).
+ *
+ */
 void TaskScheduler::initialize(int preprocess_time_limit)
 {
-    if (has_custom_strategy(env))
-    {
-        std::string strat = get_orz_strategy();
-        if (strat == "centerline")
-        {
-            strategy_centerline::init(env);
-        }
-        else
-        {
-            // strategy_tidal disabled
-        }
-        int limit = preprocess_time_limit / 2 - DefaultPlanner::SCHEDULER_TIMELIMIT_TOLERANCE;
-        DefaultPlanner::schedule_initialize(limit, env);
-    }
-    else
-    {
-        int limit = preprocess_time_limit / 2 - DefaultPlanner::SCHEDULER_TIMELIMIT_TOLERANCE;
-        DefaultPlanner::schedule_initialize(limit, env);
-    }
+    //give at most half of the entry time_limit to scheduler;
+    //-SCHEDULER_TIMELIMIT_TOLERANCE for timing error tolerance
+    int limit = preprocess_time_limit/2 - DefaultPlanner::SCHEDULER_TIMELIMIT_TOLERANCE;
+    DefaultPlanner::schedule_initialize(limit, env);    
 }
 
-void TaskScheduler::plan(int time_limit, std::vector<int> &proposed_schedule)
+/**
+ * Plans a task schedule within a specified time limit.
+ * 
+ * This function schedules tasks by calling shedule_plan function in default planner with half of the given time limit,
+ * adjusted for timing error tolerance. The planned schedule is output to the provided schedule vector.
+ * 
+ * @param time_limit The total time limit allocated for scheduling (in milliseconds).
+ * @param proposed_schedule A reference to a vector that will be populated with the proposed schedule (next task id for each agent).
+ */
+
+void TaskScheduler::plan(int time_limit, std::vector<int> & proposed_schedule)
 {
-    if (has_custom_strategy(env))
-    {
-        std::string strat = get_orz_strategy();
-        if (strat == "centerline")
-        {
-            int limit = time_limit / 2 - DefaultPlanner::SCHEDULER_TIMELIMIT_TOLERANCE;
-            strategy_centerline::plan(limit, env, proposed_schedule);
-        }
-        else
-        {
-            // strategy_tidal disabled
-        }
-    }
-    else
-    {
-        int limit = time_limit / 2 - DefaultPlanner::SCHEDULER_TIMELIMIT_TOLERANCE;
-        DefaultPlanner::schedule_plan(limit, proposed_schedule, env);
-    }
+    //give at most half of the entry time_limit to scheduler;
+    //-SCHEDULER_TIMELIMIT_TOLERANCE for timing error tolerance
+    int limit = time_limit/2 - DefaultPlanner::SCHEDULER_TIMELIMIT_TOLERANCE;
+    DefaultPlanner::schedule_plan(limit, proposed_schedule, env);
 }
