@@ -1,6 +1,7 @@
-﻿// centerline.h - V3: BFS path + zoneâ†’main range + 2D heatmap
-// All density data comes from 2D zone heatmap (g_zone24_density).
-// 1D main_dist is used only for direction and zone-range overlap.
+// centerline.h - V4: Path-aligned main squares + cell-level main zone
+// All density data comes from g_zone24_density (2D grid, unchanged).
+// g_main_squares[] replaces g_zone_ranges[] for path-aligned statistics.
+// g_cell_square[loc] replaces g_zone_is_main[zid] for cell-level main zone checks.
 #pragma once
 #include "SharedEnv.h"
 #include "config.h"
@@ -17,42 +18,44 @@
 
 namespace Centerline {
 
-static constexpr int CONGESTION_THRESHOLD = 40;
-static constexpr int DEADLOCK_THRESHOLD = 90;
-static constexpr float MAX_PENALTY = 100.0f;
-// ====== Adaptive per-zone threshold (dynamic, replaces HOT_BLOCK + CONTAIN_LOCK) ======
-// target = 30.5 - density*0.5, thr = (thr*9 + target)/10, clamp(12,35)
-static constexpr float ADAPTIVE_ALPHA = 0.1f;
-static constexpr int ADAPTIVE_FLOOR = 12;
-static constexpr int ADAPTIVE_CEIL = 35;
-// Expansion for direction lock neighbors
-static constexpr int CONTAIN_EXPAND = 1;
-static constexpr int HOT_LOCK_COOLDOWN = 30;
-static constexpr int DIR_THRESHOLD = 10;
+// ====== V4 Config (from config.h) ======
+// SQUARE_SIZE, SQUARE_STEP, PREDICT_AHEAD, PREDICT_THRESHOLD, DIR_LOCK_RADIUS
+// are defined in config.h
 
-// ====== State ======
+// ====== State (kept from V3) ======
 static bool g_ready = false;
 static int g_rows = 0, g_cols = 0;
 static int g_total_len = 0;
-static std::vector<int> g_main_dist;        // [loc] = main distance
-static std::vector<int> g_branch_dist;      // [loc] = branch distance
-static std::vector<int> g_centerline_cells;  // centerline cell locations
-static std::vector<int> g_zone24_density;   // 2D heatmap: [zid] = live agent count
-static std::vector<int> g_zone_threshold;    // [zid] = adaptive threshold (12-35)
+static std::vector<int> g_main_dist;          // [loc] = main distance (1D)
+static std::vector<int> g_branch_dist;         // [loc] = branch distance
+static std::vector<int> g_centerline_cells;    // centerline path cell locations
+static std::vector<int> g_zone24_density;      // 2D heatmap: [zid] = live agent count (UNCHANGED)
 static int g_n24c = 0, g_n24r = 0;
-static std::vector<int> g_zone_is_main;     // [zid] = 1 if centerline passes through
 
-// ====== Zoneâ†’main range (replaces segment system) ======
-struct ZoneMainRange {
-    int zone_id;      // 24Ã—24 zone id
-    int min_m, max_m; // centerline cells' main_dist range in this zone
+// ====== V4 New: Path-aligned main squares ======
+struct MainSquare {
+    int cx, cy;      // center cell coords
+    int min_m, max_m; // main_dist range covered by this square
+    int density;      // agent count in this square (this tick)
     int lock_dir;     // direction lock: +1/-1/0
 };
-static std::vector<ZoneMainRange> g_zone_ranges;
+static std::vector<MainSquare> g_main_squares;   // sorted by path order (min_m)
+static std::vector<int> g_cell_square;            // [loc] → nearest square index, -1 = not in any
 
-// ====== Direction tracking ======
-static std::vector<int> g_zone_direction;    // [+1/-1/0] per zone
-static std::vector<int> g_agent_last_main;   // [aid] = last tick main distance
+// ====== REMOVED from V3 ======
+// g_zone_is_main[zid]     → replaced by g_cell_square[loc]
+// g_zone_ranges[]         → replaced by g_main_squares[]
+// ZoneMainRange struct    → replaced by MainSquare
+// g_zone_direction[zid]   → replaced by MainSquare.lock_dir
+// g_zone_threshold[zid]   → removed (unused)
+// g_agent_last_main[aid]  → kept for direction tracking
+
+// ====== Direction tracking (kept from V3) ======
+static std::vector<int> g_zone_direction;     // [zid] = direction (kept for compatibility)
+static std::vector<int> g_agent_last_main;    // [aid] = last tick main distance
+
+// ====== Zone-level main indicator (for connection_exempt compatibility) ======
+static std::vector<int> g_zone_has_main;      // [zid] = 1 if any cell in this zone is in a main square
 
 // ====== BFS distance-to-wall ======
 static void compute_dtw(const SharedEnvironment* env, std::vector<int>& dtw) {
@@ -140,7 +143,7 @@ static void smooth_path(const SharedEnvironment* env, const std::vector<int>& ra
     }
 }
 
-// ====== Project loc -> (main, branch) ======
+// ====== Project loc -> (main, branch) - UNCHANGED from V3 ======
 inline void project(int loc, int& main_dist, int& branch_dist) {
     if (!g_ready || loc < 0 || loc >= (int)g_branch_dist.size()) {
         main_dist = -1; branch_dist = -1; return;
@@ -149,29 +152,68 @@ inline void project(int loc, int& main_dist, int& branch_dist) {
     main_dist = (branch_dist >= 0) ? g_main_dist[loc] : -1;
 }
 
-// ====== Build zoneâ†’main range map ======
-inline void build_zone_ranges() {
-    std::map<int, std::pair<int,int>> zm_range;
-    for (int loc : g_centerline_cells) {
+// ====== Generate path-aligned squares from centerline ======
+static void generate_main_squares(const SharedEnvironment* env) {
+    int half = SQUARE_SIZE / 2;
+    g_main_squares.clear();
+    
+    for (size_t i = 0; i < g_centerline_cells.size(); i += SQUARE_STEP) {
+        int loc = g_centerline_cells[i];
         if (loc < 0) continue;
-        int m = g_main_dist[loc];
         int r = loc / g_cols, c = loc % g_cols;
-        int zid = (r / 24) * g_n24c + (c / 24);
-        auto& p = zm_range[zid];
-        if (p.first == 0 || m < p.first) p.first = m;
-        if (m > p.second) p.second = m;
+        
+        MainSquare sq;
+        sq.cx = c; sq.cy = r;
+        sq.min_m = INT_MAX; sq.max_m = -1;
+        sq.density = 0; sq.lock_dir = 0;
+        
+        // Find main_dist range within this square
+        for (int dr = -half; dr < half; dr++) {
+            for (int dc = -half; dc < half; dc++) {
+                int nr = r + dr, nc = c + dc;
+                if (nr >= 0 && nr < g_rows && nc >= 0 && nc < g_cols &&
+                    env->map[nr * g_cols + nc] == 0) {
+                    int m = g_main_dist[nr * g_cols + nc];
+                    if (m >= 0 && m < sq.min_m) sq.min_m = m;
+                    if (m >= 0 && m > sq.max_m) sq.max_m = m;
+                }
+            }
+        }
+        
+        g_main_squares.push_back(sq);
     }
-    g_zone_ranges.clear();
-    for (auto& kv : zm_range) {
-        int zid = kv.first;
-        int lock = (zid >= 0 && zid < (int)g_zone_direction.size()) ? g_zone_direction[zid] : 0;
-        g_zone_ranges.push_back({zid, kv.second.first, kv.second.second, lock});
-    }
-    std::sort(g_zone_ranges.begin(), g_zone_ranges.end(),
-        [](const ZoneMainRange& a, const ZoneMainRange& b) { return a.min_m < b.min_m; });
+    
+    printf("[CENTERLINE V4] Generated %zu path-aligned squares (size=%d, step=%d)\n",
+           g_main_squares.size(), SQUARE_SIZE, SQUARE_STEP);
 }
 
-// ====== Init: BFS path + wall correction + build zone ranges ======
+// ====== Precompute cell → nearest square mapping ======
+static void compute_cell_square_mapping(const SharedEnvironment* env) {
+    int total = env->rows * env->cols;
+    int half = SQUARE_SIZE / 2;
+    int max_dist2 = half * half * 2;  // diagonal half-distance squared
+    
+    g_cell_square.assign(total, -1);
+    
+    for (int loc = 0; loc < total; loc++) {
+        if (env->map[loc] != 0) continue;  // obstacle, skip
+        
+        int r = loc / g_cols, c = loc % g_cols;
+        int best_d2 = INT_MAX, best_si = -1;
+        
+        for (int si = 0; si < (int)g_main_squares.size(); si++) {
+            int dx = c - g_main_squares[si].cx;
+            int dy = r - g_main_squares[si].cy;
+            int d2 = dx * dx + dy * dy;
+            if (d2 < best_d2) { best_d2 = d2; best_si = si; }
+        }
+        
+        if (best_d2 <= max_dist2)
+            g_cell_square[loc] = best_si;
+    }
+}
+
+// ====== Init: BFS path + wall correction + main_squares + cell mapping ======
 void init(const SharedEnvironment* env) {
     g_rows = env->rows; g_cols = env->cols;
     g_n24c = env->cols / 24 + 1; g_n24r = env->rows / 24 + 1;
@@ -223,7 +265,7 @@ void init(const SharedEnvironment* env) {
     }
     
     // Wall correction: for DTW <= 2 cells, scan radius 5, snap to best zone
-    std::unordered_map<int, int> corrected_map; // path_idx -> corrected loc
+    std::unordered_map<int, int> corrected_map;
     for (size_t i = 0; i < base_path.size(); i++) {
         int loc = base_path[i];
         if (dtw[loc] > 2) continue;
@@ -315,25 +357,31 @@ void init(const SharedEnvironment* env) {
                 { g_branch_dist[n] = nd; g_main_dist[n] = nmain; seed_q.push(n); }
     }
     
-    // Zone density init
-    g_zone24_density.assign(g_n24c * g_n24r, 0);
-    g_zone_threshold.assign(g_n24c * g_n24r, ZONE_HARD_CAP);
+    // V4: Generate path-aligned squares + cell→square mapping
+    // (These replace V3's g_zone_is_main + g_zone_ranges + build_zone_ranges)
+    generate_main_squares(env);
+    compute_cell_square_mapping(env);
     
-    
-    // Mark main-line zones
-    g_zone_is_main.assign(g_n24c * g_n24r, 0);
-    for (int clloc : g_centerline_cells) {
-        int r = clloc / g_cols, c = clloc % g_cols;
-        int zid = (r / 24) * g_n24c + (c / 24);
-        if (zid >= 0 && zid < (int)g_zone_is_main.size())
-            g_zone_is_main[zid] = 1;
+    // V4: Compute zone→has_main for connection_exempt compatibility
+    g_zone_has_main.assign(g_n24c * g_n24r, 0);
+    for (int loc = 0; loc < total; loc++) {
+        if (g_cell_square[loc] >= 0) {
+            int r = loc / g_cols, c = loc % g_cols;
+            int zid = (r / 24) * g_n24c + (c / 24);
+            if (zid >= 0 && zid < (int)g_zone_has_main.size())
+                g_zone_has_main[zid] = 1;
+        }
     }
     
-    build_zone_ranges();
+    // Initialize 2D zone density (kept from V3, unchanged)
+    g_zone24_density.assign(g_n24c * g_n24r, 0);
+    g_zone_direction.assign(g_n24c * g_n24r, 0);
+    g_agent_last_main.assign(env->num_of_agents, -1);
+    
     g_ready = true;
 }
 
-// ====== 2D zone density (tick call) ======
+// ====== 2D zone density (tick call) - UNCHANGED from V3 ======
 inline void update_zone24_density(const SharedEnvironment* env) {
     int n24c = (env->cols + 23) / 24, n24r = (env->rows + 23) / 24;
     if ((int)g_zone24_density.size() != n24c * n24r)
@@ -350,131 +398,113 @@ inline void update_zone24_density(const SharedEnvironment* env) {
     }
 }
 
-// Fixed threshold = 24 (static, no adaptation)
-inline void update_zone_threshold() {
-    int nz = (int)g_zone24_density.size();
-    if ((int)g_zone_threshold.size() != nz)
-        g_zone_threshold.assign(nz, ZONE_HARD_CAP);
-    else
-        std::fill(g_zone_threshold.begin(), g_zone_threshold.end(), ZONE_HARD_CAP);
-}
-
-// ====== Zone direction (tick call) ======
-inline void update_zone_direction(const SharedEnvironment* env) {
-    int rows = env->rows, cols = env->cols;
-    int n24c = (cols + 23) / 24, n24r = (rows + 23) / 24;
-    int nz = n24c * n24r;
-    if ((int)g_zone_direction.size() != nz) g_zone_direction.assign(nz, 0);
-    if ((int)g_agent_last_main.size() != env->num_of_agents) g_agent_last_main.assign(env->num_of_agents, -1);
-    
-    std::vector<int> flow_right(nz, 0), flow_left(nz, 0);
+// ====== Square density (V4 new: per-tick count agents per square) ======
+inline void update_square_density(const SharedEnvironment* env) {
+    for (auto& sq : g_main_squares)
+        sq.density = 0;
     for (int a = 0; a < env->num_of_agents; a++) {
         int loc = env->curr_states[a].location;
         if (loc < 0) continue;
-        int r = loc / cols, c = loc % cols;
-        int zi = (r / 24) * n24c + (c / 24);
-        if (zi < 0 || zi >= nz) continue;
-        int m = -1, b;
-        project(loc, m, b);
-        int prev_m = g_agent_last_main[a];
-        g_agent_last_main[a] = m;
-        if (prev_m >= 0 && m >= 0) {
-            if (m - prev_m >= 1)      flow_right[zi]++;
-            else if (m - prev_m <= -1) flow_left[zi]++;
-        }
+        int si = g_cell_square[loc];
+        if (si >= 0 && si < (int)g_main_squares.size())
+            g_main_squares[si].density++;
     }
+}
+
+// ====== Zone threshold (kept for compatibility, no-op) ======
+inline void update_zone_threshold() {
+    // No-op: V4 uses square densities directly
+}
+
+// ====== Square direction (V4: replaces update_zone_direction) ======
+inline void update_square_direction(const SharedEnvironment* env) {
+    int rows = env->rows, cols = env->cols;
     
-    // Zone direction: majority flow
-    std::fill(g_zone_direction.begin(), g_zone_direction.end(), 0);
-    for (int zi = 0; zi < nz; zi++) {
-        if (g_zone24_density[zi] < DIR_THRESHOLD) continue;
-        g_zone_direction[zi] = (flow_right[zi] > flow_left[zi]) ? +1 :
-                               (flow_left[zi] > flow_right[zi]) ? -1 : 0;
-    }
+    if ((int)g_agent_last_main.size() != env->num_of_agents)
+        g_agent_last_main.assign(env->num_of_agents, -1);
     
-    if (ORZ_DIRECTION_LOCK) {
-        // Non-merge direction lock: each hot zone locks itself \u00b1CONTAIN_EXPAND neighbors independently
-        // No block merging - each zone unlocks when its neighborhood cools down
+    // Reset locks
+    for (auto& sq : g_main_squares)
+        sq.lock_dir = 0;
+    
+    int curr_tick = env->curr_timestep;
+    
+    // Boot period: all squares locked to +1 (left→right)
+    if (curr_tick < DIR_LOCK_BOOT_TICKS) {
+        for (auto& sq : g_main_squares)
+            sq.lock_dir = +1;
+    } else {
+        // Normal flow-based direction detection
+        std::vector<int> flow_plus(g_main_squares.size(), 0);
+        std::vector<int> flow_minus(g_main_squares.size(), 0);
         
-        // Phase 1: Hot zones set direction (follow neighbor direction if exists)
-        for (int i = 0; i < (int)g_zone_ranges.size(); i++) {
-            int zid = g_zone_ranges[i].zone_id;
-            if (zid < 0 || zid >= nz || g_zone24_density[zid] < ZONE_HARD_CAP)
-                continue;
-            if (g_zone_direction[zid] != 0)
-                continue; // Already has direction
+        for (int a = 0; a < env->num_of_agents; a++) {
+            int loc = env->curr_states[a].location;
+            if (loc < 0) continue;
+            int si = g_cell_square[loc];
+            if (si < 0 || si >= (int)g_main_squares.size()) continue;
             
-            // Look for neighbor direction (first come first serve)
-            int neighbor_dir = 0;
-            for (int d = -CONTAIN_EXPAND; d <= CONTAIN_EXPAND; d++) {
-                int ni = i + d;
-                if (ni < 0 || ni >= (int)g_zone_ranges.size()) continue;
-                int nzid = g_zone_ranges[ni].zone_id;
-                if (nzid >= 0 && g_zone_direction[nzid] != 0) {
-                    neighbor_dir = g_zone_direction[nzid];
-                    break;
-                }
-            }
+            int m = -1, b;
+            project(loc, m, b);
+            int prev_m = g_agent_last_main[a];
+            g_agent_last_main[a] = m;
             
-            if (neighbor_dir != 0) {
-                g_zone_direction[zid] = neighbor_dir;
-            } else {
-                // Use own flow direction
-                int dir = (g_zone_direction[zid] != 0) ? g_zone_direction[zid] : 0;
-                if (dir == 0)
-                    dir = (zid * 1103515245 + 12345) % 2 ? +1 : -1;
-                g_zone_direction[zid] = dir;
+            if (prev_m >= 0 && m >= 0) {
+                if (m > prev_m) flow_plus[si]++;
+                else if (m < prev_m) flow_minus[si]++;
             }
         }
         
-        // Phase 2: Hot zones lock themselves and neighbors unconditionally
-        for (int i = 0; i < (int)g_zone_ranges.size(); i++) {
-            int zid = g_zone_ranges[i].zone_id;
-            if (zid < 0 || zid >= nz || g_zone24_density[zid] < ZONE_HARD_CAP)
-                continue;
-            int dir = g_zone_direction[zid];
-            for (int d = -CONTAIN_EXPAND; d <= CONTAIN_EXPAND; d++) {
-                int ni = i + d;
-                if (ni < 0 || ni >= (int)g_zone_ranges.size()) continue;
-                int nzid = g_zone_ranges[ni].zone_id;
-                if (nzid >= 0)
-                    g_zone_direction[nzid] = dir;
-            }
+        for (size_t si = 0; si < g_main_squares.size(); si++) {
+            int dir = 0;
+            if (flow_plus[si] > flow_minus[si] * 3) dir = +1;
+            else if (flow_minus[si] > flow_plus[si] * 3) dir = -1;
+            g_main_squares[si].lock_dir = dir;
         }
-        
-        // Phase 3: Individual unlock - each zone checks its own neighborhood
-        for (int i = 0; i < (int)g_zone_ranges.size(); i++) {
-            int zid = g_zone_ranges[i].zone_id;
-            if (zid < 0 || zid >= nz) continue;
-            if (g_zone24_density[zid] >= ZONE_HARD_CAP)
-                continue; // Hot zone stays locked
-            
-            bool nearby_hot = false;
-            for (int d = -CONTAIN_EXPAND; d <= CONTAIN_EXPAND; d++) {
-                int ni = i + d;
-                if (ni < 0 || ni >= (int)g_zone_ranges.size()) continue;
-                int nzid = g_zone_ranges[ni].zone_id;
-                if (nzid >= 0 && g_zone24_density[nzid] >= ZONE_HARD_CAP) {
-                    nearby_hot = true;
-                    break;
-                }
-            }
-            if (!nearby_hot)
-                g_zone_direction[zid] = 0; // Unlock
-        }
-    }
-    // Sync zone direction to zone_ranges
-    // Sync zone direction to zone_ranges
-    for (auto& zr : g_zone_ranges) {
-        if (zr.zone_id >= 0 && zr.zone_id < nz)
-            zr.lock_dir = ORZ_DIRECTION_LOCK ? g_zone_direction[zr.zone_id] : 0;
     }
     
-    // Sync to PIBT lock
-    for (size_t si = 0; si < g_zone_ranges.size() && si < (size_t)PIBT_Lock::MAX_SEGMENTS; si++)
-        PIBT_Lock::g_seg_lock_dir[si] = g_zone_ranges[si].lock_dir;
+    // Propagate lock: hot squares lock self ± DIR_LOCK_RADIUS squares
+    for (size_t si = 0; si < g_main_squares.size(); si++) {
+        if (g_main_squares[si].density < ZONE_HARD_CAP)
+            continue;
+        int dir = g_main_squares[si].lock_dir;
+        if (dir == 0) continue;
+        
+        int lo_idx = std::max(0, (int)si - DIR_LOCK_RADIUS);
+        int hi_idx = std::min((int)g_main_squares.size() - 1, (int)si + DIR_LOCK_RADIUS);
+        for (int sj = lo_idx; sj <= hi_idx; sj++) {
+            g_main_squares[sj].lock_dir = dir;
+        }
+    }
+    
+    // Also update g_zone_direction for compatibility (from V3 zone tracking)
+    // This is used by connection_exempt and other code that reads zone direction
+    int n24c = (cols + 23) / 24, n24r = (rows + 23) / 24;
+    int nz = n24c * n24r;
+    if ((int)g_zone_direction.size() != nz)
+        g_zone_direction.assign(nz, 0);
+    
+    for (size_t si = 0; si < g_main_squares.size() && si < PIBT_Lock::MAX_SEGMENTS; si++)
+        PIBT_Lock::g_seg_lock_dir[si] = g_main_squares[si].lock_dir;
+    
+    // Map square lock_dir to zone lock_dir for old code compatibility
+    for (int z = 0; z < nz; z++) {
+        int zr = z / n24c, zc = z % n24c;
+        int zcx = zc * 24 + 12, zcy = zr * 24 + 12;
+        int best_d2 = INT_MAX, best_dir = 0;
+        for (size_t si = 0; si < g_main_squares.size(); si++) {
+            int dx = zcx - g_main_squares[si].cx;
+            int dy = zcy - g_main_squares[si].cy;
+            int d2 = dx*dx + dy*dy;
+            if (d2 < best_d2) { best_d2 = d2; best_dir = g_main_squares[si].lock_dir; }
+        }
+        g_zone_direction[z] = best_dir;
+    }
+}
+
+// ====== Check if a location is in main zone (V4: cell-level) ======
+inline bool is_main_cell(int loc) {
+    return g_ready && loc >= 0 && loc < (int)g_cell_square.size() && g_cell_square[loc] >= 0;
 }
 
 } // namespace Centerline
-
-

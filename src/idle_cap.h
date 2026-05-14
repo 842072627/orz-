@@ -7,6 +7,7 @@
 #pragma once
 
 #define IDLE_NUM_BUCKETS  8   // 桶数（ORZ 东西走廊列分 8 段）
+#define IDLE_BOOT_TICKS 100   // 前 N tick 用小比例控流
 
 namespace IdleCap {
 
@@ -16,6 +17,9 @@ inline void compute_budgets(SharedEnvironment* env, int budgets[IDLE_NUM_BUCKETS
     int cols_per = env->cols / IDLE_NUM_BUCKETS + 1;
     int active[IDLE_NUM_BUCKETS] = {0};
     int total[IDLE_NUM_BUCKETS] = {0};
+    
+    // 开机期用小比例控流，之后恢复正常
+    float ratio = (env->curr_timestep < IDLE_BOOT_TICKS) ? 0.4f : IDLE_RATIO;
 
     for (int a = 0; a < env->num_of_agents; a++) {
         int loc = env->curr_states[a].location;
@@ -27,7 +31,7 @@ inline void compute_budgets(SharedEnvironment* env, int budgets[IDLE_NUM_BUCKETS
     }
 
     for (int b = 0; b < IDLE_NUM_BUCKETS; b++) {
-        int limit = std::max(8, (int)(total[b] * IDLE_RATIO));
+        int limit = std::max(8, (int)(total[b] * ratio));
         budgets[b] = std::max(0, limit - active[b]);
     }
 }

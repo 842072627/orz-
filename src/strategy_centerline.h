@@ -40,9 +40,9 @@ static inline int zh_dist(int z1, int z2) {
 void init(SharedEnvironment* env) {
     g_env = env;
     Centerline::init(env);
-    printf("CENTERLINE_SCHEDULER: agents=%d, map=%dx%d, zones=%zu, cells=%zu\n",
+    printf("CENTERLINE_SCHEDULER V4: agents=%d, map=%dx%d, squares=%zu, cells=%zu\n",
            env->num_of_agents, env->cols, env->rows,
-           Centerline::g_zone_ranges.size(), Centerline::g_centerline_cells.size());
+           Centerline::g_main_squares.size(), Centerline::g_centerline_cells.size());
 }
 
 // Per-errand base_score using zoneâ†’main range overlap
@@ -67,10 +67,9 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
                 if (tm < 0) continue;
                 int lo = std::min(prev_m, tm);
                 int hi = std::max(prev_m, tm);
-                for (auto& zr : Centerline::g_zone_ranges) {
-                    if (zr.min_m <= hi && zr.max_m >= lo &&
-                        Centerline::g_zone_is_main[zr.zone_id] &&
-                        Centerline::g_zone24_density[zr.zone_id] >= EXEMPT_MAIN_THR) {
+                for (auto& sq : Centerline::g_main_squares) {
+                    if (sq.min_m <= hi && sq.max_m >= lo &&
+                        sq.density >= EXEMPT_MAIN_THR) {
                         exempt = false;
                         break;
                     }
@@ -98,7 +97,7 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
         bool is_branch = true;
         int check_prev = a_loc;
         int nzc = Centerline::g_n24c;
-        int max_z = (int)Centerline::g_zone_is_main.size();
+        int max_z = (int)Centerline::g_zone24_density.size();
         for (size_t ei = (size_t)start_idx; ei < locs.size(); ei++) {
             int loc = locs[ei];
             int cols = g_env->cols;
@@ -108,7 +107,7 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
             int z1 = (y1 / 24) * nzc + (x1 / 24);
             if (z1 >= 0 && z1 < max_z) {
                 int d1 = Centerline::g_zone24_density[z1];
-                if (Centerline::g_zone_is_main[z1]) {
+                if (Centerline::is_main_cell(check_prev)) {
                     if (d1 >= ZONE_HARD_CAP)
                         { is_branch = false; break; }
                 } else {
@@ -119,7 +118,7 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
             int z2 = (y2 / 24) * nzc + (x2 / 24);
             if (z2 >= 0 && z2 < max_z) {
                 int d2 = Centerline::g_zone24_density[z2];
-                if (Centerline::g_zone_is_main[z2]) {
+                if (Centerline::is_main_cell(loc)) {
                     if (d2 >= ZONE_HARD_CAP)
                         { is_branch = false; break; }
                 } else {
@@ -163,13 +162,13 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
         // === Escape exemption: compute only remaining errands ===
         if (start_idx == 0) {
             float esc_score = connection_exempt_score(a_loc, locs,
-                Centerline::g_zone24_density, Centerline::g_zone_is_main,
+                Centerline::g_zone24_density, Centerline::g_zone_has_main,
                 g_env->map, g_env->cols, nzc);
             if (esc_score > 0) return esc_score;
         } else {
             std::vector<int> remaining(locs.begin() + start_idx, locs.end());
             float esc_score = connection_exempt_score(a_loc, remaining,
-                Centerline::g_zone24_density, Centerline::g_zone_is_main,
+                Centerline::g_zone24_density, Centerline::g_zone_has_main,
                 g_env->map, g_env->cols, nzc);
             if (esc_score > 0) return esc_score;
         }
@@ -191,13 +190,13 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
         int hi = std::max(prev_m, tm);
         int intent = (tm > prev_m) ? +1 : -1;
 
-        // Zone overlap check + direction lock (any seg locked = whole task blocked)
+        // Square overlap check + direction lock (V4: path-aligned squares)
         int d_max_seg = 0;
-        for (auto& zr : Centerline::g_zone_ranges) {
-            if (zr.min_m <= hi && zr.max_m >= lo) {
-                int d = Centerline::g_zone24_density[zr.zone_id];
+        for (auto& sq : Centerline::g_main_squares) {
+            if (sq.min_m <= hi && sq.max_m >= lo) {
+                int d = sq.density;  // V4: square density (not grid zone)
                 // Direction lock: block tasks against flow
-                if (ORZ_DIRECTION_LOCK && zr.lock_dir != 0 && zr.lock_dir != intent)
+                if (ORZ_DIRECTION_LOCK && sq.lock_dir != 0 && sq.lock_dir != intent)
                     return -1e9f;
                 // Hard density cap: block ALL tasks through severely congested zones
                 if (USE_DENSITY_CAP_80 && d >= DENSITY_CAP_80)
@@ -223,8 +222,8 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
 
 void pre_tick_updates(SharedEnvironment* env) {
     Centerline::update_zone24_density(env);
-    Centerline::update_zone_threshold();
-    Centerline::update_zone_direction(env);
+    Centerline::update_square_density(env);
+    Centerline::update_square_direction(env);
 }
 
 void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule) {
@@ -284,10 +283,14 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
                 it = free_agents.erase(it);
             } else {
                 proposed_schedule[a] = -1;
-                if (USE_HOT_ZONE_EXEMPT && is_hot_zone_exempt(a_loc, env)) {
-                    PIBT_Lock::g_agent_blocked[a] = 0; // 热区豁免：不堵
+                // V4 exemption: agent already in hot V4 square → let them escape
+                int a_si = Centerline::g_cell_square[a_loc];
+                bool v4_exempt = (a_si >= 0 && a_si < (int)Centerline::g_main_squares.size() &&
+                    Centerline::g_main_squares[a_si].density >= PREDICT_THRESHOLD);
+                if (v4_exempt) {
+                    PIBT_Lock::g_agent_blocked[a] = 0;
                 } else {
-                    PIBT_Lock::g_agent_blocked[a] = 1; // 原逻辑：原地等
+                    PIBT_Lock::g_agent_blocked[a] = 1;
                 }
                 ++it;
             }
@@ -304,7 +307,7 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
         }
     }
 
-    if (free_agents.empty()) return;
+    if (free_agents.empty()) { return; }
 
     // Phase 2: Greedy assignment
     std::unordered_map<int, std::vector<int>> tasks_by_zone;
@@ -391,6 +394,89 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
 
     for (int a : free_agents) {
         if (proposed_schedule[a] < 0) proposed_schedule[a] = -1;
+    }
+    
+    // === V4: Predictive cut-off (查前方2个方块, 30硬限制) ===
+    {
+        static int s_debug_tick = 0;
+        int blocked_count = 0, total_checked = 0, hot_sq_count = 0;
+        for (auto& sq : Centerline::g_main_squares)
+            if (sq.density >= PREDICT_THRESHOLD) hot_sq_count++;
+            
+        // PREDICT_HORIZON defined in config.h
+            
+        for (int a = 0; a < env->num_of_agents && a < PIBT_Lock::MAX_AGENTS; a++) {
+            if (PIBT_Lock::g_agent_blocked[a]) continue;
+            int cur = env->curr_task_schedule[a];
+            if (cur < 0) continue;
+            total_checked++;
+            
+            int a_loc = env->curr_states[a].location;
+            if (a_loc < 0) continue;
+            
+            // === 1D投影: agent→main_dist, task→main_dist ===
+            int a_m, a_b, t_m = -1;
+            Centerline::project(a_loc, a_m, a_b);
+            if (a_m < 0) continue;
+            auto tit = env->task_pool.find(cur);
+            if (tit != env->task_pool.end()) {
+                for (auto& loc : tit->second.locations) {
+                    int tm, tb;
+                    Centerline::project(loc, tm, tb);
+                    if (tm >= 0) { t_m = tm; break; }
+                }
+            }
+            if (t_m < 0) continue;
+            int lo = std::min(a_m, t_m);
+            int hi = std::max(a_m, t_m);
+            
+            // 找到agent的main_dist落在哪个方块
+            int si = -1;
+            for (size_t i = 0; i < Centerline::g_main_squares.size(); i++) {
+                if (a_m >= Centerline::g_main_squares[i].min_m &&
+                    a_m <= Centerline::g_main_squares[i].max_m) {
+                    si = (int)i; break;
+                }
+            }
+            if (si < 0) continue;
+            
+            // agent移动方向
+            int dir = (t_m > a_m) ? +1 : -1;
+            
+            // 检查agent自身方块是否热（豁免）
+            bool in_hot_itself = (Centerline::g_main_squares[si].density >= PREDICT_THRESHOLD);
+            
+            // 自适应阻尼: 只检查 agent→task 区间内的前方方块
+            int max_ahead_d = 0;
+            for (int ahead = 1; ahead <= PREDICT_HORIZON; ahead++) {
+                int ni = si + ahead * dir;
+                if (ni >= 0 && ni < (int)Centerline::g_main_squares.size()) {
+                    // 只截停：这个方块在 agent→task 的路径上
+                    auto& sq = Centerline::g_main_squares[ni];
+                    if (sq.min_m <= hi && sq.max_m >= lo) {
+                        if (sq.density > max_ahead_d) max_ahead_d = sq.density;
+                    }
+                }
+            }
+            
+            if (max_ahead_d > PREDICT_THRESHOLD && !in_hot_itself) {
+                float excess = (float)(max_ahead_d - PREDICT_THRESHOLD);
+                float block_prob = std::min(1.0f, excess / (float)ADAPTIVE_RANGE);
+                int hash_val = (a * 7 + step * 13) % 100;
+                if (hash_val < (int)(block_prob * 100)) {
+                    PIBT_Lock::g_agent_blocked[a] = 1;
+                    blocked_count++;
+                }
+            }
+        }
+        
+        int max_sq_d = 0;
+        for (auto& sq : Centerline::g_main_squares)
+            if (sq.density > max_sq_d) max_sq_d = sq.density;
+        if (++s_debug_tick % 50 == 1) {
+            printf("[V4 CUT] tick=%d, checked=%d, blocked=%d, hot_sq=%d, max_d=%d\n",
+                   s_debug_tick, total_checked, blocked_count, hot_sq_count, max_sq_d);
+        }
     }
     
     // Timeout detection
