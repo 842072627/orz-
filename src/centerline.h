@@ -423,6 +423,10 @@ inline void update_square_direction(const SharedEnvironment* env) {
     if ((int)g_agent_last_main.size() != env->num_of_agents)
         g_agent_last_main.assign(env->num_of_agents, -1);
     
+    // Reset locks
+    for (auto& sq : g_main_squares)
+        sq.lock_dir = 0;
+    
     int curr_tick = env->curr_timestep;
     
     // Boot period: all squares locked to +1 (left→right)
@@ -430,7 +434,7 @@ inline void update_square_direction(const SharedEnvironment* env) {
         for (auto& sq : g_main_squares)
             sq.lock_dir = +1;
     } else {
-        // Statistic flow direction (kept from original)
+        // Normal flow-based direction detection
         std::vector<int> flow_plus(g_main_squares.size(), 0);
         std::vector<int> flow_minus(g_main_squares.size(), 0);
         
@@ -451,68 +455,25 @@ inline void update_square_direction(const SharedEnvironment* env) {
             }
         }
         
-        // Step 1: hot squares set/keep direction
-        //   - Already locked → keep (先到先得，继承更早的区方向)
-        //   - Propagation range overlaps existing lock → inherit that direction
-        //   - Truly new group → determine from flow
         for (size_t si = 0; si < g_main_squares.size(); si++) {
-            if (g_main_squares[si].density < ZONE_HARD_CAP) continue;
-            if (g_main_squares[si].lock_dir != 0) continue;  // already locked
-            
-            // Check if new group would overlap an existing locked region
-            int lo = std::max(0, (int)si - DIR_LOCK_RADIUS);
-            int hi = std::min((int)g_main_squares.size() - 1, (int)si + DIR_LOCK_RADIUS);
-            int inherit = 0;
-            for (int sj = lo; sj <= hi; sj++) {
-                if (g_main_squares[sj].lock_dir != 0) {
-                    inherit = g_main_squares[sj].lock_dir;
-                    break;
-                }
-            }
-            if (inherit != 0) {
-                g_main_squares[si].lock_dir = inherit;
-                continue;
-            }
-            
-            // Truly new independent group: direction from flow
             int dir = 0;
-            if (flow_plus[si] > flow_minus[si]) dir = +1;
-            else if (flow_minus[si] > flow_plus[si]) dir = -1;
-            else dir = (rand() % 2 == 0) ? +1 : -1;
+            if (flow_plus[si] > flow_minus[si] * 3) dir = +1;
+            else if (flow_minus[si] > flow_plus[si] * 3) dir = -1;
             g_main_squares[si].lock_dir = dir;
         }
+    }
+    
+    // Propagate lock: hot squares lock self ± DIR_LOCK_RADIUS squares
+    for (size_t si = 0; si < g_main_squares.size(); si++) {
+        if (g_main_squares[si].density < ZONE_HARD_CAP)
+            continue;
+        int dir = g_main_squares[si].lock_dir;
+        if (dir == 0) continue;
         
-        // Step 2: propagate from every hot square (overlapping groups auto-align)
-        for (size_t si = 0; si < g_main_squares.size(); si++) {
-            if (g_main_squares[si].density < ZONE_HARD_CAP) continue;
-            int dir = g_main_squares[si].lock_dir;
-            if (dir == 0) continue;
-            
-            int lo_idx = std::max(0, (int)si - DIR_LOCK_RADIUS);
-            int hi_idx = std::min((int)g_main_squares.size() - 1, (int)si + DIR_LOCK_RADIUS);
-            for (int sj = lo_idx; sj <= hi_idx; sj++) {
-                if (g_main_squares[sj].lock_dir != 0)
-                    continue;
-                g_main_squares[sj].lock_dir = dir;
-            }
-        }
-        
-        // Step 3: clear cold squares, then remaining hot sources re-lock their zones
-        for (size_t si = 0; si < g_main_squares.size(); si++) {
-            if (g_main_squares[si].density >= ZONE_HARD_CAP) continue;
-            g_main_squares[si].lock_dir = 0;
-        }
-        // Re-propagate from still-hot squares to re-lock overlapping zones
-        for (size_t si = 0; si < g_main_squares.size(); si++) {
-            if (g_main_squares[si].density < ZONE_HARD_CAP) continue;
-            int dir = g_main_squares[si].lock_dir;
-            if (dir == 0) continue;
-            int lo_idx = std::max(0, (int)si - DIR_LOCK_RADIUS);
-            int hi_idx = std::min((int)g_main_squares.size() - 1, (int)si + DIR_LOCK_RADIUS);
-            for (int sj = lo_idx; sj <= hi_idx; sj++) {
-                if (g_main_squares[sj].lock_dir != 0) continue;
-                g_main_squares[sj].lock_dir = dir;
-            }
+        int lo_idx = std::max(0, (int)si - DIR_LOCK_RADIUS);
+        int hi_idx = std::min((int)g_main_squares.size() - 1, (int)si + DIR_LOCK_RADIUS);
+        for (int sj = lo_idx; sj <= hi_idx; sj++) {
+            g_main_squares[sj].lock_dir = dir;
         }
     }
     
