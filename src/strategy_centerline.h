@@ -282,6 +282,8 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
                 free_tasks.erase(parked);
                 it = free_agents.erase(it);
             } else {
+                // Park续接失败：清掉park标记，让agent像普通free agent一样走Phase 2
+                g_parked_task[a] = -1;
                 proposed_schedule[a] = -1;
                 // V4 exemption: agent already in hot V4 square → let them escape
                 int a_si = Centerline::g_cell_square[a_loc];
@@ -372,6 +374,8 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
 
             if (best_tid >= 0) {
                 proposed_schedule[a] = best_tid;
+                // 清掉Phase 1可能设的block，让agent在新任务上正常移动
+                PIBT_Lock::g_agent_blocked[a] = 0;
                 // Park second errand for multi-location tasks
                 auto tit = env->task_pool.find(best_tid);
                 if (tit != env->task_pool.end()) {
@@ -476,6 +480,24 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
         if (++s_debug_tick % 50 == 1) {
             printf("[V4 CUT] tick=%d, checked=%d, blocked=%d, hot_sq=%d, max_d=%d\n",
                    s_debug_tick, total_checked, blocked_count, hot_sq_count, max_sq_d);
+        }
+    }
+    
+    // Hot zone exempt: agents in high-density main zones must NOT be blocked
+    // Zone24 density >= ZONE_EXEMPT_PIBT_CAP → override g_agent_blocked = 0
+    // Only applies to zones that contain main-line segments (g_zone_has_main)
+    {
+        int n24c = (env->cols + 23) / 24;
+        for (int a = 0; a < env->num_of_agents && a < PIBT_Lock::MAX_AGENTS; a++) {
+            if (!PIBT_Lock::g_agent_blocked[a]) continue;
+            int loc = env->curr_states[a].location;
+            if (loc < 0) continue;
+            int zi = (loc / env->cols / 24) * n24c + (loc % env->cols / 24);
+            if (zi < 0 || zi >= (int)Centerline::g_zone_has_main.size()) continue;
+            if (!Centerline::g_zone_has_main[zi]) continue;  // 非主线zone不管
+            if (Centerline::g_zone24_density[zi] >= ZONE_EXEMPT_PIBT_CAP) {
+                PIBT_Lock::g_agent_blocked[a] = 0;
+            }
         }
     }
     
