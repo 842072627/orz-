@@ -364,107 +364,128 @@ inline void update_zone_direction(const SharedEnvironment* env) {
     int rows = env->rows, cols = env->cols;
     int n24c = (cols + 23) / 24, n24r = (rows + 23) / 24;
     int nz = n24c * n24r;
-    if ((int)g_zone_direction.size() != nz) g_zone_direction.assign(nz, 0);
-    if ((int)g_agent_last_main.size() != env->num_of_agents) g_agent_last_main.assign(env->num_of_agents, -1);
+    if ((int)g_agent_last_main.size() != env->num_of_agents)
+        g_agent_last_main.assign(env->num_of_agents, -1);
     
-    std::vector<int> flow_right(nz, 0), flow_left(nz, 0);
+    // === Use path segments (step=16, like main squares) instead of grid zones ===
+    const int SEG_STEP = 16;
+    int n_seg = (int)g_centerline_cells.size() / SEG_STEP + 1;
+    std::vector<int> seg_dir(n_seg, 0);
+    std::vector<int> seg_flow_right(n_seg, 0), seg_flow_left(n_seg, 0);
+    std::vector<int> seg_density(n_seg, 0);
+    
+    // Count agents per segment for density (real-time, per tick)
+    std::fill(seg_density.begin(), seg_density.end(), 0);
     for (int a = 0; a < env->num_of_agents; a++) {
         int loc = env->curr_states[a].location;
         if (loc < 0) continue;
-        int r = loc / cols, c = loc % cols;
-        int zi = (r / 24) * n24c + (c / 24);
-        if (zi < 0 || zi >= nz) continue;
+        int m = -1, b;
+        project(loc, m, b);
+        if (m >= 0) {
+            int si = m / SEG_STEP;
+            if (si >= 0 && si < n_seg) seg_density[si]++;
+        }
+    }
+    
+    // Flow per segment
+    for (int a = 0; a < env->num_of_agents; a++) {
+        int loc = env->curr_states[a].location;
+        if (loc < 0) continue;
         int m = -1, b;
         project(loc, m, b);
         int prev_m = g_agent_last_main[a];
         g_agent_last_main[a] = m;
         if (prev_m >= 0 && m >= 0) {
-            if (m - prev_m >= 1)      flow_right[zi]++;
-            else if (m - prev_m <= -1) flow_left[zi]++;
+            int si = m / SEG_STEP;
+            if (si >= 0 && si < n_seg) {
+                if (m - prev_m >= 1)      seg_flow_right[si]++;
+                else if (m - prev_m <= -1) seg_flow_left[si]++;
+            }
         }
     }
     
-    // Zone direction: majority flow
-    std::fill(g_zone_direction.begin(), g_zone_direction.end(), 0);
-    for (int zi = 0; zi < nz; zi++) {
-        if (g_zone24_density[zi] < DIR_THRESHOLD) continue;
-        g_zone_direction[zi] = (flow_right[zi] > flow_left[zi]) ? +1 :
-                               (flow_left[zi] > flow_right[zi]) ? -1 : 0;
+    // Segment direction: majority flow
+    for (int si = 0; si < n_seg; si++) {
+        if (seg_density[si] < 5) continue;  // DIR_THRESHOLD equivalent for segments
+        seg_dir[si] = (seg_flow_right[si] > seg_flow_left[si]) ? +1 :
+                      (seg_flow_left[si] > seg_flow_right[si]) ? -1 : 0;
     }
     
     if (ORZ_DIRECTION_LOCK) {
-        // Non-merge direction lock: each hot zone locks itself \u00b1CONTAIN_EXPAND neighbors independently
-        // No block merging - each zone unlocks when its neighborhood cools down
-        
-        // Phase 1: Hot zones set direction (follow neighbor direction if exists)
-        for (int i = 0; i < (int)g_zone_ranges.size(); i++) {
-            int zid = g_zone_ranges[i].zone_id;
-            if (zid < 0 || zid >= nz || g_zone24_density[zid] < ZONE_HARD_CAP)
-                continue;
-            if (g_zone_direction[zid] != 0)
-                continue; // Already has direction
+        // Non-merge direction lock: same 3-phase algorithm as winning version
+        // Phase 1: Hot zones set direction (follow neighbor if exists)
+        for (int si = 0; si < n_seg; si++) {
+            if (seg_density[si] < 15) continue;  // ZONE_HARD_CAP
+            if (seg_dir[si] != 0) continue;  // Already has direction
             
-            // Look for neighbor direction (first come first serve)
             int neighbor_dir = 0;
-            for (int d = -CONTAIN_EXPAND; d <= CONTAIN_EXPAND; d++) {
-                int ni = i + d;
-                if (ni < 0 || ni >= (int)g_zone_ranges.size()) continue;
-                int nzid = g_zone_ranges[ni].zone_id;
-                if (nzid >= 0 && g_zone_direction[nzid] != 0) {
-                    neighbor_dir = g_zone_direction[nzid];
+            for (int d = -1; d <= 1; d++) {  // CONTAIN_EXPAND=1
+                int ni = si + d;
+                if (ni < 0 || ni >= n_seg) continue;
+                if (seg_dir[ni] != 0) {
+                    neighbor_dir = seg_dir[ni];
                     break;
                 }
             }
             
             if (neighbor_dir != 0) {
-                g_zone_direction[zid] = neighbor_dir;
+                seg_dir[si] = neighbor_dir;
             } else {
-                // Use own flow direction
-                int dir = (g_zone_direction[zid] != 0) ? g_zone_direction[zid] : 0;
+                int dir = (seg_dir[si] != 0) ? seg_dir[si] : 0;
                 if (dir == 0)
-                    dir = (zid * 1103515245 + 12345) % 2 ? +1 : -1;
-                g_zone_direction[zid] = dir;
+                    dir = (si * 1103515245 + 12345) % 2 ? +1 : -1;
+                seg_dir[si] = dir;
             }
         }
         
         // Phase 2: Hot zones lock themselves and neighbors unconditionally
-        for (int i = 0; i < (int)g_zone_ranges.size(); i++) {
-            int zid = g_zone_ranges[i].zone_id;
-            if (zid < 0 || zid >= nz || g_zone24_density[zid] < ZONE_HARD_CAP)
-                continue;
-            int dir = g_zone_direction[zid];
-            for (int d = -CONTAIN_EXPAND; d <= CONTAIN_EXPAND; d++) {
-                int ni = i + d;
-                if (ni < 0 || ni >= (int)g_zone_ranges.size()) continue;
-                int nzid = g_zone_ranges[ni].zone_id;
-                if (nzid >= 0)
-                    g_zone_direction[nzid] = dir;
+        for (int si = 0; si < n_seg; si++) {
+            if (seg_density[si] < 15) continue;
+            int dir = seg_dir[si];
+            for (int d = -3; d <= 3; d++) {
+                int ni = si + d;
+                if (ni < 0 || ni >= n_seg) continue;
+                seg_dir[ni] = dir;
             }
         }
         
-        // Phase 3: Individual unlock - each zone checks its own neighborhood
-        for (int i = 0; i < (int)g_zone_ranges.size(); i++) {
-            int zid = g_zone_ranges[i].zone_id;
-            if (zid < 0 || zid >= nz) continue;
-            if (g_zone24_density[zid] >= ZONE_HARD_CAP)
-                continue; // Hot zone stays locked
+        // Phase 3: Individual unlock
+        for (int si = 0; si < n_seg; si++) {
+            if (seg_density[si] >= 15) continue;  // Hot stays locked
             
             bool nearby_hot = false;
-            for (int d = -CONTAIN_EXPAND; d <= CONTAIN_EXPAND; d++) {
-                int ni = i + d;
-                if (ni < 0 || ni >= (int)g_zone_ranges.size()) continue;
-                int nzid = g_zone_ranges[ni].zone_id;
-                if (nzid >= 0 && g_zone24_density[nzid] >= ZONE_HARD_CAP) {
+            for (int d = -3; d <= 3; d++) {
+                int ni = si + d;
+                if (ni < 0 || ni >= n_seg) continue;
+                if (seg_density[ni] >= 15) {
                     nearby_hot = true;
                     break;
                 }
             }
             if (!nearby_hot)
-                g_zone_direction[zid] = 0; // Unlock
+                seg_dir[si] = 0;  // Unlock
         }
     }
-    // Sync zone direction to zone_ranges
-    // Sync zone direction to zone_ranges
+    
+    // Map segment direction to grid zones
+    g_zone_direction.assign(nz, 0);
+    for (int z = 0; z < nz; z++) {
+        int zr = z / n24c, zc = z % n24c;
+        int zcx = zc * 24 + 12, zcy = zr * 24 + 12;
+        int best_d2 = 999999, best_dir = 0;
+        for (int si = 0; si < n_seg; si++) {
+            int idx = si * SEG_STEP;
+            if (idx >= (int)g_centerline_cells.size()) break;
+            int loc = g_centerline_cells[idx];
+            int dx = (loc % cols) - zcx;
+            int dy = (loc / cols) - zcy;
+            int d2 = dx*dx + dy*dy;
+            if (d2 < best_d2) { best_d2 = d2; best_dir = seg_dir[si]; }
+        }
+        g_zone_direction[z] = best_dir;
+    }
+    
+    // Sync to zone_ranges
     for (auto& zr : g_zone_ranges) {
         if (zr.zone_id >= 0 && zr.zone_id < nz)
             zr.lock_dir = ORZ_DIRECTION_LOCK ? g_zone_direction[zr.zone_id] : 0;
@@ -474,7 +495,4 @@ inline void update_zone_direction(const SharedEnvironment* env) {
     for (size_t si = 0; si < g_zone_ranges.size() && si < (size_t)PIBT_Lock::MAX_SEGMENTS; si++)
         PIBT_Lock::g_seg_lock_dir[si] = g_zone_ranges[si].lock_dir;
 }
-
 } // namespace Centerline
-
-

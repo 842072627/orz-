@@ -5,6 +5,7 @@
 #include "utils.h"
 #include "config.h"
 #include "centerline.h"
+#include "narrow_passage.h"
 #include "connection_exempt.h"
 #include "pibt_lock.h"
 #include "idle_cap.h"
@@ -40,6 +41,7 @@ static inline int zh_dist(int z1, int z2) {
 void init(SharedEnvironment* env) {
     g_env = env;
     Centerline::init(env);
+    NarrowPassage::init(env);
     printf("CENTERLINE_SCHEDULER: agents=%d, map=%dx%d, zones=%zu, cells=%zu\n",
            env->num_of_agents, env->cols, env->rows,
            Centerline::g_zone_ranges.size(), Centerline::g_centerline_cells.size());
