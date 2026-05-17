@@ -25,8 +25,6 @@ namespace PIBT_Lock
     int g_seg_lock_dir[PIBT_Lock::MAX_SEGMENTS] = {0};
     int g_agent_blocked[PIBT_Lock::MAX_AGENTS] = {0};
     int g_parked_task[PIBT_Lock::MAX_AGENTS];
-    int g_cold_goals[PIBT_Lock::MAX_AGENTS];
-    int g_agent_bound_lock[PIBT_Lock::MAX_AGENTS];
 }
 
 void TaskScheduler::initialize(int preprocess_time_limit)
@@ -59,7 +57,6 @@ void TaskScheduler::initialize(int preprocess_time_limit)
         if (strat == "centerline")
         {
             strategy_centerline::init(env);
-            ColdZonePushout::init(env);
         }
         else
         {

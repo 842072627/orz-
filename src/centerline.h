@@ -214,7 +214,6 @@ static void compute_cell_square_mapping(const SharedEnvironment* env) {
 }
 
 // ====== Init: BFS path + wall correction + main_squares + cell mapping ======
-static void compute_dead_end_zones(const SharedEnvironment* env);  // defined below update_square_direction
 void init(const SharedEnvironment* env) {
     g_rows = env->rows; g_cols = env->cols;
     g_n24c = env->cols / 24 + 1; g_n24r = env->rows / 24 + 1;
@@ -379,9 +378,6 @@ void init(const SharedEnvironment* env) {
     g_zone_direction.assign(g_n24c * g_n24r, 0);
     g_agent_last_main.assign(env->num_of_agents, -1);
     
-    // V5: Dead-end zone detection (before g_ready=true)
-    compute_dead_end_zones(env);
-    
     g_ready = true;
 }
 
@@ -420,54 +416,9 @@ inline void update_zone_threshold() {
     // No-op: V4 uses square densities directly
 }
 
-// ====== V5: Dead-end zone detection ======
-// [zid] = 1 if zone is a topological endpoint (degree <= 1 along centerline)
-static std::vector<char> g_dead_end_zone;
-
-static void compute_dead_end_zones(const SharedEnvironment* env) {
-    int n24c = (env->cols + 23) / 24, n24r = (env->rows + 23) / 24;
-    int nz = n24c * n24r;
-    g_dead_end_zone.assign(nz, 0);
-    
-    // Build adjacency along centerline
-    int prev_zid = -1;
-    for (size_t i = 0; i < g_centerline_cells.size(); i++) {
-        int loc = g_centerline_cells[i];
-        int r = loc / env->cols, c = loc % env->cols;
-        int zid = (r / 24) * n24c + (c / 24);
-        if (zid != prev_zid && prev_zid >= 0 && zid >= 0 && zid < nz && prev_zid >= 0 && prev_zid < nz) {
-            g_dead_end_zone[zid]++;
-            g_dead_end_zone[prev_zid]++;
-        }
-        prev_zid = zid;
-    }
-    
-    int dead_count = 0;
-    for (int z = 0; z < nz; z++) {
-        // zones with only 1 neighbor (or 0) along centerline = dead end
-        // g_dead_end_zone at this point = neighbor count
-        if (g_dead_end_zone[z] <= 1) {
-            // Only mark if this zone actually has centerline cells
-            bool has_cl = false;
-            for (size_t i = 0; i < g_centerline_cells.size() && !has_cl; i++) {
-                int loc = g_centerline_cells[i];
-                int zr = loc / env->cols / 24, zc = loc % env->cols / 24;
-                if (zr * n24c + zc == z) has_cl = true;
-            }
-            if (has_cl) g_dead_end_zone[z] = 2;  // 2 = dead end marker
-        }
-        if (g_dead_end_zone[z] == 2) dead_count++;
-    }
-    printf("[CENTERLINE] Dead-end zones: %d\n", dead_count);
-}
-
-// Check if zone is dead-end
-inline bool is_dead_end_zone(int zid) {
-    return zid >= 0 && zid < (int)g_dead_end_zone.size() && g_dead_end_zone[zid] == 2;
-}
+// ====== Square direction (V4: replaces update_zone_direction) ======
 inline void update_square_direction(const SharedEnvironment* env) {
     int rows = env->rows, cols = env->cols;
-    int n24c = (cols + 23) / 24, n24r = (rows + 23) / 24;
     
     if ((int)g_agent_last_main.size() != env->num_of_agents)
         g_agent_last_main.assign(env->num_of_agents, -1);
@@ -513,7 +464,6 @@ inline void update_square_direction(const SharedEnvironment* env) {
     }
     
     // Propagate lock: hot squares lock self ± DIR_LOCK_RADIUS squares
-    // V5: Stop propagation before dead-end zones (walls/corners)
     for (size_t si = 0; si < g_main_squares.size(); si++) {
         if (g_main_squares[si].density < ZONE_HARD_CAP)
             continue;
@@ -523,21 +473,13 @@ inline void update_square_direction(const SharedEnvironment* env) {
         int lo_idx = std::max(0, (int)si - DIR_LOCK_RADIUS);
         int hi_idx = std::min((int)g_main_squares.size() - 1, (int)si + DIR_LOCK_RADIUS);
         for (int sj = lo_idx; sj <= hi_idx; sj++) {
-            // V5: Check if next zone in lock_dir direction is a dead end
-            if (ENABLE_DEAD_END_PROTECTION && sj != (int)si) {
-                int zx = g_main_squares[sj].cx / 24;
-                int zy = g_main_squares[sj].cy / 24;
-                int zid = zy * n24c + zx;
-                // If this zone ahead of us is a dead end, don't lock it
-                if (dir == +1 && sj > (int)si && is_dead_end_zone(zid)) continue;
-                if (dir == -1 && sj < (int)si && is_dead_end_zone(zid)) continue;
-            }
             g_main_squares[sj].lock_dir = dir;
         }
     }
     
     // Also update g_zone_direction for compatibility (from V3 zone tracking)
     // This is used by connection_exempt and other code that reads zone direction
+    int n24c = (cols + 23) / 24, n24r = (rows + 23) / 24;
     int nz = n24c * n24r;
     if ((int)g_zone_direction.size() != nz)
         g_zone_direction.assign(nz, 0);

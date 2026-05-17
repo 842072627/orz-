@@ -7,7 +7,7 @@
 #pragma once
 
 #define IDLE_NUM_BUCKETS  8   // 桶数（ORZ 东西走廊列分 8 段）
-#define IDLE_BOOT_TICKS 0   // 前 N tick 用小比例控流
+#define IDLE_BOOT_TICKS 100   // 前 N tick 用小比例控流
 
 namespace IdleCap {
 
