@@ -87,7 +87,7 @@ inline int measure_perp_width(const SharedEnvironment* env, int cx, int cy, int 
 // ====== 走廊分类 ======
 inline CorridorClass classify_width(int w) {
     if (w <= 3)  return SUPER_NARROW;
-    if (w <= 8)  return NARROW;
+    if (w <= 6)  return NARROW;
     if (w <= 12) return MODERATE;
     if (w <= 20) return WIDE;
     return VERY_WIDE;
@@ -191,12 +191,12 @@ inline void init(const SharedEnvironment* env) {
             dx = cl[i] % g_cols - cl[i-1] % g_cols;
             dy = cl[i] / g_cols - cl[i-1] / g_cols;
         } else {
-            // 1步差（进入当前cell的方向），永远是正交
-            dx = cl[i] % g_cols - cl[i-1] % g_cols;
-            dy = cl[i] / g_cols - cl[i-1] / g_cols;
+            dx = cl[i+1] % g_cols - cl[i-1] % g_cols;
+            dy = cl[i+1] / g_cols - cl[i-1] / g_cols;
         }
-        g_tangent_dx[i] = dx;
-        g_tangent_dy[i] = dy;
+        int nd = std::max(1, std::max(std::abs(dx), std::abs(dy)));
+        g_tangent_dx[i] = dx / nd;
+        g_tangent_dy[i] = dy / nd;
     }
     
     // Step 2: 计算每个中心线cell的垂直宽度

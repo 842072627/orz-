@@ -1,4 +1,4 @@
-﻿
+
 
 
 #include "my_pibt.h"
@@ -15,11 +15,6 @@ namespace MyPlanner{
 static int g_pibt_recursion_depth = 0;
 int get_gp_h(TrajLNS& lns, int ai, int target){
     int min_heuristic;
-    int mh_dest = lns.tasks.at(ai);
-    #if ORZ_PIBT_DIRECTION_BLOCK
-    if (ai < PIBT_Lock::MAX_AGENTS && PIBT_Lock::g_cold_goals[ai] >= 0)
-        mh_dest = PIBT_Lock::g_cold_goals[ai];
-    #endif
 
 	if (is_large_map(lns.env)){
 		if (!lns.traj_dists.empty() && !lns.traj_dists[ai].empty())
@@ -28,7 +23,7 @@ int get_gp_h(TrajLNS& lns, int ai, int target){
 		}
 		else
 		{
-			min_heuristic = manhattanDistance(target,mh_dest,lns.env);
+			min_heuristic = manhattanDistance(target,lns.tasks.at(ai),lns.env);
 		}
 		return min_heuristic;
 	}
@@ -43,7 +38,7 @@ int get_gp_h(TrajLNS& lns, int ai, int target){
 		}
 		else
 		{
-			min_heuristic = manhattanDistance(target,mh_dest,lns.env);
+			min_heuristic = manhattanDistance(target,lns.tasks.at(ai),lns.env);
 		}
 		return min_heuristic;
 	}
@@ -74,10 +69,6 @@ bool causalMY_PIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
 	assert(prev_loc >= 0 && prev_loc < lns.env->map.size());
 
 	int target = lns.tasks.at(curr_id);
-    #if ORZ_PIBT_DIRECTION_BLOCK
-    if (curr_id < PIBT_Lock::MAX_AGENTS && PIBT_Lock::g_cold_goals[curr_id] >= 0)
-        target = PIBT_Lock::g_cold_goals[curr_id];
-    #endif
 
 #if ORZ_PIBT_DIRECTION_BLOCK
 	// If scheduler flagged this agent as direction-blocked, force wait
