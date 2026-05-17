@@ -5,9 +5,10 @@
 #include "utils.h"
 #include "config.h"
 #include "centerline.h"
-#include "connection_exempt.h"
 #include "pibt_lock.h"
-#include "idle_cap.h"
+#include "cold_zone_pushout.h"
+#include "narrow_passage.h"
+#include "control_zone.h"
 #include <unordered_set>
 #include <unordered_map>
 #include <algorithm>
@@ -19,6 +20,10 @@
 #include <cmath>
 
 namespace strategy_centerline {
+
+// ====== PIBT recursive search depth (from config.h) ======
+// Used in my_pibt.cpp via extern; also constexpr here for easy reference.
+#define WITHIN_SAME_ZONE(a_si, t_si)  ((a_si) >= 0 && (t_si) == (a_si))
 
 static constexpr int ROUTE_THRESHOLD = 20;
 static constexpr float DIVISOR_TABLE[21] = {
@@ -40,7 +45,9 @@ static inline int zh_dist(int z1, int z2) {
 void init(SharedEnvironment* env) {
     g_env = env;
     Centerline::init(env);
-    printf("CENTERLINE_SCHEDULER V4: agents=%d, map=%dx%d, squares=%zu, cells=%zu\n",
+    NarrowPassage::init(env);
+    ControlZone::init(env);
+    printf("CENTERLINE_SCHEDULER V5: agents=%d, map=%dx%d, squares=%zu, cells=%zu\n",
            env->num_of_agents, env->cols, env->rows,
            Centerline::g_main_squares.size(), Centerline::g_centerline_cells.size());
 }
@@ -69,7 +76,7 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
                 int hi = std::max(prev_m, tm);
                 for (auto& sq : Centerline::g_main_squares) {
                     if (sq.min_m <= hi && sq.max_m >= lo &&
-                        sq.density >= EXEMPT_MAIN_THR) {
+                        sq.density >= ZONE_HARD_CAP) {
                         exempt = false;
                         break;
                     }
@@ -159,24 +166,37 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
             return total;
         }
 
-        // === Escape exemption: compute only remaining errands ===
-        if (start_idx == 0) {
-            float esc_score = connection_exempt_score(a_loc, locs,
-                Centerline::g_zone24_density, Centerline::g_zone_has_main,
-                g_env->map, g_env->cols, nzc);
-            if (esc_score > 0) return esc_score;
-        } else {
-            std::vector<int> remaining(locs.begin() + start_idx, locs.end());
-            float esc_score = connection_exempt_score(a_loc, remaining,
-                Centerline::g_zone24_density, Centerline::g_zone_has_main,
-                g_env->map, g_env->cols, nzc);
-            if (esc_score > 0) return esc_score;
-        }
     }
+
+    // === (connection_exempt removed — cold zone pushout handles escape) ===
 
     int a_m, a_b;
     Centerline::project(a_loc, a_m, a_b);
     if (a_m < 0) return 1.0f;
+
+    // ====== Same-zone exemption: agent and task share a main zone → skip direction lock & density cap ======
+    // 如果 agent 当前位置和 task 在同一个 main square（或1D投影落在同一个square范围），
+    // 那么 agent 不应被推到冷区，应当去做任务。不然永远被推来推去。
+    bool same_zone_exempt = false;
+    int a_si = (a_loc >= 0 && a_loc < (int)Centerline::g_cell_square.size()) ? Centerline::g_cell_square[a_loc] : -1;
+    if (a_si >= 0) {
+        // 方法1: same cell square index
+        for (size_t ei = (size_t)start_idx; ei < locs.size(); ei++) {
+            int t_si = (locs[ei] >= 0 && locs[ei] < (int)Centerline::g_cell_square.size()) ? Centerline::g_cell_square[locs[ei]] : -1;
+            if (t_si == a_si) { same_zone_exempt = true; break; }
+        }
+        // 方法2: 1D投影落在同一个 square 的 main_dist 范围内
+        if (!same_zone_exempt) {
+            for (size_t ei = (size_t)start_idx; ei < locs.size(); ei++) {
+                int tm2, tb2;
+                Centerline::project(locs[ei], tm2, tb2);
+                if (tm2 >= 0 && tm2 >= Centerline::g_main_squares[a_si].min_m &&
+                    tm2 <= Centerline::g_main_squares[a_si].max_m) {
+                    same_zone_exempt = true; break;
+                }
+            }
+        }
+    }
 
     float total_score = 0;
     int prev_m = a_m, prev_b = a_b;
@@ -192,15 +212,19 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
 
         // Square overlap check + direction lock (V4: path-aligned squares)
         int d_max_seg = 0;
-        for (auto& sq : Centerline::g_main_squares) {
+        // 用g_cell_square找到agent所在的MainSquare（与base_score顶部同区检测一致）
+        int agent_sq_idx = Centerline::g_cell_square[a_loc];
+        for (size_t si = 0; si < Centerline::g_main_squares.size(); si++) {
+            auto& sq = Centerline::g_main_squares[si];
             if (sq.min_m <= hi && sq.max_m >= lo) {
                 int d = sq.density;  // V4: square density (not grid zone)
-                // Direction lock: block tasks against flow
-                if (ORZ_DIRECTION_LOCK && sq.lock_dir != 0 && sq.lock_dir != intent)
-                    return -1e9f;
-                // Hard density cap: block ALL tasks through severely congested zones
-                if (USE_DENSITY_CAP_80 && d >= DENSITY_CAP_80)
-                    return -1e9f;
+                // 同区豁免：只豁免agent所在的方块（g_cell_square匹配），路径上的其他方块仍需遵守方向锁
+                bool sq_is_agent_zone = same_zone_exempt && agent_sq_idx >= 0 && (int)si == agent_sq_idx;
+                if (!sq_is_agent_zone) {
+                    // Direction lock: block tasks against flow
+                    if (ORZ_DIRECTION_LOCK && sq.lock_dir != 0 && sq.lock_dir != intent)
+                        return -1e9f;
+                }
                 if (d > d_max_seg) d_max_seg = d;
             }
         }
@@ -229,6 +253,12 @@ void pre_tick_updates(SharedEnvironment* env) {
 void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule) {
     auto t0 = std::chrono::steady_clock::now();
     pre_tick_updates(env);
+    
+    // Edge lane pushout (new v5 architecture): 每tick管控决策
+    if (USE_COLD_ZONE_PUSHOUT) {
+        ControlZone::update(env);
+    }
+    
     auto t_pre = std::chrono::steady_clock::now();
 
     // Init parked task tracking
@@ -282,16 +312,8 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
                 free_tasks.erase(parked);
                 it = free_agents.erase(it);
             } else {
+                // Parked task not feasible → let PIBT wait (don't block the agent)
                 proposed_schedule[a] = -1;
-                // V4 exemption: agent already in hot V4 square → let them escape
-                int a_si = Centerline::g_cell_square[a_loc];
-                bool v4_exempt = (a_si >= 0 && a_si < (int)Centerline::g_main_squares.size() &&
-                    Centerline::g_main_squares[a_si].density >= PREDICT_THRESHOLD);
-                if (v4_exempt) {
-                    PIBT_Lock::g_agent_blocked[a] = 0;
-                } else {
-                    PIBT_Lock::g_agent_blocked[a] = 1;
-                }
                 ++it;
             }
             continue;
@@ -318,29 +340,12 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
                 tasks_by_zone[zid(env->task_pool[tid].locations[0], cols)].push_back(tid);
         }
 
-        // ===== Idle cap: 8-bucket uniform capacity control =====
-        int idle_budgets[IDLE_NUM_BUCKETS] = {0};
-        if (USE_IDLE_CAP) {
-            IdleCap::compute_budgets(env, idle_budgets);
-            std::shuffle(free_agents.begin(), free_agents.end(),
-                         std::mt19937(std::random_device{}()));
-        }
-
         std::unordered_set<int> done_tasks;
         for (int a : free_agents) {
             if (proposed_schedule[a] >= 0) continue;
 
             int a_loc = env->curr_states[a].location;
             int a_zone = zid(a_loc, cols);
-
-            // ===== Idle cap: check bucket budget =====
-            if (USE_IDLE_CAP) {
-                int b = IdleCap::get_bucket(env, a);
-                if (idle_budgets[b] <= 0) {
-                    proposed_schedule[a] = -1;
-                    continue;
-                }
-            }
 
             int best_tid = -1;
             float best_score = -1e9f;
@@ -378,14 +383,10 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
                     if (tit->second.locations.size() > 2)
                         g_parked_task[a] = best_tid;
                     else
-                        g_parked_task[a] = -1;  // clear stale park
+                        g_parked_task[a] = -1;
                 }
                 done_tasks.insert(best_tid);
                 phase2_assigned++;
-                if (USE_IDLE_CAP) {
-                    int b = IdleCap::get_bucket(env, a);
-                    idle_budgets[b]--;
-                }
             } else {
                 proposed_schedule[a] = -1;
             }
@@ -396,88 +397,7 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
         if (proposed_schedule[a] < 0) proposed_schedule[a] = -1;
     }
     
-    // === V4: Predictive cut-off (查前方2个方块, 30硬限制) ===
-    {
-        static int s_debug_tick = 0;
-        int blocked_count = 0, total_checked = 0, hot_sq_count = 0;
-        for (auto& sq : Centerline::g_main_squares)
-            if (sq.density >= PREDICT_THRESHOLD) hot_sq_count++;
-            
-        // PREDICT_HORIZON defined in config.h
-            
-        for (int a = 0; a < env->num_of_agents && a < PIBT_Lock::MAX_AGENTS; a++) {
-            if (PIBT_Lock::g_agent_blocked[a]) continue;
-            int cur = env->curr_task_schedule[a];
-            if (cur < 0) continue;
-            total_checked++;
-            
-            int a_loc = env->curr_states[a].location;
-            if (a_loc < 0) continue;
-            
-            // === 1D投影: agent→main_dist, task→main_dist ===
-            int a_m, a_b, t_m = -1;
-            Centerline::project(a_loc, a_m, a_b);
-            if (a_m < 0) continue;
-            auto tit = env->task_pool.find(cur);
-            if (tit != env->task_pool.end()) {
-                for (auto& loc : tit->second.locations) {
-                    int tm, tb;
-                    Centerline::project(loc, tm, tb);
-                    if (tm >= 0) { t_m = tm; break; }
-                }
-            }
-            if (t_m < 0) continue;
-            int lo = std::min(a_m, t_m);
-            int hi = std::max(a_m, t_m);
-            
-            // 找到agent的main_dist落在哪个方块
-            int si = -1;
-            for (size_t i = 0; i < Centerline::g_main_squares.size(); i++) {
-                if (a_m >= Centerline::g_main_squares[i].min_m &&
-                    a_m <= Centerline::g_main_squares[i].max_m) {
-                    si = (int)i; break;
-                }
-            }
-            if (si < 0) continue;
-            
-            // agent移动方向
-            int dir = (t_m > a_m) ? +1 : -1;
-            
-            // 检查agent自身方块是否热（豁免）
-            bool in_hot_itself = (Centerline::g_main_squares[si].density >= PREDICT_THRESHOLD);
-            
-            // 自适应阻尼: 只检查 agent→task 区间内的前方方块
-            int max_ahead_d = 0;
-            for (int ahead = 1; ahead <= PREDICT_HORIZON; ahead++) {
-                int ni = si + ahead * dir;
-                if (ni >= 0 && ni < (int)Centerline::g_main_squares.size()) {
-                    // 只截停：这个方块在 agent→task 的路径上
-                    auto& sq = Centerline::g_main_squares[ni];
-                    if (sq.min_m <= hi && sq.max_m >= lo) {
-                        if (sq.density > max_ahead_d) max_ahead_d = sq.density;
-                    }
-                }
-            }
-            
-            if (max_ahead_d > PREDICT_THRESHOLD && !in_hot_itself) {
-                float excess = (float)(max_ahead_d - PREDICT_THRESHOLD);
-                float block_prob = std::min(1.0f, excess / (float)ADAPTIVE_RANGE);
-                int hash_val = (a * 7 + step * 13) % 100;
-                if (hash_val < (int)(block_prob * 100)) {
-                    PIBT_Lock::g_agent_blocked[a] = 1;
-                    blocked_count++;
-                }
-            }
-        }
-        
-        int max_sq_d = 0;
-        for (auto& sq : Centerline::g_main_squares)
-            if (sq.density > max_sq_d) max_sq_d = sq.density;
-        if (++s_debug_tick % 50 == 1) {
-            printf("[V4 CUT] tick=%d, checked=%d, blocked=%d, hot_sq=%d, max_d=%d\n",
-                   s_debug_tick, total_checked, blocked_count, hot_sq_count, max_sq_d);
-        }
-    }
+
     
     // Timeout detection
     static int timeout_counter = 0;

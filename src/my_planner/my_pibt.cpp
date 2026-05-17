@@ -3,6 +3,7 @@
 
 #include "my_pibt.h"
 #include "../pibt_lock.h"
+#include "../config.h"
 #include <cstdint>
 
 
@@ -10,6 +11,8 @@
 
 
 namespace MyPlanner{
+// Static recursion depth tracker (per-planning-episode, resets at top-level call)
+static int g_pibt_recursion_depth = 0;
 int get_gp_h(TrajLNS& lns, int ai, int target){
     int min_heuristic;
 
@@ -48,6 +51,15 @@ bool causalMY_PIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
 	  ){
 	// The MY_PIBT works like a causal MY_PIBT when using MAPF-T model. But a normal MY_PIBT when using MAPF model.
 	
+	// ====== Recursion depth limit (configurable, config.h: PIBT_RECURSION_DEPTH) ======
+	g_pibt_recursion_depth++;
+	if (g_pibt_recursion_depth > PIBT_RECURSION_DEPTH) {
+		g_pibt_recursion_depth--;
+		next_states.at(curr_id) = State(prev_states[curr_id].location, -1, -1);
+		decision.at(prev_states[curr_id].location) = curr_id;
+		return false;
+	}
+	
 	assert(next_states[curr_id].location == -1);
     int prev_loc = prev_states[curr_id].location;
 	int prev_orientation = prev_states[curr_id].orientation;
@@ -61,6 +73,7 @@ bool causalMY_PIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
 #if ORZ_PIBT_DIRECTION_BLOCK
 	// If scheduler flagged this agent as direction-blocked, force wait
 	if (curr_id < PIBT_Lock::MAX_AGENTS && PIBT_Lock::g_agent_blocked[curr_id]) {
+		g_pibt_recursion_depth--;
 		next_states.at(curr_id) = State(prev_loc, -1, -1);
 		decision.at(prev_loc) = curr_id;
 		return false;
@@ -126,16 +139,20 @@ bool causalMY_PIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
         if (prev_decision.at(next.location) != -1 && 
 			next_states.at(prev_decision.at(next.location)).location == -1){
             int lower_id = prev_decision.at(next.location);
+			int old_depth = g_pibt_recursion_depth;
             if (!causalMY_PIBT(lower_id,curr_id,prev_states,next_states, prev_decision,decision, occupied,lns)){
+				g_pibt_recursion_depth = old_depth;  // restore depth on failure branch
 				continue;
             }
         }
 
+		g_pibt_recursion_depth--;
         return true;
     }
 
     next_states.at(curr_id) = State(prev_loc,-1 ,-1);;
-    decision.at(prev_loc) = curr_id;     
+    decision.at(prev_loc) = curr_id;
+	g_pibt_recursion_depth--;
     return false;
 }
 

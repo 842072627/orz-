@@ -22,6 +22,8 @@
 #include "my_const.h"
 #include <chrono>
 #include <iostream>
+#include "../pibt_lock.h"
+#include "../config.h"
 
 
 namespace MyPlanner{
@@ -121,11 +123,25 @@ namespace MyPlanner{
 
             // set goals/tasks
             if (env->goal_locations[i].empty()){
+#if USE_COLD_ZONE_PUSHOUT
+                int cold_goal = PIBT_Lock::g_cold_goals[i];
+                trajLNS.tasks[i] = (cold_goal >= 0) ? cold_goal : dummy_goals.at(i);
+#else
                 trajLNS.tasks[i] = dummy_goals.at(i);
+#endif
                 local_priority[i] = p_copy[i];
             }
             else{
+#if USE_COLD_ZONE_PUSHOUT
+                if (PIBT_Lock::g_agent_bound_lock[i] >= 0) {
+                    int cold_goal = PIBT_Lock::g_cold_goals[i];
+                    trajLNS.tasks[i] = (cold_goal >= 0) ? cold_goal : env->goal_locations[i].front().first;
+                } else {
+                    trajLNS.tasks[i] = env->goal_locations[i].front().first;
+                }
+#else
                 trajLNS.tasks[i] = env->goal_locations[i].front().first;
+#endif
             }
 
             // detect guide-path mismatch (goal changed or no guide path)
@@ -195,11 +211,25 @@ namespace MyPlanner{
         for(int i=0; i<env->num_of_agents; i++)
         {
             if (env->goal_locations[i].empty()){
+#if USE_COLD_ZONE_PUSHOUT
+                int cold_goal = PIBT_Lock::g_cold_goals[i];
+                trajLNS.tasks[i] = (cold_goal >= 0) ? cold_goal : dummy_goals.at(i);
+#else
                 trajLNS.tasks[i] = dummy_goals.at(i);
+#endif
                 local_priority[i] = p_copy[i];
             }
             else{
+#if USE_COLD_ZONE_PUSHOUT
+                if (PIBT_Lock::g_agent_bound_lock[i] >= 0) {
+                    int cold_goal = PIBT_Lock::g_cold_goals[i];
+                    trajLNS.tasks[i] = (cold_goal >= 0) ? cold_goal : env->goal_locations[i].front().first;
+                } else {
+                    trajLNS.tasks[i] = env->goal_locations[i].front().first;
+                }
+#else
                 trajLNS.tasks[i] = env->goal_locations[i].front().first;
+#endif
                 local_priority[i] = local_priority[i] + 1;
             }
 
