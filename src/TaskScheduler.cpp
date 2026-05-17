@@ -24,9 +24,21 @@ namespace PIBT_Lock
 {
     int g_seg_lock_dir[PIBT_Lock::MAX_SEGMENTS] = {0};
     int g_agent_blocked[PIBT_Lock::MAX_AGENTS] = {0};
-    int g_parked_task[PIBT_Lock::MAX_AGENTS];
+    // g_parked_task moved above (declared before ColdGoalInit block)
     int g_cold_goals[PIBT_Lock::MAX_AGENTS];
     int g_agent_bound_lock[PIBT_Lock::MAX_AGENTS];
+    int g_parked_task[PIBT_Lock::MAX_AGENTS]; // moved down, needs init
+
+    // Initialize shared state (garbage prevention)
+    static struct ColdGoalInit {
+        ColdGoalInit() {
+            for (int i = 0; i < MAX_AGENTS; i++) {
+                g_cold_goals[i] = -1;
+                g_agent_bound_lock[i] = -1;
+                g_parked_task[i] = -1;
+            }
+        }
+    } s_cold_goal_init;
 }
 
 void TaskScheduler::initialize(int preprocess_time_limit)
