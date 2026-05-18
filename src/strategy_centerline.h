@@ -223,6 +223,7 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
 #endif
 
         float seg_cost = (float)(std::abs(prev_m - tm) + std::abs(prev_b - tb)) + 1.0f;
+        if (seg_cost > MAX_TASK_SEGMENT_DIST) return -1e9f;  // cut off long errand transitions
         float seg_score = 1.0f / seg_cost;
 
         if (d_max_seg > ROUTE_THRESHOLD) {

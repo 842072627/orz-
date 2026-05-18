@@ -420,7 +420,7 @@ void init(const SharedEnvironment* env) {
     g_mp_lock_dir.assign(g_mp_count, 0);
     g_mp_main_dist.assign(g_mp_count, -1);
     g_mp_width.assign(g_mp_count, 0);
-    g_mp_threshold.assign(g_mp_count, 15);
+    g_mp_threshold.assign(g_mp_count, ZONE_HARD_CAP);
     
     // Compute tangents for centerline cells
     int n_cl = (int)g_centerline_cells.size();
@@ -445,9 +445,11 @@ void init(const SharedEnvironment* env) {
         auto md_it = cl_main.find(g_mp_loc[si]);
         g_mp_main_dist[si] = (md_it != cl_main.end()) ? md_it->second : -1;
         
+#if USE_MP_WIDTH
         // Compute corridor width at this main point
         g_mp_width[si] = perp_width_at(env, g_mp_loc[si], cl_tdx[idx], cl_tdy[idx]);
         g_mp_threshold[si] = classify_threshold(g_mp_width[si]);
+#endif
     }
 #endif
 

@@ -34,6 +34,9 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 // ========== 1D main zone exemption ==========
 #define EXEMPT_MAIN_THR  23      // main zone density below this exempts task from direction lock
 
+// ========== Task segment distance limit ==========
+#define MAX_TASK_SEGMENT_DIST  1500   // max main+branch distance for a single errand transition
+
 // ========== Hard density limit ==========
 #define USE_DENSITY_CAP_80  true   // enable hard density cap
 #define DENSITY_CAP_80      100     // zones at this density block ALL tasks (regardless of direction)
