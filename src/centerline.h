@@ -54,6 +54,22 @@ static std::vector<ZoneMainRange> g_zone_ranges;
 static std::vector<int> g_zone_direction;    // [+1/-1/0] per zone
 static std::vector<int> g_agent_last_main;   // [aid] = last tick main distance
 
+// ====== 1D main point system (MP_STEP=16 sampling along centerline) ======
+#if USE_MP_DENSITY
+static constexpr int MP_STEP = 16;           // step between main points
+static int g_mp_count = 0;                   // number of main points
+static std::vector<int> g_mp_loc;            // [si] = physical location of main point
+static std::vector<int> g_mp_density;        // [si] = agents in 24x24 square centered on main point
+static std::vector<int> g_mp_flow_right;     // [si] = flow towards larger main_dist
+static std::vector<int> g_mp_flow_left;      // [si] = flow towards smaller main_dist
+static std::vector<int> g_mp_dir;            // [si] = majority flow direction (+1/-1/0)
+static std::vector<int> g_mp_lock_dir;       // [si] = direction lock (+1/-1/0)
+static std::vector<int> g_mp_main_dist;      // [si] = main_dist of this main point
+static std::vector<int> g_mp_width;          // [si] = perpendicular corridor width at this MP
+static std::vector<int> g_mp_threshold;      // [si] = density threshold for direction lock (15/20/30)
+#endif
+
+
 // ====== BFS distance-to-wall ======
 static void compute_dtw(const SharedEnvironment* env, std::vector<int>& dtw) {
     int total = env->rows * env->cols;
@@ -71,45 +87,63 @@ static void compute_dtw(const SharedEnvironment* env, std::vector<int>& dtw) {
     }
 }
 
-// ====== A* widest path (fallback only) ======
+// ====== A* widest path (robust version using BFS from Python heatmap_gen) ======
 static void widest_path(const SharedEnvironment* env, const std::vector<int>& dtw,
                          int sx, int sy, int gx, int gy, std::vector<int>& path) {
     int total = env->rows * env->cols;
-    std::vector<int> best_clr(total, -1), came_from(total, -1);
-    struct Node {
-        int prio, clr, steps, loc;
-        bool operator>(const Node& o) const { return prio > o.prio; }
-    };
-    std::priority_queue<Node, std::vector<Node>, std::greater<Node>> pq;
-    int sloc = sy * g_cols + sx;
-    int sc = dtw[sloc];
-    pq.push({-sc*10000, sc, 0, sloc});
-    best_clr[sloc] = sc;
-    int gloc = gy * g_cols + gx;
-    while (!pq.empty()) {
-        auto n = pq.top(); pq.pop();
-        if (n.loc == gloc) break;
-        if (n.clr < best_clr[n.loc]) continue;
-        int r = n.loc / g_cols, c = n.loc % g_cols;
-        int neigh[4] = {n.loc - g_cols, n.loc + g_cols, n.loc - 1, n.loc + 1};
-        for (int nn : neigh) {
-            if (nn >= 0 && nn < total && env->map[nn] == 0) {
-                int nc = std::min(n.clr, dtw[nn]);
-                if (nc > best_clr[nn]) {
-                    best_clr[nn] = nc;
-                    came_from[nn] = n.loc;
-                    int nr = nn / g_cols, nc2 = nn % g_cols;
-                    pq.push({-nc*10000 + n.steps+1 + std::abs(nc2-gx) + std::abs(nr-gy), nc, n.steps+1, nn});
-                }
+    int sloc = sy * g_cols + sx, gloc = gy * g_cols + gx;
+    
+    // BFS to find shortest path first
+    std::vector<int> came_from(total, -1);
+    std::queue<int> q;
+    q.push(sloc);
+    came_from[sloc] = sloc;
+    while (!q.empty()) {
+        int cur = q.front(); q.pop();
+        if (cur == gloc) break;
+        int r = cur / g_cols, c = cur % g_cols;
+        int neigh[4] = {cur - g_cols, cur + g_cols, cur - 1, cur + 1};
+        for (int n : neigh) {
+            if (n >= 0 && n < total && env->map[n] == 0 && came_from[n] == -1) {
+                came_from[n] = cur;
+                q.push(n);
             }
         }
     }
+    
+    // Reconstruct shortest path
     path.clear();
+    if (came_from[gloc] == -1) { path.push_back(sloc); path.push_back(gloc); return; }
     int cur = gloc;
-    while (cur != -1 && cur != sloc) { path.push_back(cur); cur = came_from[cur]; }
-    if (cur == sloc) path.push_back(sloc);
+    while (cur != sloc) { path.push_back(cur); cur = came_from[cur]; }
+    path.push_back(sloc);
     std::reverse(path.begin(), path.end());
-    if (path.size() < 2) { path.clear(); path.push_back(sloc); path.push_back(gloc); }
+    
+    // Widen: for each cell on shortest path with dtw <= 2, try to find a better (wider) cell
+    // nearby with same shortest-path distance. This is a simple local optimization.
+    int w = g_cols;
+    for (size_t i = 1; i + 1 < path.size(); i++) {
+        int loc = path[i];
+        if (dtw[loc] > 2) continue;
+        int best_loc = loc, best_clr = dtw[loc];
+        int r = loc / w, c = loc % w;
+        // Search within radius 3 for a cell with higher DTW
+        for (int dr = -3; dr <= 3; dr++) {
+            for (int dc = -3; dc <= 3; dc++) {
+                if (std::abs(dr) + std::abs(dc) < 1 || std::abs(dr) + std::abs(dc) > 3) continue;
+                int nr = r + dr, nc = c + dc;
+                int nloc = nr * w + nc;
+                if (nr >= 0 && nr < env->rows && nc >= 0 && nc < w && env->map[nloc] == 0) {
+                    if (dtw[nloc] > best_clr) { best_clr = dtw[nloc]; best_loc = nloc; }
+                }
+            }
+        }
+        path[i] = best_loc;
+    }
+    
+    // Dedup consecutive duplicates
+    auto end = std::unique(path.begin(), path.end());
+    path.erase(end, path.end());
 }
 
 // ====== Smooth path (fallback) ======
@@ -138,6 +172,46 @@ static void smooth_path(const SharedEnvironment* env, const std::vector<int>& ra
             }
         if (out.empty() || out.back() != best_loc) out.push_back(best_loc);
     }
+}
+
+// ====== Perpendicular corridor width at a cell ======
+// Scans perpendicular to tangent direction, counts steps to wall on each side.
+// Skips "hole" cells (both tangent sides are walls within 1 step).
+static int perp_width_at(const SharedEnvironment* env, int loc, int tdx, int tdy) {
+    int px = -tdy, py = tdx;  // perpendicular direction
+    int cols = env->cols, rows = env->rows;
+    int gx = loc % cols, gy = loc / cols;
+    
+    // is_hole: if both tangent sides are walls within 1 step from (x,y) → hole
+    auto is_hole = [&](int x, int y) -> bool {
+        for (int s : {-1, 1}) {
+            int nx = x + tdx * s, ny = y + tdy * s;
+            if (nx >= 0 && nx < cols && ny >= 0 && ny < rows && env->map[ny * cols + nx] == 0)
+                return false;  // open on at least one side
+        }
+        return true;
+    };
+    
+    int d1 = 0, d2 = 0;
+    for (int side : {-1, 1}) {
+        int d = 0;
+        for (int k = 1; k < 100; k++) {
+            int nx = gx + px * side * k, ny = gy + py * side * k;
+            if (nx < 0 || nx >= cols || ny < 0 || ny >= rows || env->map[ny * cols + nx] != 0)
+                break;
+            if (is_hole(nx, ny)) continue;
+            d++;
+        }
+        if (side == -1) d1 = d; else d2 = d;
+    }
+    return d1 + d2 + 1;
+}
+
+// Classify corridor width into threshold
+static int classify_threshold(int width) {
+    if (width <= 8)  return 15;  // SUPER_NARROW + NARROW
+    if (width <= 12) return 20;  // MODERATE
+    return 30;  // WIDE + VERY_WIDE
 }
 
 // ====== Project loc -> (main, branch) ======
@@ -194,7 +268,14 @@ void init(const SharedEnvironment* env) {
     }
     if (start_loc < 0 || goal_loc < 0) { return; }
     
-    // BFS shortest path
+    std::vector<int> base_path;
+#if USE_MP_CENTERLINE
+    // Phase 1: A* widest path (matches heatmap analysis compute_centerline)
+    widest_path(env, dtw, start_loc % g_cols, start_loc / g_cols,
+                goal_loc % g_cols, goal_loc / g_cols, base_path);
+    { std::vector<int> tmp; smooth_path(env, base_path, tmp); base_path.swap(tmp); }
+#else
+    // Original: BFS shortest path (preserved, can revert by setting USE_MP_CENTERLINE=0)
     std::vector<int> came_from(total, -1);
     std::queue<int> bfs_q;
     bfs_q.push(start_loc);
@@ -209,18 +290,17 @@ void init(const SharedEnvironment* env) {
             if (n >= 0 && n < total && env->map[n] == 0 && came_from[n] == -1)
                 { came_from[n] = cur; bfs_q.push(n); }
     }
-    
-    std::vector<int> base_path;
     if (found_goal < 0) {
         widest_path(env, dtw, start_loc % g_cols, start_loc / g_cols,
                     goal_loc % g_cols, goal_loc / g_cols, base_path);
-        smooth_path(env, base_path, base_path);
+        { std::vector<int> tmp; smooth_path(env, base_path, tmp); base_path.swap(tmp); }
     } else {
         int cur = goal_loc;
         while (cur != start_loc) { base_path.push_back(cur); cur = came_from[cur]; }
         base_path.push_back(start_loc);
         std::reverse(base_path.begin(), base_path.end());
     }
+#endif
     
     // Wall correction: for DTW <= 2 cells, scan radius 5, snap to best zone
     std::unordered_map<int, int> corrected_map; // path_idx -> corrected loc
@@ -329,6 +409,48 @@ void init(const SharedEnvironment* env) {
             g_zone_is_main[zid] = 1;
     }
     
+#if USE_MP_DENSITY
+    // Initialize 1D main points: sample centerline at MP_STEP intervals
+    g_mp_count = (int)g_centerline_cells.size() / MP_STEP + 1;
+    g_mp_loc.assign(g_mp_count, -1);
+    g_mp_density.assign(g_mp_count, 0);
+    g_mp_flow_right.assign(g_mp_count, 0);
+    g_mp_flow_left.assign(g_mp_count, 0);
+    g_mp_dir.assign(g_mp_count, 0);
+    g_mp_lock_dir.assign(g_mp_count, 0);
+    g_mp_main_dist.assign(g_mp_count, -1);
+    g_mp_width.assign(g_mp_count, 0);
+    g_mp_threshold.assign(g_mp_count, 15);
+    
+    // Compute tangents for centerline cells
+    int n_cl = (int)g_centerline_cells.size();
+    std::vector<int> cl_tdx(n_cl, 0), cl_tdy(n_cl, 0);
+    for (int i = 0; i < n_cl; i++) {
+        int r1, c1, r2, c2;
+        if (i == 0) {
+            r1 = g_centerline_cells[0] / g_cols; c1 = g_centerline_cells[0] % g_cols;
+            r2 = g_centerline_cells[1] / g_cols; c2 = g_centerline_cells[1] % g_cols;
+        } else {
+            r1 = g_centerline_cells[i-1] / g_cols; c1 = g_centerline_cells[i-1] % g_cols;
+            r2 = g_centerline_cells[i] / g_cols; c2 = g_centerline_cells[i] % g_cols;
+        }
+        cl_tdx[i] = c2 - c1;  // x difference (col)
+        cl_tdy[i] = r2 - r1;  // y difference (row)
+    }
+    
+    for (int si = 0; si < g_mp_count; si++) {
+        int idx = si * MP_STEP;
+        if (idx >= n_cl) idx = n_cl - 1;
+        g_mp_loc[si] = g_centerline_cells[idx];
+        auto md_it = cl_main.find(g_mp_loc[si]);
+        g_mp_main_dist[si] = (md_it != cl_main.end()) ? md_it->second : -1;
+        
+        // Compute corridor width at this main point
+        g_mp_width[si] = perp_width_at(env, g_mp_loc[si], cl_tdx[idx], cl_tdy[idx]);
+        g_mp_threshold[si] = classify_threshold(g_mp_width[si]);
+    }
+#endif
+
     build_zone_ranges();
     g_ready = true;
 }
@@ -475,6 +597,120 @@ inline void update_zone_direction(const SharedEnvironment* env) {
         PIBT_Lock::g_seg_lock_dir[si] = g_zone_ranges[si].lock_dir;
 }
 
+
+// ====== 1D main point density (tick call) ======
+#if USE_MP_DENSITY
+inline void update_mp_density(const SharedEnvironment* env) {
+    const int HW = 12;  // half-width of 24x24 square
+    std::fill(g_mp_density.begin(), g_mp_density.end(), 0);
+    for (int a = 0; a < env->num_of_agents; a++) {
+        int loc = env->curr_states[a].location;
+        if (loc < 0) continue;
+        int ar = loc / env->cols, ac = loc % env->cols;
+        for (int si = 0; si < g_mp_count; si++) {
+            int mloc = g_mp_loc[si];
+            if (mloc < 0) continue;
+            int mr = mloc / env->cols, mc = mloc % env->cols;
+            if (std::abs(ar - mr) < HW && std::abs(ac - mc) < HW)
+                g_mp_density[si]++;
+        }
+    }
+}
+#endif
+
+// ====== 1D main point direction (tick call) ======
+#if USE_MP_DENSITY && ORZ_DIRECTION_LOCK
+inline void update_mp_direction(const SharedEnvironment* env) {
+    // 1. Flow tracking per main point
+    std::fill(g_mp_flow_right.begin(), g_mp_flow_right.end(), 0);
+    std::fill(g_mp_flow_left.begin(), g_mp_flow_left.end(), 0);
+    
+    // Need g_agent_last_main for flow tracking - reuse it
+    static int last_got_busy = []() {
+        if ((int)Centerline::g_agent_last_main.size() < 10000) {
+            g_agent_last_main.assign(10000, -1);
+        }
+        return 0;
+    }();
+    (void)last_got_busy;
+    
+    if ((int)g_agent_last_main.size() < env->num_of_agents)
+        g_agent_last_main.assign(env->num_of_agents + 1000, -1);
+    
+    for (int a = 0; a < env->num_of_agents; a++) {
+        int loc = env->curr_states[a].location;
+        if (loc < 0) continue;
+        int m = -1, b;
+        project(loc, m, b);
+        int prev_m = g_agent_last_main[a];
+        g_agent_last_main[a] = m;
+        if (prev_m >= 0 && m >= 0) {
+            // Find nearest main point
+            int best_si = 0, best_d = 999999;
+            for (int si = 0; si < g_mp_count; si++) {
+                int mloc = g_mp_loc[si];
+                if (mloc < 0) continue;
+                int mr = mloc / env->cols, mc = mloc % env->cols;
+                int dr = std::abs(loc / env->cols - mr);
+                int dc = std::abs(loc % env->cols - mc);
+                int d = dr + dc;
+                if (d < best_d) { best_d = d; best_si = si; }
+            }
+            if (m - prev_m >= 1)      g_mp_flow_right[best_si]++;
+            else if (m - prev_m <= -1) g_mp_flow_left[best_si]++;
+        }
+    }
+    
+    // 2. Majority flow direction
+    std::fill(g_mp_dir.begin(), g_mp_dir.end(), 0);
+    for (int si = 0; si < g_mp_count; si++) {
+        if (g_mp_density[si] < 10) continue;  // DIR_THRESHOLD equivalent
+        g_mp_dir[si] = (g_mp_flow_right[si] > g_mp_flow_left[si]) ? +1 :
+                       (g_mp_flow_left[si] > g_mp_flow_right[si]) ? -1 : 0;
+    }
+    
+    // 3. Direction lock: width-adaptive thresholds
+    std::fill(g_mp_lock_dir.begin(), g_mp_lock_dir.end(), 0);
+    
+    // Phase 1: Hot zones set direction (follow neighbor if exists)
+    for (int si = 0; si < g_mp_count; si++) {
+        if (g_mp_density[si] < g_mp_threshold[si]) continue;
+        if (g_mp_dir[si] != 0) continue;
+        int neighbor_dir = 0;
+        for (int d = -2; d <= 2; d++) {
+            int ni = si + d;
+            if (ni < 0 || ni >= g_mp_count) continue;
+            if (g_mp_dir[ni] != 0) { neighbor_dir = g_mp_dir[ni]; break; }
+        }
+        g_mp_dir[si] = (neighbor_dir != 0) ? neighbor_dir : 
+                       ((si * 1103515245 + 12345) % 2 ? +1 : -1);
+    }
+    
+    // Phase 2: Hot zones lock themselves and neighbors
+    for (int si = 0; si < g_mp_count; si++) {
+        if (g_mp_density[si] < g_mp_threshold[si]) continue;
+        int dir = g_mp_dir[si];
+        for (int d = -2; d <= 2; d++) {
+            int ni = si + d;
+            if (ni < 0 || ni >= g_mp_count) continue;
+            g_mp_lock_dir[ni] = dir;
+        }
+    }
+    
+    // Phase 3: Individual unlock
+    for (int si = 0; si < g_mp_count; si++) {
+        if (g_mp_lock_dir[si] == 0) continue;
+        if (g_mp_density[si] >= g_mp_threshold[si]) continue;  // Hot stays locked
+        bool nearby_hot = false;
+        for (int d = -2; d <= 2; d++) {
+            int ni = si + d;
+            if (ni < 0 || ni >= g_mp_count) continue;
+            if (g_mp_density[ni] >= g_mp_threshold[ni]) { nearby_hot = true; break; }
+        }
+        if (!nearby_hot) g_mp_lock_dir[si] = 0;
+    }
+}
+#endif
 } // namespace Centerline
 
 

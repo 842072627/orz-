@@ -193,6 +193,21 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
 
         // Zone overlap check + direction lock (any seg locked = whole task blocked)
         int d_max_seg = 0;
+#if USE_MP_DIRECTION
+        // Phase 3: direction lock based on main point density
+        for (int si = 0; si < Centerline::g_mp_count; si++) {
+            int si_m = Centerline::g_mp_main_dist[si];
+            if (si_m < 0) continue;
+            if (si_m < lo) continue;
+            if (si_m > hi) continue;  // main point is within the path segment
+            int d = Centerline::g_mp_density[si];
+            if (Centerline::g_mp_lock_dir[si] != 0 && Centerline::g_mp_lock_dir[si] != intent)
+                return -1e9f;
+            if (USE_DENSITY_CAP_80 && d >= DENSITY_CAP_80)
+                return -1e9f;
+            if (d > d_max_seg) d_max_seg = d;
+        }
+#else
         for (auto& zr : Centerline::g_zone_ranges) {
             if (zr.min_m <= hi && zr.max_m >= lo) {
                 int d = Centerline::g_zone24_density[zr.zone_id];
@@ -205,6 +220,7 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
                 if (d > d_max_seg) d_max_seg = d;
             }
         }
+#endif
 
         float seg_cost = (float)(std::abs(prev_m - tm) + std::abs(prev_b - tb)) + 1.0f;
         float seg_score = 1.0f / seg_cost;
@@ -225,6 +241,10 @@ void pre_tick_updates(SharedEnvironment* env) {
     Centerline::update_zone24_density(env);
     Centerline::update_zone_threshold();
     Centerline::update_zone_direction(env);
+#if USE_MP_DENSITY
+    Centerline::update_mp_density(env);
+    Centerline::update_mp_direction(env);
+#endif
 }
 
 void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule) {

@@ -50,5 +50,10 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 
 #define ORZ_DIRECTION_LOCK        true    // direction lock (lock_dir)
 
+// ========== Migration flags (step-by-step control, can revert individually) ==========
+#define USE_MP_CENTERLINE   1   // Phase 1: A* widest path centerline (matches heatmap analysis)
+#define USE_MP_DENSITY      1   // Phase 2: 1D main point density (24x24 squares centered on main points)
+#define USE_MP_DIRECTION    1   // Phase 3: 1D direction lock based on main point density
+
 // Runtime strategy name getter (used by TaskScheduler.cpp)
 inline std::string get_orz_strategy() { return ORZ_SCHEDULER; }
