@@ -36,7 +36,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 
 // ========== Task segment distance limit ==========
 #define MAX_TASK_SEGMENT_DIST  99999   // max main+branch distance for a single errand transition
-#define GARBAGE_TASK_RATIO      0.0f // bottom fraction of free tasks deferred each tick (0.0-1.0)
+#define GARBAGE_TASK_RATIO      0.05f // bottom fraction of free tasks deferred each tick (0.0-1.0)
 
 // ========== Hard density limit ==========
 #define USE_DENSITY_CAP_80  true   // enable hard density cap
