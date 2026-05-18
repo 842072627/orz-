@@ -334,6 +334,7 @@ void init(const SharedEnvironment* env) {
 }
 
 // ====== 2D zone density (tick call) ======
+static int g_debug_step = 0;
 inline void update_zone24_density(const SharedEnvironment* env) {
     int n24c = (env->cols + 23) / 24, n24r = (env->rows + 23) / 24;
     if ((int)g_zone24_density.size() != n24c * n24r)
@@ -347,6 +348,42 @@ inline void update_zone24_density(const SharedEnvironment* env) {
         int zi = (r / 24) * n24c + (c / 24);
         if (zi >= 0 && zi < (int)g_zone24_density.size())
             g_zone24_density[zi]++;
+    }
+    // DEBUG: every 200 steps, dump all main zone densities
+    g_debug_step++;
+    if (g_debug_step % 200 == 0) {
+        printf("\n=== ZONE_DENSITY at step %d ===\n", g_debug_step);
+        int total_main = 0, hot_main = 0, hot_count[101] = {0};
+        for (size_t z = 0; z < g_zone_is_main.size(); z++) {
+            if (!g_zone_is_main[z]) continue;
+            total_main++;
+            int d = g_zone24_density[z];
+            if (d >= 15) hot_main++;
+            int cap = (d > 100) ? 100 : d;
+            hot_count[cap]++;
+        }
+        printf("main_zones_total=%d hot_main(>=15)=%d (%.1f%%)\n", total_main, hot_main, 100.0f*hot_main/total_main);
+        printf("density_distribution: ");
+        for (int i = 0; i <= 100; i++) {
+            if (hot_count[i] > 0) printf("%d:%d ", i, hot_count[i]);
+        }
+        printf("\n");
+        // Print densities for first 15 and last 15 main zones
+        printf("main_zone_densities_first15: ");
+        int printed = 0;
+        for (size_t z = 0; z < g_zone_is_main.size() && printed < 15; z++) {
+            if (!g_zone_is_main[z]) continue;
+            printf("%d[%d] ", (int)z, g_zone24_density[z]);
+            printed++;
+        }
+        printf("\nmain_zone_densities_last15: ");
+        printed = 0;
+        for (int z = (int)g_zone_is_main.size()-1; z >= 0 && printed < 15; z--) {
+            if (!g_zone_is_main[z]) continue;
+            printf("%d[%d] ", z, g_zone24_density[z]);
+            printed++;
+        }
+        printf("\n===========================\n");
     }
 }
 
