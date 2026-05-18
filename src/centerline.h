@@ -711,6 +711,35 @@ inline void update_mp_direction(const SharedEnvironment* env) {
     }
 }
 #endif
+// ====== NDJSON MP analysis log (one line per snapshot, no cleanup) ======
+#if USE_MP_DENSITY
+// call-counter based: plan() called every 10 ticks, snapshot every 10 calls = 100 ticks
+static FILE* g_mp_log_f = NULL;
+
+static void mp_log_flush() {
+    static int call_counter = 0;
+    call_counter++;
+    if (call_counter <= 1) {
+        // first call: init
+        g_mp_log_f = fopen("C:\\Users\\Administrator\\.openclaw\\workspace\\mp_analysis.ndjson", "w");
+        if (!g_mp_log_f) return;
+        fprintf(g_mp_log_f, "{\"e\":\"init\",\"c\":%d,\"l\":[", g_mp_count);
+        for(int si=0;si<g_mp_count;si++){if(si)fputc(',',g_mp_log_f);fprintf(g_mp_log_f,"%d",g_mp_loc[si]);}
+        fprintf(g_mp_log_f,"]}\n");
+        fflush(g_mp_log_f);
+    }
+    // snapshot every 10 calls (= every ~100 timesteps)
+    if ((call_counter - 1) % 10 != 0) return;
+    int tick = (call_counter - 1) * 10;
+    fprintf(g_mp_log_f, "{\"t\":%d,\"d\":[", tick);
+    for(int si=0;si<g_mp_count;si++){if(si)fputc(',',g_mp_log_f);fprintf(g_mp_log_f,"%d",g_mp_density[si]);}
+    fprintf(g_mp_log_f,"],\"l\":[");
+    for(int si=0;si<g_mp_count;si++){if(si)fputc(',',g_mp_log_f);fprintf(g_mp_log_f,"%d",g_mp_lock_dir[si]);}
+    fprintf(g_mp_log_f,"]}\n");
+    fflush(g_mp_log_f);
+}
+#endif
+
 } // namespace Centerline
 
 

@@ -1,4 +1,4 @@
-﻿// strategy_centerline.h â€” V3: zone-range + per-errand scoring
+// strategy_centerline.h — V3: zone-range + per-errand scoring
 #include "TaskScheduler.h"
 #include "scheduler.h"
 #include "const.h"
@@ -45,7 +45,7 @@ void init(SharedEnvironment* env) {
            Centerline::g_zone_ranges.size(), Centerline::g_centerline_cells.size());
 }
 
-// Per-errand base_score using zoneâ†’main range overlap
+// Per-errand base_score using zone→main range overlap
 static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) {
     (void)step;
     auto it = g_env->task_pool.find(tid);
@@ -244,6 +244,7 @@ void pre_tick_updates(SharedEnvironment* env) {
 #if USE_MP_DENSITY
     Centerline::update_mp_density(env);
     Centerline::update_mp_direction(env);
+    Centerline::mp_log_flush();
 #endif
 }
 
@@ -305,9 +306,9 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
             } else {
                 proposed_schedule[a] = -1;
                 if (USE_HOT_ZONE_EXEMPT && is_hot_zone_exempt(a_loc, env)) {
-                    PIBT_Lock::g_agent_blocked[a] = 0; // 热区豁免：不堵
+                    PIBT_Lock::g_agent_blocked[a] = 0; // ????:??
                 } else {
-                    PIBT_Lock::g_agent_blocked[a] = 1; // 原逻辑：原地等
+                    PIBT_Lock::g_agent_blocked[a] = 1; // ???:???
                 }
                 ++it;
             }
