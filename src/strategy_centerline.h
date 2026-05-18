@@ -223,7 +223,10 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
 #endif
 
         float seg_cost = (float)(std::abs(prev_m - tm) + std::abs(prev_b - tb)) + 1.0f;
-        if (seg_cost > MAX_TASK_SEGMENT_DIST) return -1e9f;  // cut off long errand transitions
+        if (seg_cost > MAX_TASK_SEGMENT_DIST) {
+            float penalty = (float)MAX_TASK_SEGMENT_DIST / seg_cost;
+            seg_score *= penalty * penalty;  // quadratic penalty, never blocks completely
+        }
         float seg_score = 1.0f / seg_cost;
 
         if (d_max_seg > ROUTE_THRESHOLD) {
@@ -245,7 +248,7 @@ void pre_tick_updates(SharedEnvironment* env) {
 #if USE_MP_DENSITY
     Centerline::update_mp_density(env);
     Centerline::update_mp_direction(env);
-    Centerline::mp_log_flush();
+    // Centerline::mp_log_flush();  // disabled for cloud
 #endif
 }
 
@@ -345,6 +348,30 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
                          std::mt19937(std::random_device{}()));
         }
 
+        // ===== Garbage pile: defer bottom 15%% of free tasks by internal distance =====
+        std::unordered_set<int> deferred_tasks;
+        if ((int)free_tasks.size() > 10) {
+            std::vector<int> sorted_free(free_tasks.begin(), free_tasks.end());
+            std::unordered_map<int, int> task_internal_dist;
+            for (int tid : free_tasks) {
+                auto it = env->task_pool.find(tid);
+                if (it == env->task_pool.end() || it->second.locations.size() < 2) {
+                    task_internal_dist[tid] = 0; continue;
+                }
+                int m1, b1, m2, b2;
+                Centerline::project(it->second.locations[0], m1, b1);
+                Centerline::project(it->second.locations[1], m2, b2);
+                task_internal_dist[tid] = (m1 >= 0 && m2 >= 0) ?
+                    std::abs(m1 - m2) + std::abs(b1 - b2) : 99999;
+            }
+            std::sort(sorted_free.begin(), sorted_free.end(), [&](int a, int b) {
+                return task_internal_dist[a] < task_internal_dist[b];
+            });
+            int deferred_cnt = std::max(1, (int)(sorted_free.size() * GARBAGE_TASK_RATIO));
+            for (int i = (int)sorted_free.size() - deferred_cnt; i < (int)sorted_free.size(); i++)
+                deferred_tasks.insert(sorted_free[i]);
+        }
+
         std::unordered_set<int> done_tasks;
         for (int a : free_agents) {
             if (proposed_schedule[a] >= 0) continue;
@@ -364,18 +391,29 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
             int best_tid = -1;
             float best_score = -1e9f;
 
-            // Same zone
+            // Same zone (skip garbage if possible, fallback otherwise)
             auto sz = tasks_by_zone.find(a_zone);
             if (sz != tasks_by_zone.end()) {
+                float best_fallback = -1e9f; int fallback_tid = -1;
                 for (int tid : sz->second) {
                     if (done_tasks.count(tid)) continue;
                     float bs = base_score(a_loc, tid, step);
-                    if (bs > best_score) { best_score = bs; best_tid = tid; }
+                    if (bs > best_score) {
+                        if (!deferred_tasks.count(tid)) {
+                            best_score = bs; best_tid = tid;
+                        } else if (bs > best_fallback) {
+                            best_fallback = bs; fallback_tid = tid;
+                        }
+                    }
+                }
+                if (best_tid < 0 && fallback_tid >= 0) {
+                    best_tid = fallback_tid; best_score = best_fallback;
                 }
             }
 
             // Adjacent zones
             if (best_tid < 0) {
+                float best_fallback = -1e9f; int fallback_tid = -1;
                 for (auto& kv : tasks_by_zone) {
                     int z2 = kv.first;
                     if (z2 == a_zone || zh_dist(a_zone, z2) > 1) continue;
@@ -384,8 +422,17 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
                         if (done_tasks.count(tid)) continue;
                         if (checked++ >= 20) break;
                         float bs = base_score(a_loc, tid, step);
-                        if (bs > best_score) { best_score = bs; best_tid = tid; }
+                        if (bs > best_score) {
+                            if (!deferred_tasks.count(tid)) {
+                                best_score = bs; best_tid = tid;
+                            } else if (bs > best_fallback) {
+                                best_fallback = bs; fallback_tid = tid;
+                            }
+                        }
                     }
+                }
+                if (best_tid < 0 && fallback_tid >= 0) {
+                    best_tid = fallback_tid; best_score = best_fallback;
                 }
             }
 
