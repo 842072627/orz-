@@ -17,18 +17,7 @@
 
 namespace Centerline {
 
-static constexpr int CONGESTION_THRESHOLD = 40;
-static constexpr int DEADLOCK_THRESHOLD = 90;
-static constexpr float MAX_PENALTY = 100.0f;
-// ====== Adaptive per-zone threshold (dynamic, replaces HOT_BLOCK + CONTAIN_LOCK) ======
-// target = 30.5 - density*0.5, thr = (thr*9 + target)/10, clamp(12,35)
-static constexpr float ADAPTIVE_ALPHA = 0.1f;
-static constexpr int ADAPTIVE_FLOOR = 12;
-static constexpr int ADAPTIVE_CEIL = 35;
-// Expansion for direction lock neighbors
-static constexpr int CONTAIN_EXPAND = 1;
-static constexpr int HOT_LOCK_COOLDOWN = 30;
-static constexpr int DIR_THRESHOLD = 10;
+// Direction lock uses ZONE_HARD_CAP (from config.h) as activation threshold
 
 // ====== State ======
 static bool g_ready = false;
@@ -38,21 +27,18 @@ static std::vector<int> g_main_dist;        // [loc] = main distance
 static std::vector<int> g_branch_dist;      // [loc] = branch distance
 static std::vector<int> g_centerline_cells;  // centerline cell locations
 static std::vector<int> g_zone24_density;   // 2D heatmap: [zid] = live agent count
-static std::vector<int> g_zone_threshold;    // [zid] = adaptive threshold (12-35)
 static int g_n24c = 0, g_n24r = 0;
 static std::vector<int> g_zone_is_main;     // [zid] = 1 if centerline passes through
 
-// ====== Zoneâ†’main range (replaces segment system) ======
+// ====== Zone->main range (maps each zone to its centerline main_dist range) ======
 struct ZoneMainRange {
-    int zone_id;      // 24Ã—24 zone id
+    int zone_id;      // 24x24 zone id
     int min_m, max_m; // centerline cells' main_dist range in this zone
-    int lock_dir;     // direction lock: +1/-1/0
 };
 static std::vector<ZoneMainRange> g_zone_ranges;
 
-// ====== Direction tracking ======
-static std::vector<int> g_zone_direction;    // [+1/-1/0] per zone
-static std::vector<int> g_agent_last_main;   // [aid] = last tick main distance
+// ====== 1D main point agent tracking (prev tick main_dist for flow) ======
+static std::vector<int> g_mp_agent_last_main;   // [aid] = last tick main distance
 
 // ====== 1D main point system (MP_STEP=16 sampling along centerline) ======
 #if USE_MP_DENSITY
@@ -65,7 +51,6 @@ static std::vector<int> g_mp_flow_left;      // [si] = flow towards smaller main
 static std::vector<int> g_mp_dir;            // [si] = majority flow direction (+1/-1/0)
 static std::vector<int> g_mp_lock_dir;       // [si] = direction lock (+1/-1/0)
 static std::vector<int> g_mp_main_dist;      // [si] = main_dist of this main point
-static std::vector<int> g_mp_width;          // [si] = perpendicular corridor width at this MP
 static std::vector<int> g_mp_threshold;      // [si] = density threshold for direction lock (15/20/30)
 #endif
 
@@ -238,8 +223,7 @@ inline void build_zone_ranges() {
     g_zone_ranges.clear();
     for (auto& kv : zm_range) {
         int zid = kv.first;
-        int lock = (zid >= 0 && zid < (int)g_zone_direction.size()) ? g_zone_direction[zid] : 0;
-        g_zone_ranges.push_back({zid, kv.second.first, kv.second.second, lock});
+        g_zone_ranges.push_back({zid, kv.second.first, kv.second.second});
     }
     std::sort(g_zone_ranges.begin(), g_zone_ranges.end(),
         [](const ZoneMainRange& a, const ZoneMainRange& b) { return a.min_m < b.min_m; });
@@ -397,7 +381,6 @@ void init(const SharedEnvironment* env) {
     
     // Zone density init
     g_zone24_density.assign(g_n24c * g_n24r, 0);
-    g_zone_threshold.assign(g_n24c * g_n24r, ZONE_HARD_CAP);
     
     
     // Mark main-line zones
@@ -419,7 +402,6 @@ void init(const SharedEnvironment* env) {
     g_mp_dir.assign(g_mp_count, 0);
     g_mp_lock_dir.assign(g_mp_count, 0);
     g_mp_main_dist.assign(g_mp_count, -1);
-    g_mp_width.assign(g_mp_count, 0);
     g_mp_threshold.assign(g_mp_count, ZONE_HARD_CAP);
     
     // Compute tangents for centerline cells
@@ -444,12 +426,8 @@ void init(const SharedEnvironment* env) {
         g_mp_loc[si] = g_centerline_cells[idx];
         auto md_it = cl_main.find(g_mp_loc[si]);
         g_mp_main_dist[si] = (md_it != cl_main.end()) ? md_it->second : -1;
-        
-#if USE_MP_WIDTH
-        // Compute corridor width at this main point
-        g_mp_width[si] = perp_width_at(env, g_mp_loc[si], cl_tdx[idx], cl_tdy[idx]);
-        g_mp_threshold[si] = classify_threshold(g_mp_width[si]);
-#endif
+        // Threshold stays at ZONE_HARD_CAP (15) for all main points
+        // Phase 4 (USE_MP_WIDTH) would enable width-adaptive thresholds here
     }
 #endif
 
@@ -474,131 +452,8 @@ inline void update_zone24_density(const SharedEnvironment* env) {
     }
 }
 
-// Fixed threshold = 24 (static, no adaptation)
-inline void update_zone_threshold() {
-    int nz = (int)g_zone24_density.size();
-    if ((int)g_zone_threshold.size() != nz)
-        g_zone_threshold.assign(nz, ZONE_HARD_CAP);
-    else
-        std::fill(g_zone_threshold.begin(), g_zone_threshold.end(), ZONE_HARD_CAP);
-}
-
-// ====== Zone direction (tick call) ======
-inline void update_zone_direction(const SharedEnvironment* env) {
-    int rows = env->rows, cols = env->cols;
-    int n24c = (cols + 23) / 24, n24r = (rows + 23) / 24;
-    int nz = n24c * n24r;
-    if ((int)g_zone_direction.size() != nz) g_zone_direction.assign(nz, 0);
-    if ((int)g_agent_last_main.size() != env->num_of_agents) g_agent_last_main.assign(env->num_of_agents, -1);
-    
-    std::vector<int> flow_right(nz, 0), flow_left(nz, 0);
-    for (int a = 0; a < env->num_of_agents; a++) {
-        int loc = env->curr_states[a].location;
-        if (loc < 0) continue;
-        int r = loc / cols, c = loc % cols;
-        int zi = (r / 24) * n24c + (c / 24);
-        if (zi < 0 || zi >= nz) continue;
-        int m = -1, b;
-        project(loc, m, b);
-        int prev_m = g_agent_last_main[a];
-        g_agent_last_main[a] = m;
-        if (prev_m >= 0 && m >= 0) {
-            if (m - prev_m >= 1)      flow_right[zi]++;
-            else if (m - prev_m <= -1) flow_left[zi]++;
-        }
-    }
-    
-    // Zone direction: majority flow
-    std::fill(g_zone_direction.begin(), g_zone_direction.end(), 0);
-    for (int zi = 0; zi < nz; zi++) {
-        if (g_zone24_density[zi] < DIR_THRESHOLD) continue;
-        g_zone_direction[zi] = (flow_right[zi] > flow_left[zi]) ? +1 :
-                               (flow_left[zi] > flow_right[zi]) ? -1 : 0;
-    }
-    
-    if (ORZ_DIRECTION_LOCK) {
-        // Non-merge direction lock: each hot zone locks itself \u00b1CONTAIN_EXPAND neighbors independently
-        // No block merging - each zone unlocks when its neighborhood cools down
-        
-        // Phase 1: Hot zones set direction (follow neighbor direction if exists)
-        for (int i = 0; i < (int)g_zone_ranges.size(); i++) {
-            int zid = g_zone_ranges[i].zone_id;
-            if (zid < 0 || zid >= nz || g_zone24_density[zid] < ZONE_HARD_CAP)
-                continue;
-            if (g_zone_direction[zid] != 0)
-                continue; // Already has direction
-            
-            // Look for neighbor direction (first come first serve)
-            int neighbor_dir = 0;
-            for (int d = -CONTAIN_EXPAND; d <= CONTAIN_EXPAND; d++) {
-                int ni = i + d;
-                if (ni < 0 || ni >= (int)g_zone_ranges.size()) continue;
-                int nzid = g_zone_ranges[ni].zone_id;
-                if (nzid >= 0 && g_zone_direction[nzid] != 0) {
-                    neighbor_dir = g_zone_direction[nzid];
-                    break;
-                }
-            }
-            
-            if (neighbor_dir != 0) {
-                g_zone_direction[zid] = neighbor_dir;
-            } else {
-                // Use own flow direction
-                int dir = (g_zone_direction[zid] != 0) ? g_zone_direction[zid] : 0;
-                if (dir == 0)
-                    dir = (zid * 1103515245 + 12345) % 2 ? +1 : -1;
-                g_zone_direction[zid] = dir;
-            }
-        }
-        
-        // Phase 2: Hot zones lock themselves and neighbors unconditionally
-        for (int i = 0; i < (int)g_zone_ranges.size(); i++) {
-            int zid = g_zone_ranges[i].zone_id;
-            if (zid < 0 || zid >= nz || g_zone24_density[zid] < ZONE_HARD_CAP)
-                continue;
-            int dir = g_zone_direction[zid];
-            for (int d = -CONTAIN_EXPAND; d <= CONTAIN_EXPAND; d++) {
-                int ni = i + d;
-                if (ni < 0 || ni >= (int)g_zone_ranges.size()) continue;
-                int nzid = g_zone_ranges[ni].zone_id;
-                if (nzid >= 0)
-                    g_zone_direction[nzid] = dir;
-            }
-        }
-        
-        // Phase 3: Individual unlock - each zone checks its own neighborhood
-        for (int i = 0; i < (int)g_zone_ranges.size(); i++) {
-            int zid = g_zone_ranges[i].zone_id;
-            if (zid < 0 || zid >= nz) continue;
-            if (g_zone24_density[zid] >= ZONE_HARD_CAP)
-                continue; // Hot zone stays locked
-            
-            bool nearby_hot = false;
-            for (int d = -CONTAIN_EXPAND; d <= CONTAIN_EXPAND; d++) {
-                int ni = i + d;
-                if (ni < 0 || ni >= (int)g_zone_ranges.size()) continue;
-                int nzid = g_zone_ranges[ni].zone_id;
-                if (nzid >= 0 && g_zone24_density[nzid] >= ZONE_HARD_CAP) {
-                    nearby_hot = true;
-                    break;
-                }
-            }
-            if (!nearby_hot)
-                g_zone_direction[zid] = 0; // Unlock
-        }
-    }
-    // Sync zone direction to zone_ranges
-    // Sync zone direction to zone_ranges
-    for (auto& zr : g_zone_ranges) {
-        if (zr.zone_id >= 0 && zr.zone_id < nz)
-            zr.lock_dir = ORZ_DIRECTION_LOCK ? g_zone_direction[zr.zone_id] : 0;
-    }
-    
-    // Sync to PIBT lock
-    for (size_t si = 0; si < g_zone_ranges.size() && si < (size_t)PIBT_Lock::MAX_SEGMENTS; si++)
-        PIBT_Lock::g_seg_lock_dir[si] = g_zone_ranges[si].lock_dir;
-}
-
+// Zone direction: now handled by 1D MP system (update_mp_direction)
+// Old 2D zone direction system removed in cleanup.
 
 // ====== 1D main point density (tick call) ======
 #if USE_MP_DENSITY
@@ -621,31 +476,22 @@ inline void update_mp_density(const SharedEnvironment* env) {
 #endif
 
 // ====== 1D main point direction (tick call) ======
-#if USE_MP_DENSITY && ORZ_DIRECTION_LOCK
+#if USE_MP_DENSITY
 inline void update_mp_direction(const SharedEnvironment* env) {
     // 1. Flow tracking per main point
     std::fill(g_mp_flow_right.begin(), g_mp_flow_right.end(), 0);
     std::fill(g_mp_flow_left.begin(), g_mp_flow_left.end(), 0);
     
-    // Need g_agent_last_main for flow tracking - reuse it
-    static int last_got_busy = []() {
-        if ((int)Centerline::g_agent_last_main.size() < 10000) {
-            g_agent_last_main.assign(10000, -1);
-        }
-        return 0;
-    }();
-    (void)last_got_busy;
-    
-    if ((int)g_agent_last_main.size() < env->num_of_agents)
-        g_agent_last_main.assign(env->num_of_agents + 1000, -1);
+    if ((int)g_mp_agent_last_main.size() < env->num_of_agents)
+        g_mp_agent_last_main.assign(env->num_of_agents + 1000, -1);
     
     for (int a = 0; a < env->num_of_agents; a++) {
         int loc = env->curr_states[a].location;
         if (loc < 0) continue;
         int m = -1, b;
         project(loc, m, b);
-        int prev_m = g_agent_last_main[a];
-        g_agent_last_main[a] = m;
+        int prev_m = g_mp_agent_last_main[a];
+        g_mp_agent_last_main[a] = m;
         if (prev_m >= 0 && m >= 0) {
             // Find nearest main point
             int best_si = 0, best_d = 999999;

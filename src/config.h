@@ -52,12 +52,10 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define USE_IDLE_CAP         true   // 空载容量控制开关
 #define IDLE_RATIO           0.4f  // 最大活跃 agent 比例 (0~1.0)
 
-#define ORZ_DIRECTION_LOCK        true    // direction lock (lock_dir)
-
 // ========== Migration flags (step-by-step control, can revert individually) ==========
 #define USE_MP_CENTERLINE   1   // Phase 1: A* widest path centerline (matches heatmap analysis)
 #define USE_MP_DENSITY      1   // Phase 2: 1D main point density (24x24 squares centered on main points)
-#define USE_MP_DIRECTION    1   // Phase 3: 1D direction lock based on main point density
+// Phase 3: 1D direction lock based on main point density - always enabled (MP-based)
 #define USE_MP_WIDTH        0   // Phase 4: corridor width-adaptive direction lock thresholds
 
 // Runtime strategy name getter (used by TaskScheduler.cpp)
