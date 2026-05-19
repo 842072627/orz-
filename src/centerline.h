@@ -52,6 +52,8 @@ static std::vector<int> g_mp_dir;            // [si] = majority flow direction (
 static std::vector<int> g_mp_lock_dir;       // [si] = direction lock (+1/-1/0)
 static std::vector<int> g_mp_main_dist;      // [si] = main_dist of this main point
 static std::vector<int> g_mp_threshold;      // [si] = density threshold for direction lock (15/20/30)
+static std::vector<float> g_mp_future_right;   // [si] = distance-weighted future flow right
+static std::vector<float> g_mp_future_left;    // [si] = distance-weighted future flow left
 #endif
 
 
@@ -403,6 +405,8 @@ void init(const SharedEnvironment* env) {
     g_mp_lock_dir.assign(g_mp_count, 0);
     g_mp_main_dist.assign(g_mp_count, -1);
     g_mp_threshold.assign(g_mp_count, ZONE_HARD_CAP);
+    g_mp_future_right.assign(g_mp_count, 0.0f);
+    g_mp_future_left.assign(g_mp_count, 0.0f);
     
     // Compute tangents for centerline cells
     int n_cl = (int)g_centerline_cells.size();
@@ -434,6 +438,9 @@ void init(const SharedEnvironment* env) {
     build_zone_ranges();
     g_ready = true;
 }
+
+// ====== Future flow stub (data filled by strategy_centerline) ======
+inline void compute_future_direction() {}
 
 // ====== 2D zone density (tick call) ======
 inline void update_zone24_density(const SharedEnvironment* env) {

@@ -8,6 +8,7 @@
 #include "connection_exempt.h"
 #include "pibt_lock.h"
 #include "idle_cap.h"
+#include "corridor_log.h"
 #include <unordered_set>
 #include <unordered_map>
 #include <algorithm>
@@ -43,6 +44,14 @@ void init(SharedEnvironment* env) {
     printf("CENTERLINE_SCHEDULER: agents=%d, map=%dx%d, zones=%zu, cells=%zu\n",
            env->num_of_agents, env->cols, env->rows,
            Centerline::g_zone_ranges.size(), Centerline::g_centerline_cells.size());
+    
+    CorridorLog::init();
+    CorridorLog::set_env(env);
+    static bool atexit_reg = false;
+    if (!atexit_reg) {
+        atexit_reg = true;
+        std::atexit([]() { CorridorLog::close(); });
+    }
 }
 
 // Per-errand base_score using zone→main range overlap
@@ -193,6 +202,7 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
 
         // Zone overlap check + direction lock (any seg locked = whole task blocked)
         int d_max_seg = 0;
+        float best_align = 1.0f;  // 1.0 = perfectly aligned, lower = against flow
         // Direction lock based on 1D main point density
         for (int si = 0; si < Centerline::g_mp_count; si++) {
             int si_m = Centerline::g_mp_main_dist[si];
@@ -205,6 +215,14 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
             if (USE_DENSITY_CAP_80 && d >= DENSITY_CAP_80)
                 return -1e9f;
             if (d > d_max_seg) d_max_seg = d;
+            // Future flow alignment: prefer tasks WITH predicted traffic
+            float fr = Centerline::g_mp_future_right[si];
+            float fl = Centerline::g_mp_future_left[si];
+            float total = fr + fl;
+            if (total >= 2.0f) {
+                float align = (intent > 0) ? (fr / total) : (fl / total);
+                if (align < best_align) best_align = align;
+            }
         }
 
         float seg_cost = (float)(std::abs(prev_m - tm) + std::abs(prev_b - tb)) + 1.0f;
@@ -218,6 +236,13 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
             int idx = (d_max_seg > 40) ? 40 : d_max_seg;
             seg_score /= DIVISOR_TABLE[idx - ROUTE_THRESHOLD];
         }
+        
+        // Future flow alignment: penalize tasks against predicted traffic
+        if (best_align < 0.7f) {
+            float pen = (0.7f - best_align) * 0.5f;  // align=0.7→0%, align=0.4→15%, align=0.0→35%
+            if (pen > 0.35f) pen = 0.35f;
+            seg_score *= (1.0f - pen);
+        }
 
         total_score += seg_score;
         prev_m = tm; prev_b = tb;
@@ -229,7 +254,43 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
 void pre_tick_updates(SharedEnvironment* env) {
     Centerline::update_zone24_density(env);
     Centerline::update_mp_density(env);
+    
+    // Compute future flow: agent pos→task path projection, distance-weighted
+    std::fill(Centerline::g_mp_future_right.begin(), Centerline::g_mp_future_right.end(), 0.0f);
+    std::fill(Centerline::g_mp_future_left.begin(), Centerline::g_mp_future_left.end(), 0.0f);
+    for (int a = 0; a < env->num_of_agents; a++) {
+        int tid = env->curr_task_schedule[a];
+        if (tid < 0) continue;
+        auto it = env->task_pool.find(tid);
+        if (it == env->task_pool.end() || it->second.locations.empty()) continue;
+        int a_loc = env->curr_states[a].location;
+        if (a_loc < 0) continue;
+        int m_curr = -1, b_curr;
+        Centerline::project(a_loc, m_curr, b_curr);
+        if (m_curr < 0) continue;
+        int prev_m = m_curr;
+        for (int loc : it->second.locations) {
+            int tm, tb;
+            Centerline::project(loc, tm, tb);
+            if (tm < 0) continue;
+            int lo = std::min(prev_m, tm);
+            int hi = std::max(prev_m, tm);
+            int dir = (tm > prev_m) ? 1 : -1;
+            for (int si = 0; si < Centerline::g_mp_count; si++) {
+                int sm = Centerline::g_mp_main_dist[si];
+                if (sm < lo || sm > hi) continue;
+                if ((dir > 0 && sm <= m_curr) || (dir < 0 && sm >= m_curr)) continue;
+                float w = 1.0f / (1.0f + (float)std::abs(sm - m_curr));
+                if (dir > 0) Centerline::g_mp_future_right[si] += w;
+                else Centerline::g_mp_future_left[si] += w;
+            }
+            prev_m = tm;
+        }
+    }
+    
+    Centerline::compute_future_direction();
     Centerline::update_mp_direction(env);
+    CorridorLog::log_tick(env);
 }
 
 void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule) {
