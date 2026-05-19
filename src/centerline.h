@@ -563,14 +563,17 @@ inline void update_mp_direction(const SharedEnvironment* env) {
         }
     }
     
-    // Phase 3: Unlock when density drops OR density is extreme (safety)
+    // Phase 3: Individual unlock
     for (int si = 0; si < g_mp_count; si++) {
         if (g_mp_lock_dir[si] == 0) continue;
-        if (g_mp_density[si] < g_mp_threshold[si]) {
-            g_mp_lock_dir[si] = 0;  // Normal: density cooled down
-        } else if (g_mp_density[si] >= 50) {
-            g_mp_lock_dir[si] = 0;  // Safety: extreme density, force unlock
+        if (g_mp_density[si] >= g_mp_threshold[si]) continue;  // Hot stays locked
+        bool nearby_hot = false;
+        for (int d = -2; d <= 2; d++) {
+            int ni = si + d;
+            if (ni < 0 || ni >= g_mp_count) continue;
+            if (g_mp_density[ni] >= g_mp_threshold[ni]) { nearby_hot = true; break; }
         }
+        if (!nearby_hot) g_mp_lock_dir[si] = 0;
     }
 }
 #endif
