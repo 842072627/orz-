@@ -36,7 +36,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 
 // ========== Task segment distance limit ==========
 #define MAX_TASK_SEGMENT_DIST  99999   // max main+branch distance for a single errand transition
-#define GARBAGE_TASK_RATIO      0.05f // bottom fraction of free tasks deferred each tick (0.0-1.0)
+#define GARBAGE_TASK_RATIO      0.0f // bottom fraction of free tasks deferred each tick (0.0-1.0)
 
 // ========== Hard density limit ==========
 #define USE_DENSITY_CAP_80  true   // enable hard density cap
@@ -49,7 +49,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define USE_HOT_ZONE_EXEMPT  true   // 热区豁免：热区agent不设block，PIBT正常执行
 
 // ========== Idle capacity control (空载均匀空跑) ==========
-#define USE_IDLE_CAP         true   // 空载容量控制开关
+#define USE_IDLE_CAP         false   // 空载容量控制开关
 #define IDLE_RATIO           0.4f  // 最大活跃 agent 比例 (0~1.0)
 
 // ========== Migration flags (step-by-step control, can revert individually) ==========

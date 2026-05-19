@@ -524,6 +524,17 @@ inline void update_mp_direction(const SharedEnvironment* env) {
                        (g_mp_flow_left[si] > g_mp_flow_right[si]) ? -1 : 0;
     }
     
+    // Future flow direction override
+    for (int si = 0; si < g_mp_count; si++) {
+        float total = g_mp_future_right[si] + g_mp_future_left[si];
+        if (total >= 3.0f) {
+            if (g_mp_future_right[si] > g_mp_future_left[si] * 1.5f)
+                g_mp_dir[si] = +1;
+            else if (g_mp_future_left[si] > g_mp_future_right[si] * 1.5f)
+                g_mp_dir[si] = -1;
+        }
+    }
+    
     // 3. Direction lock: width-adaptive thresholds
     std::fill(g_mp_lock_dir.begin(), g_mp_lock_dir.end(), 0);
     
@@ -552,17 +563,13 @@ inline void update_mp_direction(const SharedEnvironment* env) {
         }
     }
     
-    // Phase 3: Individual unlock
+    // Phase 3: Unlock when future traffic fades (regardless of current density)
     for (int si = 0; si < g_mp_count; si++) {
         if (g_mp_lock_dir[si] == 0) continue;
-        if (g_mp_density[si] >= g_mp_threshold[si]) continue;  // Hot stays locked
-        bool nearby_hot = false;
-        for (int d = -2; d <= 2; d++) {
-            int ni = si + d;
-            if (ni < 0 || ni >= g_mp_count) continue;
-            if (g_mp_density[ni] >= g_mp_threshold[ni]) { nearby_hot = true; break; }
+        float total_future = g_mp_future_right[si] + g_mp_future_left[si];
+        if (total_future < 2.0f) {
+            g_mp_lock_dir[si] = 0;
         }
-        if (!nearby_hot) g_mp_lock_dir[si] = 0;
     }
 }
 #endif
