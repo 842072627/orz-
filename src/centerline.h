@@ -563,12 +563,13 @@ inline void update_mp_direction(const SharedEnvironment* env) {
         }
     }
     
-    // Phase 3: Unlock when future traffic fades (regardless of current density)
+    // Phase 3: Unlock when density drops OR density is extreme (safety)
     for (int si = 0; si < g_mp_count; si++) {
         if (g_mp_lock_dir[si] == 0) continue;
-        float total_future = g_mp_future_right[si] + g_mp_future_left[si];
-        if (total_future < 2.0f) {
-            g_mp_lock_dir[si] = 0;
+        if (g_mp_density[si] < g_mp_threshold[si]) {
+            g_mp_lock_dir[si] = 0;  // Normal: density cooled down
+        } else if (g_mp_density[si] >= 50) {
+            g_mp_lock_dir[si] = 0;  // Safety: extreme density, force unlock
         }
     }
 }
