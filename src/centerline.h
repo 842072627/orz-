@@ -552,7 +552,8 @@ inline void update_mp_direction(const SharedEnvironment* env) {
                        ((si * 1103515245 + 12345) % 2 ? +1 : -1);
     }
     
-    // Phase 2: Hot zones lock themselves and neighbors
+        // Phase 2: Hot zones lock - density threshold OR future flow prediction
+    // First pass: density >= threshold (existing)
     for (int si = 0; si < g_mp_count; si++) {
         if (g_mp_density[si] < g_mp_threshold[si]) continue;
         int dir = g_mp_dir[si];
@@ -562,18 +563,38 @@ inline void update_mp_direction(const SharedEnvironment* env) {
             g_mp_lock_dir[ni] = dir;
         }
     }
-    
-    // Phase 3: Individual unlock
+    // Second pass: density < threshold but future flow >= 5.0 (predictive lock)
     for (int si = 0; si < g_mp_count; si++) {
-        if (g_mp_lock_dir[si] == 0) continue;
-        if (g_mp_density[si] >= g_mp_threshold[si]) continue;  // Hot stays locked
-        bool nearby_hot = false;
+        if (g_mp_lock_dir[si] != 0) continue;
+        float total = g_mp_future_right[si] + g_mp_future_left[si];
+        if (total < 5.0f) continue;
+        int dir = (g_mp_future_right[si] > g_mp_future_left[si]) ? +1 : -1;
         for (int d = -2; d <= 2; d++) {
             int ni = si + d;
             if (ni < 0 || ni >= g_mp_count) continue;
-            if (g_mp_density[ni] >= g_mp_threshold[ni]) { nearby_hot = true; break; }
+            g_mp_lock_dir[ni] = dir;
         }
-        if (!nearby_hot) g_mp_lock_dir[si] = 0;
+    }
+    
+    // Phase 3: Unlock - density cooled, OR hot but no future traffic
+    for (int si = 0; si < g_mp_count; si++) {
+        if (g_mp_lock_dir[si] == 0) continue;
+        // Rule 1: density cooled down (existing)
+        if (g_mp_density[si] < g_mp_threshold[si]) {
+            bool nearby_hot = false;
+            for (int d = -2; d <= 2; d++) {
+                int ni = si + d;
+                if (ni < 0 || ni >= g_mp_count) continue;
+                if (g_mp_density[ni] >= g_mp_threshold[ni]) { nearby_hot = true; break; }
+            }
+            if (!nearby_hot) g_mp_lock_dir[si] = 0;
+            continue;
+        }
+        // Rule 2: still hot but no future traffic heading here (predictive unlock)
+        float total = g_mp_future_right[si] + g_mp_future_left[si];
+        if (total < 2.0f) {
+            g_mp_lock_dir[si] = 0;
+        }
     }
 }
 #endif
