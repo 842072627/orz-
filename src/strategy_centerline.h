@@ -517,6 +517,16 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
                                         Centerline::g_mp_future_right[si] += w;
                                     else
                                         Centerline::g_mp_future_left[si] += w;
+                                    // Instant lock: recompute lock_dir right after adding flow
+                                    float ftotal = Centerline::g_mp_future_right[si] + Centerline::g_mp_future_left[si];
+                                    if (ftotal >= FUTURE_FLOW_LOCK_TH) {
+                                        int ndir = (Centerline::g_mp_future_right[si] > Centerline::g_mp_future_left[si]) ? +1 : -1;
+                                        for (int d = -2; d <= 2; d++) {
+                                            int ni = si + d;
+                                            if (ni >= 0 && ni < Centerline::g_mp_count)
+                                                Centerline::g_mp_lock_dir[ni] = ndir;
+                                        }
+                                    }
                                 }
                                 prv = tm2;
                             }
