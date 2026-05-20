@@ -543,11 +543,17 @@ inline void update_mp_direction(const SharedEnvironment* env) {
         }
     }
     
-    // 3. Direction lock: purely by future flow prediction (no density)
+    // 3. Direction lock: future flow + density-based relaxation
     std::fill(g_mp_lock_dir.begin(), g_mp_lock_dir.end(), 0);
     for (int si = 0; si < g_mp_count; si++) {
-        float total = g_mp_future_right[si] + g_mp_future_left[si];
-        if (total < FUTURE_FLOW_LOCK_TH) continue;
+        float ftotal = g_mp_future_right[si] + g_mp_future_left[si];
+        float flow_th = FUTURE_FLOW_LOCK_TH;
+        if (env->curr_timestep >= FUTURE_FLOW_RELAX_DELAY_TICKS && g_mp_density[si] < 10) {
+            float relax = (10 - g_mp_density[si]) * FUTURE_FLOW_DENSITY_RELAX;
+            if (relax > 0.8f) relax = 0.8f;
+            flow_th += relax;
+        }
+        if (ftotal < flow_th) continue;
         int dir = (g_mp_future_right[si] > g_mp_future_left[si]) ? +1 : -1;
         for (int d = -FUTURE_FLOW_LOCK_SPREAD; d <= FUTURE_FLOW_LOCK_SPREAD; d++) {
             int ni = si + d;

@@ -26,8 +26,10 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define ORZ_EXECUTOR    "default"       // ORZ executor: default
 
 // ========== Future flow direction lock (pure prediction, no density) ==========
-#define FUTURE_FLOW_LOCK_TH   1.7f    // future flow >= this → lock direction
+#define FUTURE_FLOW_LOCK_TH   1.68f    // future flow >= this → lock direction
 #define FUTURE_FLOW_LOCK_SPREAD 2       // lock radius: ±N main points
+#define FUTURE_FLOW_DENSITY_RELAX  0.20f  // per density-under-10 TH relaxation (max relax ~0.8 -> TH <= 2.5)
+#define FUTURE_FLOW_RELAX_DELAY_TICKS 100  // ticks before density relaxation kicks in
 #define FUTURE_FLOW_BRANCH_PENALTY  0.6f
 #define FUTURE_FLOW_BRANCH_OFFSET   14
 // ========== Branch/hot zone checks (uses zone24 density, all agents counted) ==========
@@ -50,7 +52,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define ORZ_PIBT_DIRECTION_BLOCK  true    // scheduler + PIBT direction block linkage
 
 // ========== Density exclusion ==========
-#define USE_DENSITY_EXCLUDE_IDLE  false   // 排除无任务/被截停agent的密度贡献
+#define USE_DENSITY_EXCLUDE_IDLE  true    // 排除无任务/被截停agent的密度贡献
 
 // ========== Hot zone exemption ==========
 #define USE_HOT_ZONE_EXEMPT  true   // 热区豁免：热区agent不设block，PIBT正常执行

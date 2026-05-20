@@ -81,7 +81,13 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
                     if (sm < 0) continue;
                     if (sm < lo || sm > hi) continue;
                     float ftotal = Centerline::g_mp_future_right[si] + Centerline::g_mp_future_left[si];
-                    if (ftotal >= FUTURE_FLOW_LOCK_TH) {
+                    float flow_th_ex = FUTURE_FLOW_LOCK_TH;
+                    if (step >= FUTURE_FLOW_RELAX_DELAY_TICKS && Centerline::g_mp_density[si] < 10) {
+                        float rlx = (10 - Centerline::g_mp_density[si]) * FUTURE_FLOW_DENSITY_RELAX;
+                        if (rlx > 0.8f) rlx = 0.8f;
+                        flow_th_ex += rlx;
+                    }
+                    if (ftotal >= flow_th_ex) {
                         exempt = false;
                         break;
                     }
@@ -549,9 +555,15 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
                                         Centerline::g_mp_future_left[si] += w;
                                     // Instant lock: recompute lock_dir right after adding flow
                                     float ftotal = Centerline::g_mp_future_right[si] + Centerline::g_mp_future_left[si];
-                                    if (ftotal >= FUTURE_FLOW_LOCK_TH) {
+                                    float flow_th_inst = FUTURE_FLOW_LOCK_TH;
+                                    if (step >= FUTURE_FLOW_RELAX_DELAY_TICKS && Centerline::g_mp_density[si] < 10) {
+                                        float rlx = (10 - Centerline::g_mp_density[si]) * FUTURE_FLOW_DENSITY_RELAX;
+                                        if (rlx > 0.8f) rlx = 0.8f;
+                                        flow_th_inst += rlx;
+                                    }
+                                    if (ftotal >= flow_th_inst) {
                                         int ndir = (Centerline::g_mp_future_right[si] > Centerline::g_mp_future_left[si]) ? +1 : -1;
-                                        for (int d = -2; d <= 2; d++) {
+                                        for (int d = -FUTURE_FLOW_LOCK_SPREAD; d <= FUTURE_FLOW_LOCK_SPREAD; d++) {
                                             int ni = si + d;
                                             if (ni >= 0 && ni < Centerline::g_mp_count)
                                                 Centerline::g_mp_lock_dir[ni] = ndir;
