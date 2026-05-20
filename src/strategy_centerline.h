@@ -83,8 +83,8 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
                     float ftotal = Centerline::g_mp_future_right[si] + Centerline::g_mp_future_left[si];
                     float flow_th_ex = FUTURE_FLOW_LOCK_TH;
                     if (step >= FUTURE_FLOW_RELAX_DELAY_TICKS && Centerline::g_mp_density[si] < 10) {
-                        float rlx = (10 - Centerline::g_mp_density[si]) * FUTURE_FLOW_DENSITY_RELAX;
-                        if (rlx > 0.8f) rlx = 0.8f;
+                        float ratio = (10.0f - (float)Centerline::g_mp_density[si]) / 10.0f;
+                        float rlx = ratio * ratio * (FUTURE_FLOW_TH_MAX - FUTURE_FLOW_LOCK_TH);
                         flow_th_ex += rlx;
                     }
                     if (ftotal >= flow_th_ex) {
@@ -557,8 +557,8 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
                                     float ftotal = Centerline::g_mp_future_right[si] + Centerline::g_mp_future_left[si];
                                     float flow_th_inst = FUTURE_FLOW_LOCK_TH;
                                     if (step >= FUTURE_FLOW_RELAX_DELAY_TICKS && Centerline::g_mp_density[si] < 10) {
-                                        float rlx = (10 - Centerline::g_mp_density[si]) * FUTURE_FLOW_DENSITY_RELAX;
-                                        if (rlx > 0.8f) rlx = 0.8f;
+                                        float ratio = (10.0f - (float)Centerline::g_mp_density[si]) / 10.0f;
+                                        float rlx = ratio * ratio * (FUTURE_FLOW_TH_MAX - FUTURE_FLOW_LOCK_TH);
                                         flow_th_inst += rlx;
                                     }
                                     if (ftotal >= flow_th_inst) {

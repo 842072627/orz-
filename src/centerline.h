@@ -549,8 +549,8 @@ inline void update_mp_direction(const SharedEnvironment* env) {
         float ftotal = g_mp_future_right[si] + g_mp_future_left[si];
         float flow_th = FUTURE_FLOW_LOCK_TH;
         if (env->curr_timestep >= FUTURE_FLOW_RELAX_DELAY_TICKS && g_mp_density[si] < 10) {
-            float relax = (10 - g_mp_density[si]) * FUTURE_FLOW_DENSITY_RELAX;
-            if (relax > 0.8f) relax = 0.8f;
+            float ratio = (10.0f - (float)g_mp_density[si]) / 10.0f;
+            float relax = ratio * ratio * (FUTURE_FLOW_TH_MAX - FUTURE_FLOW_LOCK_TH);
             flow_th += relax;
         }
         if (ftotal < flow_th) continue;
