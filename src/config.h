@@ -48,6 +48,9 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 // ========== Feature flags ==========
 #define ORZ_PIBT_DIRECTION_BLOCK  true    // scheduler + PIBT direction block linkage
 
+// ========== Density exclusion ==========
+#define USE_DENSITY_EXCLUDE_IDLE  true   // 排除无任务/被截停agent的密度贡献
+
 // ========== Hot zone exemption ==========
 #define USE_HOT_ZONE_EXEMPT  true   // 热区豁免：热区agent不设block，PIBT正常执行
 

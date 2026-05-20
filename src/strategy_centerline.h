@@ -21,12 +21,6 @@
 
 namespace strategy_centerline {
 
-// ====== SCORE debug counters ======
-static int g_dbg_exempt = 0;
-static int g_dbg_branch = 0;
-static int g_dbg_dirlock = 0;
-static int g_dbg_cap = 0;
-
 static constexpr int ROUTE_THRESHOLD = 20;
 static constexpr float DIVISOR_TABLE[21] = {
     1.0f, 1.1f, 1.2f, 1.3f, 1.4f,
@@ -105,7 +99,6 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
                     total += 1.0f / (dist + 1.0f);
                     prev = loc;
                 }
-                g_dbg_exempt++;
                 return total;
             }
         }
@@ -175,7 +168,6 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
                 total += 1.0f / (dist + 1.0f);
                 prev = locs[ei];
             }
-            g_dbg_branch++;
             return total;
         }
 
@@ -221,11 +213,9 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
             if (si_m > hi) continue;  // main point is within the path segment
             int d = Centerline::g_mp_density[si];
             if (Centerline::g_mp_lock_dir[si] != 0 && Centerline::g_mp_lock_dir[si] != intent) {
-                g_dbg_dirlock++;
                 return -1e9f;
             }
             if (USE_DENSITY_CAP_80 && d >= DENSITY_CAP_80) {
-                g_dbg_cap++;
                 return -1e9f;
             }
             if (d > d_max_seg) d_max_seg = d;
@@ -575,18 +565,7 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
         }
     }
     
-    // Print SCORE counters at regular intervals
-    static int last_score_tick = -1;
-    if (step - last_score_tick >= 100) {
-        printf("[SCORE] step=%d exempt=%d branch=%d dirlock=%d cap=%d\n",
-               step, g_dbg_exempt, g_dbg_branch, g_dbg_dirlock, g_dbg_cap);
-        fflush(stdout);
-        g_dbg_exempt = 0;
-        g_dbg_branch = 0;
-        g_dbg_dirlock = 0;
-        g_dbg_cap = 0;
-        last_score_tick = step;
-    }
+
 }
 
 } // namespace strategy_centerline
