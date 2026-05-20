@@ -26,7 +26,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define ORZ_EXECUTOR    "default"       // ORZ executor: default
 
 // ========== Future flow direction lock (pure prediction, no density) ==========
-#define FUTURE_FLOW_LOCK_TH   1.72f    // future flow >= this → lock direction
+#define FUTURE_FLOW_LOCK_TH   2.0f    // future flow >= this → lock direction
 #define FUTURE_FLOW_LOCK_SPREAD 2       // lock radius: ±N main points
 #define FUTURE_FLOW_TH_MAX        4.5f    // max TH when density=0 (curve: ((10-d)/10)^2 * (max-1.7) + 1.7)
 #define FUTURE_FLOW_RELAX_DELAY_TICKS 100  // ticks before density relaxation kicks in
@@ -56,6 +56,13 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 
 // ========== Hot zone exemption ==========
 #define USE_HOT_ZONE_EXEMPT  true   // 热区豁免：热区agent不设block，PIBT正常执行
+
+// ========== Wall-hugging in corridors (PIBT tie-breaker + A* guide path) ==========
+#define USE_WALL_HUGGING        true    // master switch for all wall-hugging features
+#define USE_WALL_HUGGING_PIBT    true    // PIBT successor tie-breaker wall-hugging
+#define USE_WALL_HUGGING_ASTAR   true    // A* guide path branch-dist bias
+#define WALL_HUG_WIDTH_MAX       20      // max corridor width (cells) for wall-hugging
+#define WALL_HUG_BRANCH_BIAS_MAX 2       // max per-step branch bias for A* (0-5, larger = stronger)
 
 // ========== Idle capacity control (空载均匀空跑) ==========
 #define USE_IDLE_CAP         false   // 空载容量控制开关

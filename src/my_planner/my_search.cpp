@@ -2,6 +2,7 @@
 
 
 #include "my_search.h"
+#include "../pibt_lock.h"
 
 
 namespace MyPlanner{
@@ -52,6 +53,23 @@ s_node astar(SharedEnvironment* env, std::vector<Int4>& flow,
     int neighbors[4];
     int next_neighbors[4];
 
+#if USE_WALL_HUGGING && USE_WALL_HUGGING_ASTAR
+    int corridor_dir = 0;
+    if (CenterlineAccess::g_main_dist && CenterlineAccess::g_branch_dist &&
+        CenterlineAccess::g_zone_is_main && CenterlineAccess::g_n24c > 0) {
+        int s_zi = (start / env->cols / 24) * CenterlineAccess::g_n24c + (start % env->cols / 24);
+        int g_zi = (goal / env->cols / 24) * CenterlineAccess::g_n24c + (goal % env->cols / 24);
+        if (s_zi >= 0 && s_zi < (int)CenterlineAccess::g_zone_is_main->size() &&
+            (*CenterlineAccess::g_zone_is_main)[s_zi] &&
+            g_zi >= 0 && g_zi < (int)CenterlineAccess::g_zone_is_main->size() &&
+            (*CenterlineAccess::g_zone_is_main)[g_zi] && g_zi != s_zi) {
+            int s_m = (*CenterlineAccess::g_main_dist)[start];
+            int g_m = (*CenterlineAccess::g_main_dist)[goal];
+            if (s_m >= 0 && g_m >= 0 && g_m != s_m)
+                corridor_dir = (g_m > s_m) ? 1 : -1;
+        }
+    }
+#endif
 
 
     while (open.size() > 0){
@@ -119,6 +137,16 @@ s_node astar(SharedEnvironment* env, std::vector<Int4>& flow,
             op_flow += temp_op;
         
             all_vertex_flow+= (temp_vertex-1) /2;
+
+#if USE_WALL_HUGGING && USE_WALL_HUGGING_ASTAR
+            if (corridor_dir != 0 && CenterlineAccess::g_branch_dist) {
+                int bd = (*CenterlineAccess::g_branch_dist)[next];
+                int target_bd = (corridor_dir > 0) ? 99 : 0;
+                int diff = (bd > target_bd) ? (bd - target_bd) : (target_bd - bd);
+                if (diff > WALL_HUG_BRANCH_BIAS_MAX) diff = WALL_HUG_BRANCH_BIAS_MAX;
+                op_flow += diff;
+            }
+#endif
 
             p_diff = 0;
             if (curr->parent != nullptr){

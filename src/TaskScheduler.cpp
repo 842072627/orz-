@@ -26,6 +26,17 @@ namespace PIBT_Lock
     int g_parked_task[PIBT_Lock::MAX_AGENTS];
 }
 
+namespace CenterlineAccess {
+    const std::vector<int>* g_branch_dist = nullptr;
+    const std::vector<int>* g_main_dist = nullptr;
+    const std::vector<int>* g_zone_is_main = nullptr;
+    const std::vector<int>* g_mp_loc = nullptr;
+    const std::vector<int>* g_mp_main_dist = nullptr;
+    int g_mp_count = 0;
+    int g_n24c = 0;
+    int g_n24r = 0;
+}
+
 void TaskScheduler::initialize(int preprocess_time_limit)
 {
     // if (env == nullptr || env->rows != 656 || env->cols != 1491)

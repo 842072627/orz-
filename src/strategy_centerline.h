@@ -337,6 +337,17 @@ void pre_tick_updates(SharedEnvironment* env) {
     
     Centerline::compute_future_direction();
     Centerline::update_mp_direction(env);
+    
+    // Sync centerline data to shared pointers for PIBT wall-hugging
+    CenterlineAccess::g_branch_dist = &Centerline::g_branch_dist;
+    CenterlineAccess::g_main_dist = &Centerline::g_main_dist;
+    CenterlineAccess::g_zone_is_main = &Centerline::g_zone_is_main;
+    CenterlineAccess::g_mp_loc = &Centerline::g_mp_loc;
+    CenterlineAccess::g_mp_main_dist = &Centerline::g_mp_main_dist;
+    CenterlineAccess::g_mp_count = Centerline::g_mp_count;
+    CenterlineAccess::g_n24c = Centerline::g_n24c;
+    CenterlineAccess::g_n24r = Centerline::g_n24r;
+    
     CorridorLog::log_tick(env);
 }
 

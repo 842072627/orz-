@@ -5,11 +5,36 @@
 #include "../pibt_lock.h"
 #include <cstdint>
 
-
-
-
-
 namespace MyPlanner{
+
+#if USE_WALL_HUGGING && USE_WALL_HUGGING_PIBT
+// Scan from loc in direction (dx, dy) until hitting wall or map boundary
+static int scan_to_wall(int loc, int dx, int dy, const SharedEnvironment* env) {
+    int steps = 0;
+    while (true) {
+        int r = loc / env->cols + dy;
+        int c = loc % env->cols + dx;
+        int nxt = r * env->cols + c;
+        if (r < 0 || r >= env->rows || c < 0 || c >= env->cols || env->map[nxt] != 0)
+            return steps;
+        loc = nxt;
+        steps++;
+        if (steps > 50) return steps;
+    }
+}
+// Find main point si closest to given main_dist
+static int find_mp_si(int a_m) {
+    if (!CenterlineAccess::g_mp_main_dist || CenterlineAccess::g_mp_count <= 0)
+        return -1;
+    int best_si = 0, best_d = 999999;
+    for (int si = 0; si < CenterlineAccess::g_mp_count; si++) {
+        int d = std::abs((*CenterlineAccess::g_mp_main_dist)[si] - a_m);
+        if (d < best_d) { best_d = d; best_si = si; }
+    }
+    return best_si;
+}
+#endif
+
 int get_gp_h(TrajLNS& lns, int ai, int target){
     int min_heuristic;
 
@@ -90,6 +115,26 @@ bool causalMY_PIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
 	successors.emplace_back(prev_loc, wait_heuristic,-1,rand());
 
 
+
+#if USE_WALL_HUGGING && USE_WALL_HUGGING_PIBT
+    // Compute wall-hugging data for this agent
+    int corridor_dir = 0;
+    if (CenterlineAccess::g_branch_dist && CenterlineAccess::g_main_dist &&
+        CenterlineAccess::g_zone_is_main && CenterlineAccess::g_n24c > 0) {
+        int a_zi = (prev_loc / lns.env->cols / 24) * CenterlineAccess::g_n24c + (prev_loc % lns.env->cols / 24);
+        int g_zi = (target / lns.env->cols / 24) * CenterlineAccess::g_n24c + (target % lns.env->cols / 24);
+        if (a_zi >= 0 && a_zi < (int)CenterlineAccess::g_zone_is_main->size() &&
+            (*CenterlineAccess::g_zone_is_main)[a_zi] &&
+            g_zi >= 0 && g_zi < (int)CenterlineAccess::g_zone_is_main->size() &&
+            (*CenterlineAccess::g_zone_is_main)[g_zi] && g_zi != a_zi) {
+            int a_m = (*CenterlineAccess::g_main_dist)[prev_loc];
+            int g_m = (*CenterlineAccess::g_main_dist)[target];
+            if (a_m >= 0 && g_m >= 0) {
+                corridor_dir = (g_m > a_m) ? 1 : -1;
+            }
+        }
+    }
+#endif
 	std::sort(successors.begin(), successors.end(), 
 		[&](MY_PIBT_C& a, MY_PIBT_C& b)
 		{
@@ -100,8 +145,20 @@ bool causalMY_PIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
 						return true;
 					if (a.location!=orien_next_v && b.location==orien_next_v)
 						return false;
-					// random tie break
-					return a.tie_breaker < b.tie_breaker;
+
+#if USE_WALL_HUGGING && USE_WALL_HUGGING_PIBT
+                    // Wall-hugging: prefer side closer to own wall
+                    if (corridor_dir != 0) {
+                        int ba = (*CenterlineAccess::g_branch_dist)[a.location];
+                        int bb = (*CenterlineAccess::g_branch_dist)[b.location];
+                        ba *= corridor_dir;
+                        bb *= corridor_dir;
+                        if (ba != bb) return ba > bb;
+                    }
+#endif
+                    // random tie break
+                    return a.tie_breaker < b.tie_breaker;
+
 			}
 			return a.heuristic < b.heuristic; 
 		});
