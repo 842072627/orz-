@@ -294,7 +294,10 @@ void pre_tick_updates(SharedEnvironment* env) {
                 int sm = Centerline::g_mp_main_dist[si];
                 if (sm < lo || sm > hi) continue;
                 if ((dir > 0 && sm <= m_curr) || (dir < 0 && sm >= m_curr)) continue;
-                float w = 1.0f / (1.0f + (float)std::abs(sm - m_curr));
+                float d_main = (float)std::abs(sm - m_curr);
+                float adj_branch = (float)(b_curr > FUTURE_FLOW_BRANCH_OFFSET ? b_curr - FUTURE_FLOW_BRANCH_OFFSET : 0);
+                float d_branch = FUTURE_FLOW_BRANCH_PENALTY * adj_branch;
+                float w = 1.0f / (1.0f + d_main + d_branch);
                 if (dir > 0) Centerline::g_mp_future_right[si] += w;
                 else Centerline::g_mp_future_left[si] += w;
             }
@@ -512,7 +515,10 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
                                     int sm2 = Centerline::g_mp_main_dist[si];
                                     if (sm2 < lo2 || sm2 > hi2) continue;
                                     if ((dir2 > 0 && sm2 <= m_c) || (dir2 < 0 && sm2 >= m_c)) continue;
-                                    float w = 1.0f / (1.0f + (float)((sm2 > m_c) ? (sm2 - m_c) : (m_c - sm2)));
+                                    float d_main = (float)((sm2 > m_c) ? (sm2 - m_c) : (m_c - sm2));
+                                    float adj_branch = (float)(b_c > FUTURE_FLOW_BRANCH_OFFSET ? b_c - FUTURE_FLOW_BRANCH_OFFSET : 0);
+                                    float d_branch = FUTURE_FLOW_BRANCH_PENALTY * adj_branch;
+                                    float w = 1.0f / (1.0f + d_main + d_branch);
                                     if (dir2 > 0)
                                         Centerline::g_mp_future_right[si] += w;
                                     else

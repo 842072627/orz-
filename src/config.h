@@ -26,8 +26,9 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define ORZ_EXECUTOR    "default"       // ORZ executor: default
 
 // ========== Future flow direction lock (pure prediction, no density) ==========
-#define FUTURE_FLOW_LOCK_TH   5    // future flow >= this → lock direction (±2 spread)
-
+#define FUTURE_FLOW_LOCK_TH   1.3f    // future flow >= this → lock direction (±2 spread)
+#define FUTURE_FLOW_BRANCH_PENALTY  0.7f
+#define FUTURE_FLOW_BRANCH_OFFSET   10
 // ========== Branch/hot zone checks (uses zone24 density, all agents counted) ==========
 #define ZONE_HARD_CAP  15  
 
@@ -61,3 +62,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 
 // Runtime strategy name getter (used by TaskScheduler.cpp)
 inline std::string get_orz_strategy() { return ORZ_SCHEDULER; }
+
+
+
+
