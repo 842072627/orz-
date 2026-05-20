@@ -551,16 +551,25 @@ inline void update_mp_direction(const SharedEnvironment* env) {
         }
     }
     
-    // 3. Direction lock: future flow + density-based relaxation
+    // 3. Direction lock: future flow + active ratio relaxation
     std::fill(g_mp_lock_dir.begin(), g_mp_lock_dir.end(), 0);
     for (int si = 0; si < g_mp_count; si++) {
         float ftotal = g_mp_future_right[si] + g_mp_future_left[si];
         float flow_th = FUTURE_FLOW_LOCK_TH + g_mp_width_bonus[si];
-        if (env->curr_timestep >= FUTURE_FLOW_RELAX_DELAY_TICKS && g_mp_density[si] < 10) {
-            float ratio = (10.0f - (float)g_mp_density[si]) / 10.0f;
-            float relax = ratio * ratio * (FUTURE_FLOW_TH_MAX - FUTURE_FLOW_LOCK_TH);
-            flow_th += relax;
+#if USE_ACTIVE_RATIO_RELAX
+        if (env->curr_timestep >= ACTIVE_RELAX_DELAY_TICKS && g_mp_density[si] < ACTIVE_RATIO_DENSITY_MAX) {
+            float active = CenterlineAccess::active_ratio;
+            if (active < ACTIVE_RATIO_BASELINE) {
+                float factor = (ACTIVE_RATIO_BASELINE - active) / ACTIVE_RATIO_BASELINE;
+#if ACTIVE_RATIO_RELAX_EXP >= 2
+                float _base = factor;
+                for (int _e = 1; _e < ACTIVE_RATIO_RELAX_EXP; _e++) factor *= _base;
+#endif
+                float relax = factor * (FUTURE_FLOW_TH_MAX - FUTURE_FLOW_LOCK_TH);
+                flow_th += relax;
+            }
         }
+#endif
         if (ftotal < flow_th) continue;
         int dir = (g_mp_future_right[si] > g_mp_future_left[si]) ? +1 : -1;
         for (int d = -FUTURE_FLOW_LOCK_SPREAD; d <= FUTURE_FLOW_LOCK_SPREAD; d++) {

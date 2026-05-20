@@ -26,10 +26,10 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define ORZ_EXECUTOR    "default"       // ORZ executor: default
 
 // ========== Future flow direction lock (pure prediction, no density) ==========
-#define FUTURE_FLOW_LOCK_TH   2.0f    // future flow >= this → lock direction
+#define FUTURE_FLOW_LOCK_TH   1.9f    // future flow >= this → lock direction
 #define FUTURE_FLOW_LOCK_SPREAD 2       // lock radius: ±N main points
-#define FUTURE_FLOW_TH_MAX        4.5f    // max TH when density=0 (curve: ((10-d)/10)^2 * (max-1.7) + 1.7)
-#define FUTURE_FLOW_RELAX_DELAY_TICKS 100  // ticks before density relaxation kicks in
+#define FUTURE_FLOW_TH_MAX        30.0f    // max TH when active ratio = 0 (curve: (0.5-active)/0.5)^2 * (max-1.7) + 1.7)
+#define FUTURE_FLOW_RELAX_DELAY_TICKS 100  // ticks before density relaxation kicks in (DEPRECATED, use ACTIVE_RELAX_DELAY_TICKS)
 #define FUTURE_FLOW_BRANCH_PENALTY  0.6f
 #define FUTURE_FLOW_BRANCH_OFFSET   14
 // ========== Branch/hot zone checks (uses zone24 density, all agents counted) ==========
@@ -52,7 +52,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define ORZ_PIBT_DIRECTION_BLOCK  true    // scheduler + PIBT direction block linkage
 
 // ========== Density exclusion ==========
-#define USE_DENSITY_EXCLUDE_IDLE  true    // 排除无任务/被截停agent的密度贡献
+#define USE_DENSITY_EXCLUDE_IDLE  false    // 排除无任务/被截停agent的密度贡献
 
 // ========== Hot zone exemption ==========
 #define USE_HOT_ZONE_EXEMPT  true   // 热区豁免：热区agent不设block，PIBT正常执行
@@ -63,6 +63,13 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define USE_WALL_HUGGING_ASTAR   true    // A* guide path branch-dist bias
 #define WALL_HUG_WIDTH_MAX       20      // max corridor width (cells) for wall-hugging
 #define WALL_HUG_BRANCH_BIAS_MAX 2       // max per-step branch bias for A* (0-5, larger = stronger)
+
+// ========== Active agent ratio lock relaxation (global, replaces per-main-point density relax) ==========
+#define USE_ACTIVE_RATIO_RELAX   true    // global active-agent ratio relaxation
+#define ACTIVE_RATIO_BASELINE    0.50f   // active ratio >= this  TH=1.7 (no relax)
+#define ACTIVE_RATIO_RELAX_EXP  2       // curve exponent (1=linear, 2=quadratic, 3=cubic...)
+#define ACTIVE_RATIO_DENSITY_MAX 12     // per-main-point density >= this  skip relaxation (zone still hot)
+#define ACTIVE_RELAX_DELAY_TICKS 100     // ticks before active ratio relaxation kicks in
 
 // ========== Idle capacity control (空载均匀空跑) ==========
 #define USE_IDLE_CAP         false   // 空载容量控制开关

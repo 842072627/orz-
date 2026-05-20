@@ -82,11 +82,19 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
                     if (sm < lo || sm > hi) continue;
                     float ftotal = Centerline::g_mp_future_right[si] + Centerline::g_mp_future_left[si];
                     float flow_th_ex = FUTURE_FLOW_LOCK_TH + Centerline::g_mp_width_bonus[si];
-                    if (step >= FUTURE_FLOW_RELAX_DELAY_TICKS && Centerline::g_mp_density[si] < 10) {
-                        float ratio = (10.0f - (float)Centerline::g_mp_density[si]) / 10.0f;
-                        float rlx = ratio * ratio * (FUTURE_FLOW_TH_MAX - FUTURE_FLOW_LOCK_TH);
-                        flow_th_ex += rlx;
+#if USE_ACTIVE_RATIO_RELAX
+                    if (step >= ACTIVE_RELAX_DELAY_TICKS && Centerline::g_mp_density[si] < ACTIVE_RATIO_DENSITY_MAX) {
+                        float active = CenterlineAccess::active_ratio;
+                        if (active < ACTIVE_RATIO_BASELINE) {
+                            float factor = (ACTIVE_RATIO_BASELINE - active) / ACTIVE_RATIO_BASELINE;
+#if ACTIVE_RATIO_RELAX_EXP >= 2
+                            float _base = factor;
+                            for (int _e = 1; _e < ACTIVE_RATIO_RELAX_EXP; _e++) factor *= _base;
+#endif
+                            flow_th_ex += factor * (FUTURE_FLOW_TH_MAX - FUTURE_FLOW_LOCK_TH);
+                        }
                     }
+#endif
                     if (ftotal >= flow_th_ex) {
                         exempt = false;
                         break;
@@ -266,6 +274,14 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
 void pre_tick_updates(SharedEnvironment* env) {
     Centerline::update_zone24_density(env);
     Centerline::update_mp_density(env);
+    
+    // Compute active agent ratio (fraction of agents with tasks)
+    {
+        int active = 0;
+        for (int a = 0; a < env->num_of_agents; a++)
+            if (env->curr_task_schedule[a] >= 0) active++;
+        CenterlineAccess::active_ratio = (float)active / (float)env->num_of_agents;
+    }
     
     // Compute future flow: agent pos→task path projection, distance-weighted
     std::fill(Centerline::g_mp_future_right.begin(), Centerline::g_mp_future_right.end(), 0.0f);
@@ -567,11 +583,19 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
                                     // Instant lock: recompute lock_dir right after adding flow
                                     float ftotal = Centerline::g_mp_future_right[si] + Centerline::g_mp_future_left[si];
                                     float flow_th_inst = FUTURE_FLOW_LOCK_TH + Centerline::g_mp_width_bonus[si];
-                                    if (step >= FUTURE_FLOW_RELAX_DELAY_TICKS && Centerline::g_mp_density[si] < 10) {
-                                        float ratio = (10.0f - (float)Centerline::g_mp_density[si]) / 10.0f;
-                                        float rlx = ratio * ratio * (FUTURE_FLOW_TH_MAX - FUTURE_FLOW_LOCK_TH);
-                                        flow_th_inst += rlx;
+#if USE_ACTIVE_RATIO_RELAX
+                                    if (step >= ACTIVE_RELAX_DELAY_TICKS && Centerline::g_mp_density[si] < ACTIVE_RATIO_DENSITY_MAX) {
+                                        float active = CenterlineAccess::active_ratio;
+                                        if (active < ACTIVE_RATIO_BASELINE) {
+                                            float factor = (ACTIVE_RATIO_BASELINE - active) / ACTIVE_RATIO_BASELINE;
+#if ACTIVE_RATIO_RELAX_EXP >= 2
+                                            float _base = factor;
+                                            for (int _e = 1; _e < ACTIVE_RATIO_RELAX_EXP; _e++) factor *= _base;
+#endif
+                                            flow_th_inst += factor * (FUTURE_FLOW_TH_MAX - FUTURE_FLOW_LOCK_TH);
+                                        }
                                     }
+#endif
                                     if (ftotal >= flow_th_inst) {
                                         int ndir = (Centerline::g_mp_future_right[si] > Centerline::g_mp_future_left[si]) ? +1 : -1;
                                         for (int d = -FUTURE_FLOW_LOCK_SPREAD; d <= FUTURE_FLOW_LOCK_SPREAD; d++) {

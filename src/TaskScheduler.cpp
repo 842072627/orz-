@@ -35,6 +35,7 @@ namespace CenterlineAccess {
     int g_mp_count = 0;
     int g_n24c = 0;
     int g_n24r = 0;
+    float active_ratio = 0.0f;
 }
 
 void TaskScheduler::initialize(int preprocess_time_limit)

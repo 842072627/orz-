@@ -21,4 +21,5 @@ namespace CenterlineAccess {
     extern int g_mp_count;
     extern int g_n24c;
     extern int g_n24r;
+    extern float active_ratio;       // [0-1] fraction of agents with tasks this tick
 }
