@@ -81,7 +81,7 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
                     if (sm < 0) continue;
                     if (sm < lo || sm > hi) continue;
                     float ftotal = Centerline::g_mp_future_right[si] + Centerline::g_mp_future_left[si];
-                    float flow_th_ex = FUTURE_FLOW_LOCK_TH;
+                    float flow_th_ex = FUTURE_FLOW_LOCK_TH + Centerline::g_mp_width_bonus[si];
                     if (step >= FUTURE_FLOW_RELAX_DELAY_TICKS && Centerline::g_mp_density[si] < 10) {
                         float ratio = (10.0f - (float)Centerline::g_mp_density[si]) / 10.0f;
                         float rlx = ratio * ratio * (FUTURE_FLOW_TH_MAX - FUTURE_FLOW_LOCK_TH);
@@ -555,7 +555,7 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
                                         Centerline::g_mp_future_left[si] += w;
                                     // Instant lock: recompute lock_dir right after adding flow
                                     float ftotal = Centerline::g_mp_future_right[si] + Centerline::g_mp_future_left[si];
-                                    float flow_th_inst = FUTURE_FLOW_LOCK_TH;
+                                    float flow_th_inst = FUTURE_FLOW_LOCK_TH + Centerline::g_mp_width_bonus[si];
                                     if (step >= FUTURE_FLOW_RELAX_DELAY_TICKS && Centerline::g_mp_density[si] < 10) {
                                         float ratio = (10.0f - (float)Centerline::g_mp_density[si]) / 10.0f;
                                         float rlx = ratio * ratio * (FUTURE_FLOW_TH_MAX - FUTURE_FLOW_LOCK_TH);

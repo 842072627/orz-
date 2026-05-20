@@ -54,6 +54,7 @@ static std::vector<int> g_mp_main_dist;      // [si] = main_dist of this main po
 static std::vector<int> g_mp_threshold;      // [si] = density threshold for direction lock (15/20/30)
 static std::vector<float> g_mp_future_right;   // [si] = distance-weighted future flow right
 static std::vector<float> g_mp_future_left;    // [si] = distance-weighted future flow left
+static std::vector<float> g_mp_width_bonus;    // [si] = extra TH from corridor width
 #endif
 
 
@@ -407,6 +408,7 @@ void init(const SharedEnvironment* env) {
     g_mp_threshold.assign(g_mp_count, ZONE_HARD_CAP);
     g_mp_future_right.assign(g_mp_count, 0.0f);
     g_mp_future_left.assign(g_mp_count, 0.0f);
+    g_mp_width_bonus.assign(g_mp_count, 0.0f);
     
     // Compute tangents for centerline cells
     int n_cl = (int)g_centerline_cells.size();
@@ -431,7 +433,13 @@ void init(const SharedEnvironment* env) {
         auto md_it = cl_main.find(g_mp_loc[si]);
         g_mp_main_dist[si] = (md_it != cl_main.end()) ? md_it->second : -1;
         // Threshold stays at ZONE_HARD_CAP (15) for all main points
-        // Phase 4 (USE_MP_WIDTH) would enable width-adaptive thresholds here
+#if USE_MP_WIDTH
+        if (g_mp_main_dist[si] >= 0) {
+            int w = perp_width_at(env, g_mp_loc[si], cl_tdx[idx], cl_tdy[idx]);
+            if (w > WIDTH_SUPER_THR) g_mp_width_bonus[si] = WIDTH_SUPER_BONUS;
+            else if (w > WIDTH_WIDE_THR) g_mp_width_bonus[si] = WIDTH_WIDE_BONUS;
+        }
+#endif
     }
 #endif
 
@@ -547,7 +555,7 @@ inline void update_mp_direction(const SharedEnvironment* env) {
     std::fill(g_mp_lock_dir.begin(), g_mp_lock_dir.end(), 0);
     for (int si = 0; si < g_mp_count; si++) {
         float ftotal = g_mp_future_right[si] + g_mp_future_left[si];
-        float flow_th = FUTURE_FLOW_LOCK_TH;
+        float flow_th = FUTURE_FLOW_LOCK_TH + g_mp_width_bonus[si];
         if (env->curr_timestep >= FUTURE_FLOW_RELAX_DELAY_TICKS && g_mp_density[si] < 10) {
             float ratio = (10.0f - (float)g_mp_density[si]) / 10.0f;
             float relax = ratio * ratio * (FUTURE_FLOW_TH_MAX - FUTURE_FLOW_LOCK_TH);

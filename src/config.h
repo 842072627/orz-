@@ -64,7 +64,11 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 // ========== Migration flags (step-by-step control, can revert individually) ==========
 #define USE_MP_CENTERLINE   1   // Phase 1: A* widest path centerline (matches heatmap analysis)
 #define USE_MP_DENSITY      1   // Phase 2: 1D main point density (24x24 squares centered on main points)
-#define USE_MP_WIDTH        0   // Phase 4: corridor width-adaptive direction lock thresholds
+#define USE_MP_WIDTH        1   // corridor width-adaptive direction lock thresholds
+#define WIDTH_WIDE_THR      12  // width > this → WIDE (+WIDTH_WIDE_BONUS)
+#define WIDTH_SUPER_THR     18  // width > this → SUPER WIDE (+WIDTH_SUPER_BONUS)
+#define WIDTH_WIDE_BONUS    2.0f  // extra TH for wide corridor
+#define WIDTH_SUPER_BONUS   4.0f  // extra TH for super wide corridor
 
 // Runtime strategy name getter (used by TaskScheduler.cpp)
 inline std::string get_orz_strategy() { return ORZ_SCHEDULER; }
