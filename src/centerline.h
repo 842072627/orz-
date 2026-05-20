@@ -535,65 +535,16 @@ inline void update_mp_direction(const SharedEnvironment* env) {
         }
     }
     
-    // 3. Direction lock: width-adaptive thresholds
+    // 3. Direction lock: purely by future flow prediction (no density)
     std::fill(g_mp_lock_dir.begin(), g_mp_lock_dir.end(), 0);
-    
-    // Phase 1: Hot zones set direction (follow neighbor if exists)
     for (int si = 0; si < g_mp_count; si++) {
-        if (g_mp_density[si] < g_mp_threshold[si]) continue;
-        if (g_mp_dir[si] != 0) continue;
-        int neighbor_dir = 0;
-        for (int d = -2; d <= 2; d++) {
-            int ni = si + d;
-            if (ni < 0 || ni >= g_mp_count) continue;
-            if (g_mp_dir[ni] != 0) { neighbor_dir = g_mp_dir[ni]; break; }
-        }
-        g_mp_dir[si] = (neighbor_dir != 0) ? neighbor_dir : 
-                       ((si * 1103515245 + 12345) % 2 ? +1 : -1);
-    }
-    
-        // Phase 2: Hot zones lock - density threshold OR future flow prediction
-    // First pass: density >= threshold (existing)
-    for (int si = 0; si < g_mp_count; si++) {
-        if (g_mp_density[si] < g_mp_threshold[si]) continue;
-        int dir = g_mp_dir[si];
-        for (int d = -2; d <= 2; d++) {
-            int ni = si + d;
-            if (ni < 0 || ni >= g_mp_count) continue;
-            g_mp_lock_dir[ni] = dir;
-        }
-    }
-    // Second pass: density < threshold but future flow >= 5.0 (predictive lock)
-    for (int si = 0; si < g_mp_count; si++) {
-        if (g_mp_lock_dir[si] != 0) continue;
         float total = g_mp_future_right[si] + g_mp_future_left[si];
-        if (total < 5.0f) continue;
+        if (total < FUTURE_FLOW_LOCK_TH) continue;
         int dir = (g_mp_future_right[si] > g_mp_future_left[si]) ? +1 : -1;
         for (int d = -2; d <= 2; d++) {
             int ni = si + d;
             if (ni < 0 || ni >= g_mp_count) continue;
             g_mp_lock_dir[ni] = dir;
-        }
-    }
-    
-    // Phase 3: Unlock - density cooled, OR hot but no future traffic
-    for (int si = 0; si < g_mp_count; si++) {
-        if (g_mp_lock_dir[si] == 0) continue;
-        // Rule 1: density cooled down (existing)
-        if (g_mp_density[si] < g_mp_threshold[si]) {
-            bool nearby_hot = false;
-            for (int d = -2; d <= 2; d++) {
-                int ni = si + d;
-                if (ni < 0 || ni >= g_mp_count) continue;
-                if (g_mp_density[ni] >= g_mp_threshold[ni]) { nearby_hot = true; break; }
-            }
-            if (!nearby_hot) g_mp_lock_dir[si] = 0;
-            continue;
-        }
-        // Rule 2: still hot but no future traffic heading here (predictive unlock)
-        float total = g_mp_future_right[si] + g_mp_future_left[si];
-        if (total < 2.0f) {
-            g_mp_lock_dir[si] = 0;
         }
     }
 }

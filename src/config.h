@@ -25,14 +25,16 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define ORZ_PLANNER     "default"       // ORZ planner: default PIBT
 #define ORZ_EXECUTOR    "default"       // ORZ executor: default
 
-// ========== Density cap ==========
+// ========== Future flow direction lock (pure prediction, no density) ==========
+#define FUTURE_FLOW_LOCK_TH   5    // future flow >= this → lock direction (±2 spread)
+
+// ========== Branch/hot zone checks (uses zone24 density, all agents counted) ==========
 #define ZONE_HARD_CAP  15  
 
 #define ZONE_EXEMPT_PIBT_CAP  15       // 24x24 zone density cap, blocks when exceeded
-// 24x24 zone density cap, blocks when exceeded
 
-// ========== 1D main zone exemption ==========
-#define EXEMPT_MAIN_THR  23      // main zone density below this exempts task from direction lock
+// ========== 1D main zone exemption (replaced by future-flow exempt) ==========
+#define EXEMPT_MAIN_THR  23      // kept for branch check fallback
 
 // ========== Task segment distance limit ==========
 #define MAX_TASK_SEGMENT_DIST  99999   // max main+branch distance for a single errand transition
@@ -49,13 +51,12 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define USE_HOT_ZONE_EXEMPT  true   // 热区豁免：热区agent不设block，PIBT正常执行
 
 // ========== Idle capacity control (空载均匀空跑) ==========
-#define USE_IDLE_CAP         false   // 空载容量控制开关
+#define USE_IDLE_CAP         true   // 空载容量控制开关
 #define IDLE_RATIO           0.4f  // 最大活跃 agent 比例 (0~1.0)
 
 // ========== Migration flags (step-by-step control, can revert individually) ==========
 #define USE_MP_CENTERLINE   1   // Phase 1: A* widest path centerline (matches heatmap analysis)
 #define USE_MP_DENSITY      1   // Phase 2: 1D main point density (24x24 squares centered on main points)
-// Phase 3: 1D direction lock based on main point density - always enabled (MP-based)
 #define USE_MP_WIDTH        0   // Phase 4: corridor width-adaptive direction lock thresholds
 
 // Runtime strategy name getter (used by TaskScheduler.cpp)

@@ -21,6 +21,12 @@
 
 namespace strategy_centerline {
 
+// ====== SCORE debug counters ======
+static int g_dbg_exempt = 0;
+static int g_dbg_branch = 0;
+static int g_dbg_dirlock = 0;
+static int g_dbg_cap = 0;
+
 static constexpr int ROUTE_THRESHOLD = 20;
 static constexpr float DIVISOR_TABLE[21] = {
     1.0f, 1.1f, 1.2f, 1.3f, 1.4f,
@@ -63,7 +69,7 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
     if (!Centerline::g_ready) return 1.0f;
     auto& locs = it->second.locations;
 
-    // === 1D main zone exemption: skip direction lock if all main zones along path are cool ===
+    // === Future flow exemption: skip direction lock if no main point along path has high future flow ===
     {
         int a_m, a_b;
         Centerline::project(a_loc, a_m, a_b);
@@ -76,10 +82,12 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
                 if (tm < 0) continue;
                 int lo = std::min(prev_m, tm);
                 int hi = std::max(prev_m, tm);
-                for (auto& zr : Centerline::g_zone_ranges) {
-                    if (zr.min_m <= hi && zr.max_m >= lo &&
-                        Centerline::g_zone_is_main[zr.zone_id] &&
-                        Centerline::g_zone24_density[zr.zone_id] >= EXEMPT_MAIN_THR) {
+                for (int si = 0; si < Centerline::g_mp_count; si++) {
+                    int sm = Centerline::g_mp_main_dist[si];
+                    if (sm < 0) continue;
+                    if (sm < lo || sm > hi) continue;
+                    float ftotal = Centerline::g_mp_future_right[si] + Centerline::g_mp_future_left[si];
+                    if (ftotal >= FUTURE_FLOW_LOCK_TH) {
                         exempt = false;
                         break;
                     }
@@ -97,6 +105,7 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
                     total += 1.0f / (dist + 1.0f);
                     prev = loc;
                 }
+                g_dbg_exempt++;
                 return total;
             }
         }
@@ -166,6 +175,7 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
                 total += 1.0f / (dist + 1.0f);
                 prev = locs[ei];
             }
+            g_dbg_branch++;
             return total;
         }
 
@@ -210,10 +220,14 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
             if (si_m < lo) continue;
             if (si_m > hi) continue;  // main point is within the path segment
             int d = Centerline::g_mp_density[si];
-            if (Centerline::g_mp_lock_dir[si] != 0 && Centerline::g_mp_lock_dir[si] != intent)
+            if (Centerline::g_mp_lock_dir[si] != 0 && Centerline::g_mp_lock_dir[si] != intent) {
+                g_dbg_dirlock++;
                 return -1e9f;
-            if (USE_DENSITY_CAP_80 && d >= DENSITY_CAP_80)
+            }
+            if (USE_DENSITY_CAP_80 && d >= DENSITY_CAP_80) {
+                g_dbg_cap++;
                 return -1e9f;
+            }
             if (d > d_max_seg) d_max_seg = d;
             // Future flow alignment: prefer tasks WITH predicted traffic
             float fr = Centerline::g_mp_future_right[si];
@@ -479,6 +493,36 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
 
             if (best_tid >= 0) {
                 proposed_schedule[a] = best_tid;
+                // Per-assignment future flow update (feeds next tick's lock computation)
+                {
+                    int m_c, b_c;
+                    Centerline::project(env->curr_states[a].location, m_c, b_c);
+                    if (m_c >= 0) {
+                        auto tsk = env->task_pool.find(best_tid);
+                        if (tsk != env->task_pool.end() && !tsk->second.locations.empty()) {
+                            int prv = m_c;
+                            for (int loc : tsk->second.locations) {
+                                int tm2, tb2;
+                                Centerline::project(loc, tm2, tb2);
+                                if (tm2 < 0) continue;
+                                int lo2 = (prv < tm2) ? prv : tm2;
+                                int hi2 = (prv > tm2) ? prv : tm2;
+                                int dir2 = (tm2 > prv) ? 1 : -1;
+                                for (int si = 0; si < Centerline::g_mp_count; si++) {
+                                    int sm2 = Centerline::g_mp_main_dist[si];
+                                    if (sm2 < lo2 || sm2 > hi2) continue;
+                                    if ((dir2 > 0 && sm2 <= m_c) || (dir2 < 0 && sm2 >= m_c)) continue;
+                                    float w = 1.0f / (1.0f + (float)((sm2 > m_c) ? (sm2 - m_c) : (m_c - sm2)));
+                                    if (dir2 > 0)
+                                        Centerline::g_mp_future_right[si] += w;
+                                    else
+                                        Centerline::g_mp_future_left[si] += w;
+                                }
+                                prv = tm2;
+                            }
+                        }
+                    }
+                }
                 // Park second errand for multi-location tasks
                 auto tit = env->task_pool.find(best_tid);
                 if (tit != env->task_pool.end()) {
@@ -511,6 +555,19 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
             printf("[SCHEDULE TIMEOUT #%d] step=%d, free_agents=%zu, phase2_assigned=%d\n",
                    timeout_counter, step, free_agents.size(), phase2_assigned);
         }
+    }
+    
+    // Print SCORE counters at regular intervals
+    static int last_score_tick = -1;
+    if (step - last_score_tick >= 100) {
+        printf("[SCORE] step=%d exempt=%d branch=%d dirlock=%d cap=%d\n",
+               step, g_dbg_exempt, g_dbg_branch, g_dbg_dirlock, g_dbg_cap);
+        fflush(stdout);
+        g_dbg_exempt = 0;
+        g_dbg_branch = 0;
+        g_dbg_dirlock = 0;
+        g_dbg_cap = 0;
+        last_score_tick = step;
     }
 }
 
