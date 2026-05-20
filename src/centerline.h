@@ -549,7 +549,7 @@ inline void update_mp_direction(const SharedEnvironment* env) {
         float total = g_mp_future_right[si] + g_mp_future_left[si];
         if (total < FUTURE_FLOW_LOCK_TH) continue;
         int dir = (g_mp_future_right[si] > g_mp_future_left[si]) ? +1 : -1;
-        for (int d = -2; d <= 2; d++) {
+        for (int d = -FUTURE_FLOW_LOCK_SPREAD; d <= FUTURE_FLOW_LOCK_SPREAD; d++) {
             int ni = si + d;
             if (ni < 0 || ni >= g_mp_count) continue;
             g_mp_lock_dir[ni] = dir;

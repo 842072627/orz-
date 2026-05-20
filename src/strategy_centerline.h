@@ -297,6 +297,38 @@ void pre_tick_updates(SharedEnvironment* env) {
         }
     }
     
+    // Future flow from idle agents going to spawn (dummy goal)
+    for (int a = 0; a < env->num_of_agents; a++) {
+        int tid = env->curr_task_schedule[a];
+        if (tid >= 0) continue;  // skip agents with tasks (already handled above)
+        int a_loc = env->curr_states[a].location;
+        if (a_loc < 0) continue;
+        int spawn_loc = env->start_states.at(a).location;
+        if (spawn_loc < 0 || spawn_loc == a_loc) continue;  // already at spawn
+        int m_curr, b_curr;
+        Centerline::project(a_loc, m_curr, b_curr);
+        if (m_curr < 0) continue;
+        int tm, tb;
+        Centerline::project(spawn_loc, tm, tb);
+        if (tm < 0) continue;
+        int lo = std::min(m_curr, tm);
+        int hi = std::max(m_curr, tm);
+        int dir = (tm > m_curr) ? 1 : -1;
+        for (int si = 0; si < Centerline::g_mp_count; si++) {
+            int sm = Centerline::g_mp_main_dist[si];
+            if (sm < lo || sm > hi) continue;
+            if ((dir > 0 && sm <= m_curr) || (dir < 0 && sm >= m_curr)) continue;
+            float d_main = (float)std::abs(sm - m_curr);
+            float adj_branch = (float)(b_curr > FUTURE_FLOW_BRANCH_OFFSET ? b_curr - FUTURE_FLOW_BRANCH_OFFSET : 0);
+            float d_branch = FUTURE_FLOW_BRANCH_PENALTY * adj_branch;
+            float w = 1.0f / (1.0f + d_main + d_branch);
+            if (dir > 0)
+                Centerline::g_mp_future_right[si] += w;
+            else
+                Centerline::g_mp_future_left[si] += w;
+        }
+    }
+    
     Centerline::compute_future_direction();
     Centerline::update_mp_direction(env);
     CorridorLog::log_tick(env);
