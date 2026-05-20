@@ -239,7 +239,9 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
             }
         }
 
-        float seg_cost = (float)(std::abs(prev_m - tm) + std::abs(prev_b - tb)) + 1.0f;
+        float seg_dist = (float)(std::abs(prev_m - tm) + std::abs(prev_b - tb));
+        // Penalize task1->task2 segment less (agents already committed)
+        float seg_cost = (ei > (size_t)start_idx) ? (seg_dist * 0.3f + 1.0f) : (seg_dist + 1.0f);
         float seg_score = 1.0f / seg_cost;
         if (seg_cost > MAX_TASK_SEGMENT_DIST) {
             float penalty = (float)MAX_TASK_SEGMENT_DIST / seg_cost;

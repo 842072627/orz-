@@ -26,9 +26,9 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define ORZ_EXECUTOR    "default"       // ORZ executor: default
 
 // ========== Future flow direction lock (pure prediction, no density) ==========
-#define FUTURE_FLOW_LOCK_TH   1.3f    // future flow >= this → lock direction (±2 spread)
-#define FUTURE_FLOW_BRANCH_PENALTY  0.7f
-#define FUTURE_FLOW_BRANCH_OFFSET   10
+#define FUTURE_FLOW_LOCK_TH   1.69f    // future flow >= this → lock direction (±2 spread)
+#define FUTURE_FLOW_BRANCH_PENALTY  0.6f
+#define FUTURE_FLOW_BRANCH_OFFSET   14
 // ========== Branch/hot zone checks (uses zone24 density, all agents counted) ==========
 #define ZONE_HARD_CAP  15  
 
@@ -39,7 +39,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 
 // ========== Task segment distance limit ==========
 #define MAX_TASK_SEGMENT_DIST  99999   // max main+branch distance for a single errand transition
-#define GARBAGE_TASK_RATIO      0.0f // bottom fraction of free tasks deferred each tick (0.0-1.0)
+#define GARBAGE_TASK_RATIO      0.05f // bottom fraction of free tasks deferred each tick (0.0-1.0)
 
 // ========== Hard density limit ==========
 #define USE_DENSITY_CAP_80  true   // enable hard density cap
@@ -62,6 +62,12 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 
 // Runtime strategy name getter (used by TaskScheduler.cpp)
 inline std::string get_orz_strategy() { return ORZ_SCHEDULER; }
+
+
+
+
+
+
 
 
 
