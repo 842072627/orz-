@@ -26,9 +26,9 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define ORZ_EXECUTOR    "default"       // ORZ executor: default
 
 // ========== Future flow direction lock (pure prediction, no density) ==========
-#define FUTURE_FLOW_LOCK_TH   1.76f    // future flow >= this → lock direction
+#define FUTURE_FLOW_LOCK_TH   1.72f    // future flow >= this → lock direction
 #define FUTURE_FLOW_LOCK_SPREAD 2       // lock radius: ±N main points
-#define FUTURE_FLOW_TH_MAX        2.75f    // max TH when active ratio = 0
+#define FUTURE_FLOW_TH_MAX        2.8f    // max TH when active ratio = 0
 #define FUTURE_FLOW_RELAX_DELAY_TICKS 100  // ticks before density relaxation kicks in (DEPRECATED, use ACTIVE_RELAX_DELAY_TICKS)
 #define FUTURE_FLOW_BRANCH_PENALTY  0.6f
 #define FUTURE_FLOW_BRANCH_OFFSET   14
