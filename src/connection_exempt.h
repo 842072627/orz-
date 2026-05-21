@@ -80,8 +80,8 @@ inline float connection_exempt_score(
             if (e2 <= dx) { err += dx; cy += sy; }
         }
 
-        // 路径通过 → 直线距离给分
-        float dist = std::sqrt((float)((tx - ax) * (tx - ax) + (ty - ay) * (ty - ay)));
+        // 路径通过 → 曼哈顿距离给分
+        float dist = (float)(std::abs(tx - ax) + std::abs(ty - ay));
         total_score += 1.0f / (dist + 1.0f);
 
         ax = tx; ay = ty;
