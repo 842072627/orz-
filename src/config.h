@@ -26,11 +26,11 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define ORZ_EXECUTOR    "default"       // ORZ executor: default
 
 // ========== Future flow direction lock (pure prediction, no density) ==========
-#define FUTURE_FLOW_LOCK_TH   1.85f    // future flow >= this → lock direction
+#define FUTURE_FLOW_LOCK_TH   1.6f    // future flow >= this → lock direction
 #define FUTURE_FLOW_LOCK_SPREAD 2       // lock radius: ±N main points
 #define FUTURE_FLOW_TH_MAX        2.5f    // max TH when active ratio = 0
 #define FUTURE_FLOW_RELAX_DELAY_TICKS 100  // ticks before density relaxation kicks in (DEPRECATED, use ACTIVE_RELAX_DELAY_TICKS)
-#define FUTURE_FLOW_BRANCH_PENALTY  0.6f
+#define FUTURE_FLOW_BRANCH_PENALTY  0.78f
 #define FUTURE_FLOW_BRANCH_OFFSET   14
 // ========== Branch/hot zone checks (uses zone24 density, all agents counted) ==========
 #define ZONE_HARD_CAP  15  
@@ -73,7 +73,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 
 // ========== Idle capacity control (空载均匀空跑) ==========
 #define USE_IDLE_CAP         false   // 空载容量控制开关
-#define IDLE_RATIO           1f  // 最大活跃 agent 比例 (0~1.0)
+#define IDLE_RATIO           1.0f  // 最大活跃 agent 比例 (0~1.0)
 
 // ========== Migration flags (step-by-step control, can revert individually) ==========
 #define USE_MP_CENTERLINE   1   // Phase 1: A* widest path centerline (matches heatmap analysis)
