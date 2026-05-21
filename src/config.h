@@ -31,6 +31,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define FUTURE_FLOW_TH_MAX        2.5f    // max TH when active ratio = 0
 #define FUTURE_FLOW_RELAX_DELAY_TICKS 100  // ticks before density relaxation kicks in (DEPRECATED, use ACTIVE_RELAX_DELAY_TICKS)
 #define FUTURE_FLOW_BRANCH_PENALTY  0.78f
+
 #define FUTURE_FLOW_BRANCH_OFFSET   14
 // ========== Branch/hot zone checks (uses zone24 density, all agents counted) ==========
 #define ZONE_HARD_CAP  15  
