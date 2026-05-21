@@ -28,9 +28,9 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 // ========== Future flow direction lock (pure prediction, no density) ==========
 #define FUTURE_FLOW_LOCK_TH   1.6f    // future flow >= this → lock direction
 #define FUTURE_FLOW_LOCK_SPREAD 2       // lock radius: ±N main points
-#define FUTURE_FLOW_TH_MAX        2.5f    // max TH when active ratio = 0
+#define FUTURE_FLOW_TH_MAX        2.0f    // max TH when active ratio = 0
 #define FUTURE_FLOW_RELAX_DELAY_TICKS 100  // ticks before density relaxation kicks in (DEPRECATED, use ACTIVE_RELAX_DELAY_TICKS)
-#define FUTURE_FLOW_BRANCH_PENALTY  0.78f
+#define FUTURE_FLOW_BRANCH_PENALTY  0.8f
 
 #define FUTURE_FLOW_BRANCH_OFFSET   14
 // ========== Branch/hot zone checks (uses zone24 density, all agents counted) ==========
@@ -82,8 +82,8 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define USE_MP_WIDTH        1   // corridor width-adaptive direction lock thresholds
 #define WIDTH_WIDE_THR      12  // width > this → WIDE (+WIDTH_WIDE_BONUS)
 #define WIDTH_SUPER_THR     18  // width > this → SUPER WIDE (+WIDTH_SUPER_BONUS)
-#define WIDTH_WIDE_BONUS    2.0f  // extra TH for wide corridor
-#define WIDTH_SUPER_BONUS   4.0f  // extra TH for super wide corridor
+#define WIDTH_WIDE_BONUS    1.0f  // extra TH for wide corridor
+#define WIDTH_SUPER_BONUS   2.0f  // extra TH for super wide corridor
 
 // Runtime strategy name getter (used by TaskScheduler.cpp)
 inline std::string get_orz_strategy() { return ORZ_SCHEDULER; }
