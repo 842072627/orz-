@@ -38,6 +38,27 @@ static inline int zh_dist(int z1, int z2) {
     return std::abs(z1/100 - z2/100) + std::abs(z1%100 - z2%100);
 }
 
+// ====== 统一距离函数 ======
+// 返回loc_a到loc_b的最短网格路径长度
+// BFS表优先 → |Δmain|+|Δbranch| → 曼哈顿
+static inline int unified_dist(int loc_a, int loc_b) {
+    // 1) BFS表（最精确）
+    int d = BFSTable::get_dist(loc_a, loc_b);
+    if (d > 0) return d;
+    
+    // 2) main_dist路径
+    int a_m, a_b, b_m, b_b;
+    Centerline::project(loc_a, a_m, a_b);
+    Centerline::project(loc_b, b_m, b_b);
+    if (a_m >= 0 && b_m >= 0) {
+        return std::abs(b_m - a_m) + std::abs(b_b - a_b);
+    }
+    
+    // 3) 曼哈顿（兜底）
+    int cols = g_env->cols;
+    return std::abs(loc_a / cols - loc_b / cols) + std::abs(loc_a % cols - loc_b % cols);
+}
+
 void init(SharedEnvironment* env) {
     g_env = env;
     Centerline::init(env);
@@ -107,10 +128,8 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
                 float total = 0;
                 int prev = a_loc;
                 for (auto& loc : locs) {
-                    int r1 = prev / g_env->cols, c1 = prev % g_env->cols;
-                    int r2 = loc / g_env->cols, c2 = loc % g_env->cols;
-                    int manh = std::abs(r2 - r1) + std::abs(c2 - c1);
-                    total += 1.0f / (float)(manh + 1);
+                    int d = unified_dist(prev, loc);
+                    total += 1.0f / (float)(d + 1);
                     prev = loc;
                 }
                 return total;
@@ -132,22 +151,13 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
         }
         
         if (is_branch) {
-            // Pure branch task: distance from BFS table (if ready), else Manhattan fallback
+            // Pure branch task: unified distance
             float total = 0;
             int prev = a_loc;
             for (size_t ei = (size_t)start_idx; ei < locs.size(); ei++) {
                 int loc = locs[ei];
-                float seg = 0;
-                int d = BFSTable::get_dist(prev, loc);
-                if (d > 0) {
-                    seg = 1.0f / (float)(d + 1);
-                } else {
-                    // Fallback: Manhattan distance
-                    int r1 = prev / g_env->cols, c1 = prev % g_env->cols;
-                    int r2 = loc / g_env->cols, c2 = loc % g_env->cols;
-                    seg = 1.0f / (float)(std::abs(r2 - r1) + std::abs(c2 - c1) + 1);
-                }
-                total += seg;
+                int d = unified_dist(prev, loc);
+                total += 1.0f / (float)(d + 1);
                 prev = loc;
             }
             return total;
