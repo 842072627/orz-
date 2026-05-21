@@ -109,8 +109,8 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
                 for (auto& loc : locs) {
                     int r1 = prev / g_env->cols, c1 = prev % g_env->cols;
                     int r2 = loc / g_env->cols, c2 = loc % g_env->cols;
-                    float dist = std::sqrt((float)((c2-c1)*(c2-c1) + (r2-r1)*(r2-r1)));
-                    total += 1.0f / (dist + 1.0f);
+                    int manh = std::abs(r2 - r1) + std::abs(c2 - c1);
+                    total += 1.0f / (float)(manh + 1);
                     prev = loc;
                 }
                 return total;
@@ -132,7 +132,7 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
         }
         
         if (is_branch) {
-            // Pure branch task: distance from BFS table (if ready), else Euclidean fallback
+            // Pure branch task: distance from BFS table (if ready), else Manhattan fallback
             float total = 0;
             int prev = a_loc;
             for (size_t ei = (size_t)start_idx; ei < locs.size(); ei++) {
@@ -142,10 +142,10 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
                 if (d > 0) {
                     seg = 1.0f / (float)(d + 1);
                 } else {
-                    // Fallback: Euclidean distance
+                    // Fallback: Manhattan distance
                     int r1 = prev / g_env->cols, c1 = prev % g_env->cols;
                     int r2 = loc / g_env->cols, c2 = loc % g_env->cols;
-                    seg = 1.0f / (std::sqrt((float)((c2-c1)*(c2-c1)+(r2-r1)*(r2-r1))) + 1.0f);
+                    seg = 1.0f / (float)(std::abs(r2 - r1) + std::abs(c2 - c1) + 1);
                 }
                 total += seg;
                 prev = loc;
