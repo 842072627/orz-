@@ -118,86 +118,58 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
         }
     }
 
-    // === Branch task check: ALL errands off-hot-main + obstacle-free line ===
+    // === Branch task check: BFS table (No Man Sky approach) ===
     {
         bool is_branch = true;
         int check_prev = a_loc;
-        int nzc = Centerline::g_n24c;
-        int max_z = (int)Centerline::g_zone_is_main.size();
         for (size_t ei = (size_t)start_idx; ei < locs.size(); ei++) {
             int loc = locs[ei];
-            int cols = g_env->cols;
-            int x1 = check_prev % cols, y1 = check_prev / cols;
-            int x2 = loc % cols, y2 = loc / cols;
-            // Start zone check
-            int z1 = (y1 / 24) * nzc + (x1 / 24);
-            if (z1 >= 0 && z1 < max_z) {
-                int d1 = Centerline::g_zone24_density[z1];
-                if (Centerline::g_zone_is_main[z1]) {
-                    if (d1 >= ZONE_HARD_CAP)
-                        { is_branch = false; break; }
-                } else {
-                    if (d1 >= 70) { is_branch = false; break; }
-                }
+            if (!BFSTable::is_branch_path(check_prev, loc)) {
+                is_branch = false;
+                break;
             }
-            // End zone check
-            int z2 = (y2 / 24) * nzc + (x2 / 24);
-            if (z2 >= 0 && z2 < max_z) {
-                int d2 = Centerline::g_zone24_density[z2];
-                if (Centerline::g_zone_is_main[z2]) {
-                    if (d2 >= ZONE_HARD_CAP)
-                        { is_branch = false; break; }
-                } else {
-                    if (d2 >= 70) { is_branch = false; break; }
-                }
-            }
-            // Bresenham line-of-sight
-            int dx = abs(x2 - x1), sx = x1 < x2 ? 1 : -1;
-            int dy = -abs(y2 - y1), sy = y1 < y2 ? 1 : -1;
-            int err = dx + dy;
-            int cx = x1, cy = y1;
-            while (true) {
-                if (g_env->map[cy * cols + cx] != 0) { is_branch = false; break; }
-                if (cx == x2 && cy == y2) break;
-                int e2 = 2 * err;
-                if (e2 >= dy) { err += dy; cx += sx; }
-                if (e2 <= dx) { err += dx; cy += sy; }
-            }
-            if (!is_branch) break;
             check_prev = loc;
         }
         
         if (is_branch) {
-            // Branch task: distance scoring, only block at >= 70
+            // Pure branch task: distance from BFS table (if ready), else Euclidean fallback
             float total = 0;
             int prev = a_loc;
             for (size_t ei = (size_t)start_idx; ei < locs.size(); ei++) {
                 int loc = locs[ei];
-                int r1 = prev / g_env->cols, c1 = prev % g_env->cols;
-                int r2 = locs[ei] / g_env->cols, c2 = locs[ei] % g_env->cols;
-                int z2 = (r2 / 24) * nzc + (c2 / 24);
-                if (z2 >= 0 && z2 < max_z && Centerline::g_zone24_density[z2] >= 70)
-                    return -1e9f;
-                float dist = std::sqrt((float)((c2-c1)*(c2-c1) + (r2-r1)*(r2-r1)));
-                total += 1.0f / (dist + 1.0f);
-                prev = locs[ei];
+                float seg = 0;
+                int d = BFSTable::get_dist(prev, loc);
+                if (d > 0) {
+                    seg = 1.0f / (float)(d + 1);
+                } else {
+                    // Fallback: Euclidean distance
+                    int r1 = prev / g_env->cols, c1 = prev % g_env->cols;
+                    int r2 = loc / g_env->cols, c2 = loc % g_env->cols;
+                    seg = 1.0f / (std::sqrt((float)((c2-c1)*(c2-c1)+(r2-r1)*(r2-r1))) + 1.0f);
+                }
+                total += seg;
+                prev = loc;
             }
             return total;
         }
 
-        // === Escape exemption: compute only remaining errands ===
-        if (start_idx == 0) {
-            float esc_score = connection_exempt_score(a_loc, locs,
-                Centerline::g_zone24_density, Centerline::g_zone_is_main,
-                g_env->map, g_env->cols, nzc);
-            if (esc_score > 0) return esc_score;
-        } else {
-            std::vector<int> remaining(locs.begin() + start_idx, locs.end());
-            float esc_score = connection_exempt_score(a_loc, remaining,
-                Centerline::g_zone24_density, Centerline::g_zone_is_main,
-                g_env->map, g_env->cols, nzc);
-            if (esc_score > 0) return esc_score;
+        // === Escape exemption ===
+        {
+            int nzc = Centerline::g_n24c;
+            if (start_idx == 0) {
+                float esc_score = connection_exempt_score(a_loc, locs,
+                    Centerline::g_zone24_density, Centerline::g_zone_is_main,
+                    g_env->map, g_env->cols, nzc);
+                if (esc_score > 0) return esc_score;
+            } else {
+                std::vector<int> remaining(locs.begin() + start_idx, locs.end());
+                float esc_score = connection_exempt_score(a_loc, remaining,
+                    Centerline::g_zone24_density, Centerline::g_zone_is_main,
+                    g_env->map, g_env->cols, nzc);
+                if (esc_score > 0) return esc_score;
+            }
         }
+
     }
 
     int a_m, a_b;

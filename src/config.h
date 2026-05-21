@@ -27,7 +27,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 
 // ========== Future flow direction lock (pure prediction, no density) ==========
 #define FUTURE_FLOW_LOCK_TH   1.72f    // future flow >= this → lock direction
-#define FUTURE_FLOW_LOCK_SPREAD 3       // lock radius: ±N main points
+#define FUTURE_FLOW_LOCK_SPREAD 2       // lock radius: ±N main points
 #define FUTURE_FLOW_TH_MAX        2.8f    // max TH when active ratio = 0
 #define FUTURE_FLOW_RELAX_DELAY_TICKS 100  // ticks before density relaxation kicks in (DEPRECATED, use ACTIVE_RELAX_DELAY_TICKS)
 #define FUTURE_FLOW_BRANCH_PENALTY  0.6f
@@ -74,6 +74,9 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 // ========== Idle capacity control (空载均匀空跑) ==========
 #define USE_IDLE_CAP         false   // 空载容量控制开关
 #define IDLE_RATIO           0.4f  // 最大活跃 agent 比例 (0~1.0)
+
+// ========== BFS distance table (0=offmain only, 1=full matrix for cloud) ==========
+#define USE_BFS_TABLE       1   // 0: off-main组件 (本地), 1: 全量BFS距离矩阵 (云端)
 
 // ========== Migration flags (step-by-step control, can revert individually) ==========
 #define USE_MP_CENTERLINE   1   // Phase 1: A* widest path centerline (matches heatmap analysis)

@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <map>
 #include "pibt_lock.h"
+#include "bfs_table.h"
 
 namespace Centerline {
 
@@ -444,6 +445,10 @@ void init(const SharedEnvironment* env) {
 #endif
 
     build_zone_ranges();
+
+    // BFS distance table (off-main comps always; full matrix if USE_BFS_TABLE=1)
+    BFSTable::init(env, g_zone_is_main, g_n24c);
+
     g_ready = true;
 }
 
