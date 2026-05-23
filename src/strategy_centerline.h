@@ -636,6 +636,67 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
     CorridorLog::log_assign_stats(step, g_dbg_exempt, g_dbg_branch, g_dbg_dirlock, g_dbg_cap, g_dbg_accepted);
     g_dbg_exempt = 0; g_dbg_branch = 0; g_dbg_dirlock = 0; g_dbg_cap = 0; g_dbg_accepted = 0;
 
+    // === DIAG: snapshot every 500 ticks to file ===
+    if (step > 0 && step % 500 == 0) {
+        int lock_r = 0, lock_l = 0, lock_0 = 0;
+        int locked_narrow = 0, locked_wide = 0, wide_total = 0;
+        for (int si = 0; si < Centerline::g_mp_count; si++) {
+            int ld = Centerline::g_mp_lock_dir[si];
+            if (ld > 0) lock_r++; else if (ld < 0) lock_l++; else lock_0++;
+            int w = Centerline::g_mp_width_p10[si];
+            if (w >= WIDTH_BAND_3) { wide_total++; if (ld != 0) locked_wide++; }
+            else if (w < WIDTH_BAND_2) { if (ld != 0) locked_narrow++; }
+        }
+        int busy = 0;
+        for (int a = 0; a < env->num_of_agents; a++)
+            if (env->curr_task_schedule[a] >= 0) busy++;
+        // Write to diag file (append mode, file opened once)
+        // DIAG goes to stdout, captured by test.py
+        fprintf(stderr, "[DIAG] step=%d busy=%d/%d free_task=%zu lock=(R%d L%d 0%d) narrow_lock=%d wide=%d widelock=%d\n",
+               step, busy, env->num_of_agents, free_tasks.size(),
+               lock_r, lock_l, lock_0, locked_narrow, wide_total, locked_wide);
+        fflush(stderr);
+        
+        // === Detailed 1D histogram every 2000 ticks ===
+        if (step % 2000 == 0) {
+            const int NB = 20;
+            int bins[NB] = {0};  // agent count per bin
+            int tbin[NB] = {0};  // free task target per bin
+            int mp_count = Centerline::g_mp_count;
+            for (int a = 0; a < env->num_of_agents; a++) {
+                int loc = env->curr_states[a].location;
+                if (loc < 0) continue;
+                int m = -1, b;
+                Centerline::project(loc, m, b);
+                if (m >= 0) {
+                    int bi = (m * NB) / (Centerline::g_mp_main_dist[mp_count-1] + 1);
+                    if (bi >= NB) bi = NB-1;
+                    bins[bi]++;
+                }
+            }
+            for (int tid : free_tasks) {
+                auto it = env->task_pool.find(tid);
+                if (it == env->task_pool.end() || it->second.locations.empty()) continue;
+                int last_loc = it->second.locations.back();
+                int m = -1, b;
+                Centerline::project(last_loc, m, b);
+                if (m >= 0) {
+                    int bi = (m * NB) / (Centerline::g_mp_main_dist[mp_count-1] + 1);
+                    if (bi >= NB) bi = NB-1;
+                    tbin[bi]++;
+                }
+            }
+            // Print histogram to stdout
+            fprintf(stderr, "[DIST] step=%d agent1D:", step);
+            for (int bi = 0; bi < NB; bi++) printf(" %d", bins[bi]);
+            printf("\n");
+            fprintf(stderr, "[DIST] step=%d tasks1D:", step);
+            for (int bi = 0; bi < NB; bi++) printf(" %d", tbin[bi]);
+            printf("\n");
+            fflush(stderr);
+        }
+    }
+
 }
 
 } // namespace strategy_centerline
