@@ -503,16 +503,20 @@ void init(const SharedEnvironment* env) {
     }  // end for si loop
 
     // Build bottleneck list from P10 widths
+    // Only lock bottlenecks that span at least BN_MIN_LENGTH consecutive narrow MPs
     g_bn_count = 0;
     g_bn_mp_start.clear();
     g_bn_mp_end.clear();
     for (int si = 0; si < g_mp_count; ) {
-        if (g_mp_p10_width[si] <= 7) {
+        if (g_mp_p10_width[si] <= WIDTH_NARROW_THR) {
             int start_si = si;
-            while (si < g_mp_count && g_mp_p10_width[si] <= 7) si++;
-            g_bn_mp_start.push_back(start_si);
-            g_bn_mp_end.push_back(si - 1);
-            g_bn_count++;
+            while (si < g_mp_count && g_mp_p10_width[si] <= WIDTH_NARROW_THR) si++;
+            int bn_len = si - start_si;
+            if (bn_len >= BN_MIN_LENGTH) {
+                g_bn_mp_start.push_back(start_si);
+                g_bn_mp_end.push_back(si - 1);
+                g_bn_count++;
+            }
         } else {
             si++;
         }
@@ -524,6 +528,19 @@ void init(const SharedEnvironment* env) {
     g_mp_agent_right.assign(g_mp_count, 0);
     g_mp_agent_left.assign(g_mp_count, 0);
 
+    // Dump P10 width distribution
+    {
+        int hist[20] = {0};
+        for (int si = 0; si < g_mp_count; si++) {
+            int w = g_mp_p10_width[si];
+            if (w < 20) hist[w]++;
+        }
+        printf("P10 WIDTH DIST: ");
+        for (int i = 0; i < 20; i++)
+            if (hist[i] > 0) printf("%d:%d ", i, hist[i]);
+        printf("\n");
+    }
+    
 #if USE_WAVE_SCHEDULING
     g_bn_wave_dir.assign(g_bn_count, 0);
     g_bn_wave_age.assign(g_bn_count, 0);
@@ -532,9 +549,10 @@ void init(const SharedEnvironment* env) {
     printf("WAVE_SCHEDULING: ENABLED (exhaust=%.1f, wake=%.1f, idle=%d)\n", WAVE_EXHAUST_THR, WAVE_WAKE_THR, WAVE_MIN_IDLE);
 #endif
     
-    printf("BOTTLENECKS: detected %d (p10 threshold <=7)\n", g_bn_count);
+    printf("BOTTLENECKS: detected %d (min_len=%d)\n", g_bn_count, BN_MIN_LENGTH);
     for (int bi = 0; bi < g_bn_count; bi++)
-        printf("  BN[%d]: MPs=%d-%d\n", bi, g_bn_mp_start[bi], g_bn_mp_end[bi]);
+        printf("  BN[%d]: MPs=%d-%d w=%d\n", bi, g_bn_mp_start[bi], g_bn_mp_end[bi], 
+               g_mp_p10_width[g_bn_mp_start[bi]]);
     fflush(stdout);
 #endif
 

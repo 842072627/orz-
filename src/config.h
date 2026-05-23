@@ -95,7 +95,8 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define WAVE_FLOW_LOOKBACK 40    // recent flow window for throughput tracking
 
 // ========== Corridor width thresholds (for P10 bottleneck detection) ==========
-#define WIDTH_NARROW_THR    7   // width <= this = narrow bottleneck (always locked)
+#define WIDTH_NARROW_THR    7   // width <= this = narrow bottleneck
+#define BN_MIN_LENGTH       2   // min consecutive narrow MPs to form a bottleneck
 #define WIDTH_WIDE_THR      12  // width > this = wide area (interception target)
 #define WIDTH_SUPER_THR     18  // width > this = super wide
 #define WIDTH_WIDE_BONUS    2.0f
