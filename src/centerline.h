@@ -85,6 +85,9 @@ static std::vector<int> g_bn_cross_right;   // [bn_idx] = total agents needing R
 static std::vector<int> g_bn_cross_left;    // [bn_idx] = total agents needing LEFT crossing
 static std::vector<int> g_bn_wave_dir;      // [bn_idx] = current wave direction (+1/-1)
 static std::vector<int> g_bn_wave_age;      // [bn_idx] = ticks since last wave flip
+static std::vector<int> g_agent_fsm;     // [agent_id] = AS_* state
+static std::vector<int> g_agent_fsm_bn;  // [agent_id] = bottleneck index (-1 if none)
+static std::vector<int> g_agent_fsm_dir; // [agent_id] = direction (+1/-1/0)
 #endif
 #endif
 
@@ -262,6 +265,11 @@ inline void build_zone_ranges() {
     std::sort(g_zone_ranges.begin(), g_zone_ranges.end(),
         [](const ZoneMainRange& a, const ZoneMainRange& b) { return a.min_m < b.min_m; });
 }
+
+#define AS_FREE        0   // no task
+#define AS_GOING       1   // has task, moving in wide area, no bottleneck crossing
+#define AS_NEAR_BN     2   // near bottleneck entrance (within ±2 MP), will cross
+#define AS_INSIDE      3   // inside bottleneck (w <= WIDTH_NARROW_THR), following wave
 
 // Forward declaration for per-cell width computation
 inline void compute_cell_width(const SharedEnvironment* env);
@@ -670,16 +678,19 @@ inline void update_mp_direction(const SharedEnvironment* env) {
     
     
 #if USE_WAVE_SCHEDULING
-    // 3. MACROSCOPIC wave scheduling: bottleneck open direction based on
-    // FREE TASK distribution on each side of the bottleneck (1D axis).
-    // Task distribution is STABLE (tasks don't move), direction flips
-    // smoothly when the other side accumulates more work.
+    // 3. MACROSCOPIC wave scheduling: bottleneck direction based on
+    // MACRO data only — task distribution on each 1D side.
+    // Flip condition (ALL must hold):
+    //   (A) Other side has MORE tasks (any amount — no hard threshold)
+    //   (B) Buffer age ≥ 15 ticks (prevent noise oscillation)
+    //   (C) NO agents currently INSIDE the bottleneck (g_agent_fsm==AS_INSIDE)
+    // Macro goal: maximize throughput by pointing wave toward where tasks are.
     std::fill(g_mp_lock_dir.begin(), g_mp_lock_dir.end(), 0);
     
     for (int bi = 0; bi < g_bn_count; bi++) {
         int lo = g_bn_mp_start[bi], hi = g_bn_mp_end[bi];
         
-        // Sum free task mass on each side
+        // (A) Free task mass on each side
         float left_tasks = 0, right_tasks = 0;
         for (int si = 0; si < lo; si++) {
             right_tasks += (float)g_mp_task_right[si];
@@ -690,6 +701,13 @@ inline void update_mp_direction(const SharedEnvironment* env) {
             left_tasks += (float)g_mp_task_left[si];
         }
         
+        // (C) Count agents INSIDE this bottleneck
+        int inside_count = 0;
+        for (int a = 0; a < (int)g_agent_fsm.size(); a++) {
+            if (g_agent_fsm[a] == AS_INSIDE && g_agent_fsm_bn[a] == bi)
+                inside_count++;
+        }
+        
         int cur = g_bn_wave_dir[bi];
         
         if (cur == 0) {
@@ -697,17 +715,12 @@ inline void update_mp_direction(const SharedEnvironment* env) {
             g_bn_wave_dir[bi] = cur;
             g_bn_wave_age[bi] = 0;
         } else {
-            // Flip decision: proven stable parameters
-            // 1.2x task imbalance at 80+ ticks, forced flip at 400 ticks
-            if (g_bn_wave_age[bi] >= 400) {
-                cur = -cur; g_bn_wave_dir[bi] = cur; g_bn_wave_age[bi] = 0;
-            } else if (g_bn_wave_age[bi] >= 80) {
-                if (cur == +1 && left_tasks > right_tasks * 1.2f) {
-                    cur = -1; g_bn_wave_dir[bi] = -1; g_bn_wave_age[bi] = 0;
-                } else if (cur == -1 && right_tasks > left_tasks * 1.2f) {
-                    cur = +1; g_bn_wave_dir[bi] = +1; g_bn_wave_age[bi] = 0;
-                }
-            }
+            int flip = 0;
+            if (cur == +1 && left_tasks > right_tasks) flip = 1;  // LEFT has more macro mass
+            if (cur == -1 && right_tasks > left_tasks) flip = 1;  // RIGHT has more macro mass
+            if (inside_count > 0) flip = 0;  // (C) NEVER flip if agents inside
+            if (g_bn_wave_age[bi] < 20) flip = 0;  // (B) buffer
+            if (flip) { cur = -cur; g_bn_wave_dir[bi] = cur; g_bn_wave_age[bi] = 0; }
         }
         
         // Apply lock
@@ -747,17 +760,8 @@ inline void update_mp_direction(const SharedEnvironment* env) {
 }
 #endif
 // ====== Agent FSM states (1D projection-based) ======
-#define AS_FREE        0   // no task
-#define AS_GOING       1   // has task, moving in wide area, no bottleneck crossing
-#define AS_NEAR_BN     2   // near bottleneck entrance (within ±2 MP), will cross
-#define AS_INSIDE      3   // inside bottleneck (w <= WIDTH_NARROW_THR), following wave
 
-#if USE_WAVE_SCHEDULING
-// Per-agent 1D state tracking (updated each tick)
-static std::vector<int> g_agent_fsm;     // [agent_id] = AS_*
-static std::vector<int> g_agent_fsm_bn;  // [agent_id] = bottleneck index this agent is near/inside (-1)
-static std::vector<int> g_agent_fsm_dir; // [agent_id] = direction agent wants to go through BN (+1/-1/0)
-#endif
+
 
 // ====== Full-link bottleneck crossing computation ======
 // Given agent MP index and task target MP index, find which bottleneck

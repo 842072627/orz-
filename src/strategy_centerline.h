@@ -453,6 +453,9 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
             Centerline::g_agent_task_mp.assign(env->num_of_agents, -1);
             Centerline::g_agent_cross_bn.assign(env->num_of_agents, -1);
             Centerline::g_agent_cross_dir.assign(env->num_of_agents, 0);
+            Centerline::g_agent_fsm.assign(env->num_of_agents, AS_FREE);
+            Centerline::g_agent_fsm_bn.assign(env->num_of_agents, -1);
+            Centerline::g_agent_fsm_dir.assign(env->num_of_agents, 0);
         }
         
         // Reset bottleneck crossing counts, then rebuild from scratch
@@ -503,11 +506,7 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
         
         // ====== Agent FSM computation ======
         // Each agent's state based on 1D position relative to bottlenecks
-        if ((int)Centerline::g_agent_fsm.size() != env->num_of_agents) {
-            Centerline::g_agent_fsm.assign(env->num_of_agents, AS_FREE);
-            Centerline::g_agent_fsm_bn.assign(env->num_of_agents, -1);
-            Centerline::g_agent_fsm_dir.assign(env->num_of_agents, 0);
-        }
+
         
         for (int a = 0; a < env->num_of_agents; a++) {
             int tid = env->curr_task_schedule[a];
