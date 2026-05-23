@@ -500,6 +500,56 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
             }
         }
         
+        // ====== Agent FSM computation ======
+        // Each agent's state based on 1D position relative to bottlenecks
+        if ((int)Centerline::g_agent_fsm.size() != env->num_of_agents) {
+            Centerline::g_agent_fsm.assign(env->num_of_agents, AS_FREE);
+            Centerline::g_agent_fsm_bn.assign(env->num_of_agents, -1);
+            Centerline::g_agent_fsm_dir.assign(env->num_of_agents, 0);
+        }
+        
+        for (int a = 0; a < env->num_of_agents; a++) {
+            int tid = env->curr_task_schedule[a];
+            int agent_mp = Centerline::g_agent_loc_mp[a];
+            
+            if (tid < 0 || agent_mp < 0) {
+                Centerline::g_agent_fsm[a] = AS_FREE;
+                Centerline::g_agent_fsm_bn[a] = -1;
+                Centerline::g_agent_fsm_dir[a] = 0;
+                continue;
+            }
+            
+            // Has task: check if near/inside a bottleneck
+            int cross_bn = Centerline::g_agent_cross_bn[a];
+            int cross_dir = Centerline::g_agent_cross_dir[a];
+            
+            if (cross_bn >= 0 && cross_dir != 0) {
+                int lo = Centerline::g_bn_mp_start[cross_bn];
+                int hi = Centerline::g_bn_mp_end[cross_bn];
+                
+                if (agent_mp >= lo && agent_mp <= hi) {
+                    // INSIDE bottleneck (w <= 7)
+                    Centerline::g_agent_fsm[a] = AS_INSIDE;
+                    Centerline::g_agent_fsm_bn[a] = cross_bn;
+                    Centerline::g_agent_fsm_dir[a] = cross_dir;
+                } else if (agent_mp >= lo - 2 && agent_mp <= hi + 2) {
+                    // Near bottleneck entrance (±2 MPs)
+                    Centerline::g_agent_fsm[a] = AS_NEAR_BN;
+                    Centerline::g_agent_fsm_bn[a] = cross_bn;
+                    Centerline::g_agent_fsm_dir[a] = cross_dir;
+                } else {
+                    // Far from bottleneck, moving through wide area
+                    Centerline::g_agent_fsm[a] = AS_GOING;
+                    Centerline::g_agent_fsm_bn[a] = cross_bn;
+                    Centerline::g_agent_fsm_dir[a] = cross_dir;
+                }
+            } else {
+                // No bottleneck to cross
+                Centerline::g_agent_fsm[a] = AS_GOING;
+                Centerline::g_agent_fsm_bn[a] = -1;
+                Centerline::g_agent_fsm_dir[a] = 0;
+            }
+        }
     }
 #endif
     

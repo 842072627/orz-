@@ -749,6 +749,19 @@ inline void update_mp_direction(const SharedEnvironment* env) {
 #endif
 }
 #endif
+// ====== Agent FSM states (1D projection-based) ======
+#define AS_FREE        0   // no task
+#define AS_GOING       1   // has task, moving in wide area, no bottleneck crossing
+#define AS_NEAR_BN     2   // near bottleneck entrance (within ±2 MP), will cross
+#define AS_INSIDE      3   // inside bottleneck (w <= WIDTH_NARROW_THR), following wave
+
+#if USE_WAVE_SCHEDULING
+// Per-agent 1D state tracking (updated each tick)
+static std::vector<int> g_agent_fsm;     // [agent_id] = AS_*
+static std::vector<int> g_agent_fsm_bn;  // [agent_id] = bottleneck index this agent is near/inside (-1)
+static std::vector<int> g_agent_fsm_dir; // [agent_id] = direction agent wants to go through BN (+1/-1/0)
+#endif
+
 // ====== Full-link bottleneck crossing computation ======
 // Given agent MP index and task target MP index, find which bottleneck
 // the agent must cross and in which direction.

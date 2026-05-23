@@ -80,6 +80,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 // ========== New framework flags ==========
 #define USE_MP_CENTERLINE   1   // A* widest path centerline
 #define USE_MP_DENSITY      1   // 1D main point system
+#define USE_MP_WIDTH        1   // P10 corridor width computation (required for bottleneck detection)
 
 // ========== Bottleneck & direction lock (always-on for narrow corridors) ==========
 #define USE_P10_BOTTLENECK  1   // P10 corridor width bottleneck detection (replaces spread)
