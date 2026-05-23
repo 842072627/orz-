@@ -439,11 +439,13 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
     for (int a = 0; a < env->num_of_agents && a < PIBT_Lock::MAX_AGENTS; a++)
         PIBT_Lock::g_agent_blocked[a] = 0;
     
+    pre_tick_updates(env);
+    auto t_pre = std::chrono::steady_clock::now();
+    
 #if USE_WAVE_SCHEDULING
     // ====== Full-link bottleneck crossing tracking ======
-    // Run BEFORE pre_tick_updates so wave scheduler gets FRESH crossing counts
-    // Scan each agent's current task, project to 1D, find bottleneck crossing
-    // This feeds g_bn_cross_right/left for wave scheduling
+    // Run AFTER pre_tick_updates. Wave scheduler uses T-1 crossing counts
+    // which is fine since age-based flipping is the primary mechanism.
     {
         // Init tracking arrays if needed
         if ((int)Centerline::g_agent_loc_mp.size() != env->num_of_agents) {
@@ -551,9 +553,6 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
         }
     }
 #endif
-    
-    pre_tick_updates(env);
-    auto t_pre = std::chrono::steady_clock::now();
     
     TimePoint endtime = t0 + std::chrono::milliseconds(limit);
     int cols = env->cols;
