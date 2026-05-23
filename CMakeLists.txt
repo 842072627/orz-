@@ -19,9 +19,10 @@ file(GLOB DEFAULT_PLANNER_SOURCES "default_planner/*.cpp")
 
 
 # Find Boost
-ADD_DEFINITIONS(-DBOOST_LOG_DYN_LINK)
+# ADD_DEFINITIONS(-DBOOST_LOG_DYN_LINK)
 find_package( Boost 1.49.0 REQUIRED COMPONENTS program_options system filesystem log log_setup)
 include_directories( ${Boost_INCLUDE_DIRS} )
+add_definitions(-DBOOST_LOG_NO_LIB -DBOOST_LOG_STATIC_LINK -DBOOST_ALL_NO_LIB)
 
 # pybind11 is a required dependency (needed for Python component support at runtime)
 find_package(pybind11 REQUIRED)

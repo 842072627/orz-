@@ -344,6 +344,72 @@ void pre_tick_updates(SharedEnvironment* env) {
         }
     }
     
+#if USE_TRAFFIC_VIEW
+    // === TrafficView1D: task + agent flow per MP ===
+    {
+        // Reset traffic counters
+        std::fill(Centerline::g_mp_task_right.begin(), Centerline::g_mp_task_right.end(), 0);
+        std::fill(Centerline::g_mp_task_left.begin(), Centerline::g_mp_task_left.end(), 0);
+        std::fill(Centerline::g_mp_agent_right.begin(), Centerline::g_mp_agent_right.end(), 0);
+        std::fill(Centerline::g_mp_agent_left.begin(), Centerline::g_mp_agent_left.end(), 0);
+        
+        // Agent flight: already-assigned agents' path direction per MP
+        for (int a = 0; a < env->num_of_agents; a++) {
+            int tid = env->curr_task_schedule[a];
+            if (tid < 0) continue;
+            auto it = env->task_pool.find(tid);
+            if (it == env->task_pool.end() || it->second.locations.empty()) continue;
+            int a_loc = env->curr_states[a].location;
+            if (a_loc < 0) continue;
+            int a_m, a_b;
+            Centerline::project(a_loc, a_m, a_b);
+            if (a_m < 0) continue;
+            int prev_m = a_m;
+            for (int loc : it->second.locations) {
+                int tm, tb;
+                Centerline::project(loc, tm, tb);
+                if (tm < 0) continue;
+                int lo = std::min(prev_m, tm), hi = std::max(prev_m, tm);
+                int dir = (tm > prev_m) ? 1 : -1;
+                for (int si = 0; si < Centerline::g_mp_count; si++) {
+                    int sm = Centerline::g_mp_main_dist[si];
+                    if (sm >= lo && sm <= hi) {
+                        if (dir > 0) Centerline::g_mp_agent_right[si]++;
+                        else Centerline::g_mp_agent_left[si]++;
+                    }
+                }
+                prev_m = tm;
+            }
+        }
+        
+        // Free tasks: unassigned tasks' direction per MP
+        {
+            std::unordered_set<int> assigned;
+            for (int a = 0; a < env->num_of_agents; a++)
+                if (env->curr_task_schedule[a] >= 0) assigned.insert(env->curr_task_schedule[a]);
+            for (auto& kv : env->task_pool) {
+                int tid = kv.first;
+                if (assigned.count(tid)) continue;
+                auto& locs = kv.second.locations;
+                if (locs.size() < 2) continue;
+                int m1, b1, m2, b2;
+                Centerline::project(locs[0], m1, b1);
+                Centerline::project(locs.back(), m2, b2);
+                if (m1 < 0 || m2 < 0) continue;
+                int lo = std::min(m1, m2), hi = std::max(m1, m2);
+                int dir = (m2 > m1) ? 1 : -1;
+                for (int si = 0; si < Centerline::g_mp_count; si++) {
+                    int sm = Centerline::g_mp_main_dist[si];
+                    if (sm >= lo && sm <= hi) {
+                        if (dir > 0) Centerline::g_mp_task_right[si]++;
+                        else Centerline::g_mp_task_left[si]++;
+                    }
+                }
+            }
+        }
+    }
+#endif
+    
     Centerline::compute_future_direction();
     Centerline::update_mp_direction(env);
     
@@ -374,7 +440,69 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
     // Reset PIBT block flags
     for (int a = 0; a < env->num_of_agents && a < PIBT_Lock::MAX_AGENTS; a++)
         PIBT_Lock::g_agent_blocked[a] = 0;
-
+    
+#if USE_WAVE_SCHEDULING
+    // ====== Full-link bottleneck crossing tracking ======
+    // Scan each agent's current task, project to 1D, find bottleneck crossing
+    // This feeds g_bn_cross_right/left for wave scheduling
+    {
+        // Init tracking arrays if needed
+        if ((int)Centerline::g_agent_loc_mp.size() != env->num_of_agents) {
+            Centerline::g_agent_loc_mp.assign(env->num_of_agents, -1);
+            Centerline::g_agent_task_mp.assign(env->num_of_agents, -1);
+            Centerline::g_agent_cross_bn.assign(env->num_of_agents, -1);
+            Centerline::g_agent_cross_dir.assign(env->num_of_agents, 0);
+        }
+        
+        // Reset bottleneck crossing counts, then rebuild from scratch
+        std::fill(Centerline::g_bn_cross_right.begin(), Centerline::g_bn_cross_right.end(), 0);
+        std::fill(Centerline::g_bn_cross_left.begin(), Centerline::g_bn_cross_left.end(), 0);
+        
+        for (int a = 0; a < env->num_of_agents; a++) {
+            int loc = env->curr_states[a].location;
+            if (loc < 0) continue;
+            
+            // Project agent location to MP
+            int agent_m = -1, agent_b;
+            Centerline::project(loc, agent_m, agent_b);
+            int agent_mp = (agent_m >= 0) ? (agent_m / 16) : -1;
+            Centerline::g_agent_loc_mp[a] = agent_mp;
+            
+            // Get agent's current task target
+            int tid = env->curr_task_schedule[a];
+            int task_mp = -1;
+            if (tid >= 0) {
+                auto it = env->task_pool.find(tid);
+                if (it != env->task_pool.end() && !it->second.locations.empty()) {
+                    int task_loc = it->second.locations.back();
+                    int task_m = -1, task_b;
+                    Centerline::project(task_loc, task_m, task_b);
+                    task_mp = (task_m >= 0) ? (task_m / 16) : -1;
+                }
+            }
+            Centerline::g_agent_task_mp[a] = task_mp;
+            
+            // Compute bottleneck crossing
+            int old_cross = Centerline::g_agent_cross_bn[a];
+            int cross_bn = -1, cross_dir = 0;
+            if (agent_mp >= 0 && task_mp >= 0) {
+                cross_bn = Centerline::compute_bottleneck_crossing(agent_mp, task_mp, cross_dir);
+            }
+            Centerline::g_agent_cross_bn[a] = cross_bn;
+            Centerline::g_agent_cross_dir[a] = cross_dir;
+            
+            // Update bottleneck crossing counts
+            if (cross_bn >= 0 && cross_dir != 0) {
+                if (cross_dir == +1)
+                    Centerline::g_bn_cross_right[cross_bn]++;
+                else
+                    Centerline::g_bn_cross_left[cross_bn]++;
+            }
+        }
+        
+    }
+#endif
+    
     TimePoint endtime = t0 + std::chrono::milliseconds(limit);
     int cols = env->cols;
     static int s_step = 0;
@@ -383,25 +511,7 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
     std::vector<int> free_agents;
     std::unordered_set<int> free_tasks;
 
-    // One-time dump of task location -> main_dist
-    static bool s_task_map_printed = false;
-    if (!s_task_map_printed) {
-        s_task_map_printed = true;
-        printf("TASK_MAIN_MAP\n");
-        for (auto& kv : env->task_pool) {
-            int tid = kv.first;
-            Task& task = kv.second;
-            printf("TASK tid=%d:", tid);
-            for (int loc : task.locations) {
-                int m = -1, b = -1;
-                Centerline::project(loc, m, b);
-                printf(" %d(m=%d,b=%d)", loc, m, b);
-            }
-            printf("\n");
-        }
-        printf("TASK_MAIN_MAP_END\n");
-        fflush(stdout);
-    }
+    // TASK_MAIN_MAP removed (was slow, data available in task_profiles.csv)
 
     for (int a = 0; a < env->num_of_agents; a++) {
         if (env->curr_task_schedule[a] < 0) free_agents.push_back(a);
@@ -609,14 +719,7 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
                                         }
                                     }
 #endif
-                                    if (ftotal >= flow_th_inst) {
-                                        int ndir = (Centerline::g_mp_future_right[si] > Centerline::g_mp_future_left[si]) ? +1 : -1;
-                                        for (int d = -FUTURE_FLOW_LOCK_SPREAD; d <= FUTURE_FLOW_LOCK_SPREAD; d++) {
-                                            int ni = si + d;
-                                            if (ni >= 0 && ni < Centerline::g_mp_count)
-                                                Centerline::g_mp_lock_dir[ni] = ndir;
-                                        }
-                                    }
+                                    // Lock is handled by bottleneck lock in update_mp_direction
                                 }
                                 prv = tm2;
                             }
@@ -646,6 +749,82 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
     for (int a : free_agents) {
         if (proposed_schedule[a] < 0) proposed_schedule[a] = -1;
     }
+    
+#if USE_WIDE_INTERCEPT
+    // === Wide-area interception: block REVERSE-direction agents near locked bottlenecks ===
+    for (int a : free_agents) {
+        if (proposed_schedule[a] >= 0) continue;
+        int loc = env->curr_states[a].location;
+        if (loc < 0) continue;
+        int a_w = (int)Centerline::g_cell_width[loc];
+        int a_m = -1, a_b;
+        Centerline::project(loc, a_m, a_b);
+        if (a_m < 0) continue;
+        
+        int asi = a_m / 16;
+        if (asi < 0 || asi >= Centerline::g_mp_count) continue;
+        
+        if (Centerline::g_bn_count <= 0) continue;
+        
+        // Find nearest bottleneck and its lock direction
+        int lock_dir = 0;
+        int nearest_dist = 999;
+        for (int bi = 0; bi < Centerline::g_bn_count; bi++) {
+            int lo = Centerline::g_bn_mp_start[bi];
+            int hi = Centerline::g_bn_mp_end[bi];
+            int ld = Centerline::g_mp_lock_dir[lo];
+            if (ld == 0) continue;
+            int dist = (asi < lo) ? (lo - asi) : (asi - hi);
+            if (dist < nearest_dist) { nearest_dist = dist; lock_dir = ld; }
+        }
+        if (lock_dir == 0) continue;  // no locked bottleneck nearby
+        
+        if (a_w <= 7) {
+            // Inside narrow bottleneck: NEVER block
+            PIBT_Lock::g_agent_blocked[a] = 0;
+            continue;
+        }
+        if (a_w < 12) continue;  // transition zone, don't intercept
+        
+        // MACROSCOPIC: determine if this agent needs to cross the bottleneck
+        // Agent LEFT of bottleneck (asi < lo), wants RIGHT to reach tasks on RIGHT side
+        // Agent RIGHT of bottleneck (asi > hi), wants LEFT to reach tasks on LEFT side
+        // If agent's crossing direction opposes wave lock → block
+        
+        // Find the nearest bottleneck and figure out which side the agent is on
+        int lo = 0, hi = 0;
+        float right_mass = 0, left_mass = 0;
+        for (int bi = 0; bi < Centerline::g_bn_count; bi++) {
+            lo = Centerline::g_bn_mp_start[bi];
+            hi = Centerline::g_bn_mp_end[bi];
+            int ld = Centerline::g_mp_lock_dir[lo];
+            if (ld == 0) continue;
+            if (asi >= lo - 5 && asi <= hi + 5) {
+                // Agent is just outside or inside bottleneck
+                // Compute macroscopic mass on each side
+                for (int si = hi + 1; si < Centerline::g_mp_count; si++) {
+                    right_mass += (float)Centerline::g_mp_task_right[si] + (float)Centerline::g_mp_agent_right[si];
+                    left_mass += (float)Centerline::g_mp_task_left[si] + (float)Centerline::g_mp_agent_left[si];
+                }
+                break;
+            }
+        }
+        
+        int agent_dir = 0;
+        if (asi < lo) {
+            // Agent LEFT of bottleneck → wants RIGHT to cross? Check RIGHT-side mass
+            agent_dir = (right_mass > left_mass) ? +1 : -1;  // toward side with more work
+        } else if (asi > hi) {
+            // Agent RIGHT of bottleneck → wants LEFT to cross? Check LEFT-side mass
+            agent_dir = (left_mass > right_mass) ? -1 : +1;
+        }
+        
+        // Block if agent needs to go AGAINST the bottleneck wave
+        if (agent_dir != 0 && agent_dir != lock_dir)
+            PIBT_Lock::g_agent_blocked[a] = 1;
+        // else same direction: free pass
+    }
+#endif
     
     // Timeout detection
     static int timeout_counter = 0;

@@ -60,6 +60,32 @@ static std::vector<int> g_mp_threshold;      // [si] = density threshold for dir
 static std::vector<float> g_mp_future_right;   // [si] = distance-weighted future flow right
 static std::vector<float> g_mp_future_left;    // [si] = distance-weighted future flow left
 static std::vector<float> g_mp_width_bonus;    // [si] = extra TH from corridor width
+
+// ====== Traffic & bottleneck tracking (flow-aware direction lock) ======
+static std::vector<int> g_mp_p10_width;       // [si] = P10 cell width around each MP
+static std::vector<int> g_mp_task_right;      // [si] = free tasks going right through this MP
+static std::vector<int> g_mp_task_left;       // [si] = free tasks going left through this MP
+static std::vector<int> g_mp_agent_right;     // [si] = agents in-flight going right through this MP
+static std::vector<int> g_mp_agent_left;      // [si] = agents in-flight going left through this MP
+static std::vector<int> g_bn_mp_start;        // [bn_idx] = first MP of bottleneck
+static std::vector<int> g_bn_mp_end;          // [bn_idx] = last MP of bottleneck
+static int g_bn_count = 0;
+
+#if USE_WAVE_SCHEDULING
+// ====== Full-link tracking: agent -> task -> bottleneck crossing ======
+// Updated incrementally when tasks are assigned/completed
+// Per-agent projection to 1D main point
+static std::vector<int> g_agent_loc_mp;     // [agent_id] = current MP index
+static std::vector<int> g_agent_task_mp;    // [agent_id] = task target MP (-1 if none)
+static std::vector<int> g_agent_cross_bn;   // [agent_id] = bottleneck the agent must cross (-1)
+static std::vector<int> g_agent_cross_dir;  // [agent_id] = direction through that BN (+1/-1/0)
+
+// Per-bottleneck accumulation (cumulative, NOT per-tick scanned)
+static std::vector<int> g_bn_cross_right;   // [bn_idx] = total agents needing RIGHT crossing
+static std::vector<int> g_bn_cross_left;    // [bn_idx] = total agents needing LEFT crossing
+static std::vector<int> g_bn_wave_dir;      // [bn_idx] = current wave direction (+1/-1)
+static std::vector<int> g_bn_wave_age;      // [bn_idx] = ticks since last wave flip
+#endif
 #endif
 
 
@@ -436,6 +462,9 @@ void init(const SharedEnvironment* env) {
 
     // Pre-compute per-cell corridor width for p10 scanning
     compute_cell_width(env);
+    
+    // Initialize P10 width array (default 999 = unknown/wide)
+    g_mp_p10_width.assign(g_mp_count, 999);
 
     for (int si = 0; si < g_mp_count; si++) {
         int idx = si * MP_STEP;
@@ -460,12 +489,53 @@ void init(const SharedEnvironment* env) {
             if (!cw_vals.empty()) {
                 std::sort(cw_vals.begin(), cw_vals.end());
                 int p10 = cw_vals[cw_vals.size() / 10];
+                g_mp_p10_width[si] = p10;  // store actual p10 width
                 if (p10 > WIDTH_SUPER_THR) g_mp_width_bonus[si] = WIDTH_SUPER_BONUS;
                 else if (p10 > WIDTH_WIDE_THR) g_mp_width_bonus[si] = WIDTH_WIDE_BONUS;
+            } else {
+                g_mp_p10_width[si] = 999;
             }
+        } else {
+            g_mp_p10_width[si] = 999;
         }
+
 #endif
+    }  // end for si loop
+
+    // Build bottleneck list from P10 widths
+    g_bn_count = 0;
+    g_bn_mp_start.clear();
+    g_bn_mp_end.clear();
+    for (int si = 0; si < g_mp_count; ) {
+        if (g_mp_p10_width[si] <= 7) {
+            int start_si = si;
+            while (si < g_mp_count && g_mp_p10_width[si] <= 7) si++;
+            g_bn_mp_start.push_back(start_si);
+            g_bn_mp_end.push_back(si - 1);
+            g_bn_count++;
+        } else {
+            si++;
+        }
     }
+
+    // Initialize traffic tracking arrays
+    g_mp_task_right.assign(g_mp_count, 0);
+    g_mp_task_left.assign(g_mp_count, 0);
+    g_mp_agent_right.assign(g_mp_count, 0);
+    g_mp_agent_left.assign(g_mp_count, 0);
+
+#if USE_WAVE_SCHEDULING
+    g_bn_wave_dir.assign(g_bn_count, 0);
+    g_bn_wave_age.assign(g_bn_count, 0);
+    g_bn_cross_right.assign(g_bn_count, 0);
+    g_bn_cross_left.assign(g_bn_count, 0);
+    printf("WAVE_SCHEDULING: ENABLED (exhaust=%.1f, wake=%.1f, idle=%d)\n", WAVE_EXHAUST_THR, WAVE_WAKE_THR, WAVE_MIN_IDLE);
+#endif
+    
+    printf("BOTTLENECKS: detected %d (p10 threshold <=7)\n", g_bn_count);
+    for (int bi = 0; bi < g_bn_count; bi++)
+        printf("  BN[%d]: MPs=%d-%d\n", bi, g_bn_mp_start[bi], g_bn_mp_end[bi]);
+    fflush(stdout);
 #endif
 
     build_zone_ranges();
@@ -580,42 +650,121 @@ inline void update_mp_direction(const SharedEnvironment* env) {
         }
     }
     
-    // 3. Direction lock: future flow + active ratio relaxation
+    
+#if USE_WAVE_SCHEDULING
+    // 3. MACROSCOPIC wave scheduling: bottleneck open direction based on
+    // FREE TASK distribution on each side of the bottleneck (1D axis).
+    // g_mp_task_right/left = free tasks wanting to go right/left at each MP.
+    // Wave direction = side with MORE total task mass.
+    // Tasks don't move — this is STABLE, not noisy like agent positions.
+    // Flip when the other side accumulates significantly more tasks.
     std::fill(g_mp_lock_dir.begin(), g_mp_lock_dir.end(), 0);
-    for (int si = 0; si < g_mp_count; si++) {
-        float ftotal = g_mp_future_right[si] + g_mp_future_left[si];
-        float flow_th = FUTURE_FLOW_LOCK_TH + g_mp_width_bonus[si];
-#if USE_ACTIVE_RATIO_RELAX
-        if (env->curr_timestep >= ACTIVE_RELAX_DELAY_TICKS && g_mp_density[si] < ACTIVE_RATIO_DENSITY_MAX) {
-            float active = CenterlineAccess::active_ratio;
-            if (active < ACTIVE_RATIO_BASELINE) {
-                float factor = (ACTIVE_RATIO_BASELINE - active) / ACTIVE_RATIO_BASELINE;
-#if ACTIVE_RATIO_RELAX_EXP >= 2
-                float _base = factor;
-                for (int _e = 1; _e < ACTIVE_RATIO_RELAX_EXP; _e++) factor *= _base;
-#endif
-                float relax = factor * (FUTURE_FLOW_TH_MAX - FUTURE_FLOW_LOCK_TH);
-                flow_th += relax;
+    
+    for (int bi = 0; bi < g_bn_count; bi++) {
+        int lo = g_bn_mp_start[bi], hi = g_bn_mp_end[bi];
+        
+        // Sum free task mass on each side of this bottleneck
+        float left_tasks = 0, right_tasks = 0;
+        for (int si = 0; si < lo; si++) {
+            right_tasks += (float)g_mp_task_right[si];
+            left_tasks += (float)g_mp_task_left[si];
+        }
+        for (int si = hi + 1; si < g_mp_count; si++) {
+            right_tasks += (float)g_mp_task_right[si];
+            left_tasks += (float)g_mp_task_left[si];
+        }
+        
+        int cur = g_bn_wave_dir[bi];
+        
+        if (cur == 0) {
+            // Initial: pick majority
+            cur = (right_tasks >= left_tasks) ? +1 : -1;
+            g_bn_wave_dir[bi] = cur;
+            g_bn_wave_age[bi] = 0;
+        } else if (cur == +1) {
+            // RIGHT wave: agents go RIGHT to pick up tasks on RIGHT side
+            // Flip when LEFT side accumulates 40%+ more tasks
+            if (left_tasks > right_tasks * 1.4f && g_bn_wave_age[bi] >= 15) {
+                cur = -1;
+                g_bn_wave_dir[bi] = -1;
+                g_bn_wave_age[bi] = 0;
+            }
+        } else { // cur == -1
+            // LEFT wave: agents go LEFT to pick up tasks on LEFT side
+            if (right_tasks > left_tasks * 1.4f && g_bn_wave_age[bi] >= 15) {
+                cur = +1;
+                g_bn_wave_dir[bi] = +1;
+                g_bn_wave_age[bi] = 0;
             }
         }
-#endif
-        if (ftotal < flow_th) continue;
-        int dir = (g_mp_future_right[si] > g_mp_future_left[si]) ? +1 : -1;
-        for (int d = -FUTURE_FLOW_LOCK_SPREAD; d <= FUTURE_FLOW_LOCK_SPREAD; d++) {
-            int ni = si + d;
-            if (ni < 0 || ni >= g_mp_count) continue;
-            g_mp_lock_dir[ni] = dir;
-        }
+        
+        // Apply lock
+        for (int si = lo; si <= hi; si++)
+            g_mp_lock_dir[si] = cur;
     }
+#endif
+    
+#ifndef USE_WAVE_SCHEDULING
+
+    // Original reactive bottleneck-level lock (fallback)
+    std::fill(g_mp_lock_dir.begin(), g_mp_lock_dir.end(), 0);
+    
+    for (int bi = 0; bi < g_bn_count; bi++) {
+        int lo = g_bn_mp_start[bi], hi = g_bn_mp_end[bi];
+        
+        float right_demand = 0, left_demand = 0;
+        for (int si = lo; si <= hi; si++) {
+            right_demand += g_mp_future_right[si];
+            left_demand += g_mp_future_left[si];
+            right_demand += (float)g_mp_task_right[si];
+            left_demand += (float)g_mp_task_left[si];
+            right_demand += (float)g_mp_agent_right[si];
+            left_demand += (float)g_mp_agent_left[si];
+        }
+        
+        int lock_dir = +1;
+        if (left_demand > right_demand * 1.3f && left_demand >= 3)
+            lock_dir = -1;
+        for (int si = lo; si <= hi; si++)
+            g_mp_lock_dir[si] = lock_dir;
+    }
+#endif
 }
 #endif
+// ====== Full-link bottleneck crossing computation ======
+// Given agent MP index and task target MP index, find which bottleneck
+// the agent must cross and in which direction.
+// Returns bottleneck index, or -1 if no crossing needed.
+inline int compute_bottleneck_crossing(int agent_mp, int task_mp, int& out_dir) {
+    out_dir = 0;
+    if (agent_mp < 0 || task_mp < 0 || g_bn_count <= 0) return -1;
+    
+    // Find bottleneck between agent and task
+    for (int bi = 0; bi < g_bn_count; bi++) {
+        int lo = g_bn_mp_start[bi], hi = g_bn_mp_end[bi];
+        
+        // Check if bottleneck lies between agent and task
+        if (agent_mp < lo && task_mp > hi) {
+            // Agent LEFT of bottleneck, task RIGHT → cross RIGHT
+            out_dir = +1;
+            return bi;
+        }
+        if (agent_mp > hi && task_mp < lo) {
+            // Agent RIGHT of bottleneck, task LEFT → cross LEFT
+            out_dir = -1;
+            return bi;
+        }
+        
+        // Agent or task INSIDE bottleneck: no crossing (already inside)
+        if ((agent_mp >= lo && agent_mp <= hi) ||
+            (task_mp >= lo && task_mp <= hi)) {
+            continue;
+        }
+    }
+    return -1;  // no bottleneck crossing needed
+}
+
 // ====== NDJSON MP analysis log (disabled for cloud) ======
-// #if USE_MP_DENSITY
-// static FILE* g_mp_log_f = NULL;
-// static void mp_log_flush() {
-//     ...
-// }
-// #endif
 
 // ====== 16-direction per-cell corridor width (static, computed once at init) ======
 // Ported from cell_width_map_v3.py: 16 pairs, step-length normalized, dead-end skip

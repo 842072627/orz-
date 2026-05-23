@@ -27,7 +27,6 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 
 // ========== Future flow direction lock (pure prediction, no density) ==========
 #define FUTURE_FLOW_LOCK_TH   1.72f    // future flow >= this → lock direction
-#define FUTURE_FLOW_LOCK_SPREAD 2       // lock radius: ±N main points
 #define FUTURE_FLOW_TH_MAX        2.8f    // max TH when active ratio = 0
 #define FUTURE_FLOW_RELAX_DELAY_TICKS 100  // ticks before density relaxation kicks in (DEPRECATED, use ACTIVE_RELAX_DELAY_TICKS)
 #define FUTURE_FLOW_BRANCH_PENALTY  0.6f
@@ -78,14 +77,29 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 // ========== BFS distance table (0=offmain only, 1=full matrix for cloud) ==========
 #define USE_BFS_TABLE       0   // 0: off-main组件 (本地), 1: 全量BFS距离矩阵 (云端)
 
-// ========== Migration flags (step-by-step control, can revert individually) ==========
-#define USE_MP_CENTERLINE   1   // Phase 1: A* widest path centerline (matches heatmap analysis)
-#define USE_MP_DENSITY      1   // Phase 2: 1D main point density (24x24 squares centered on main points)
-#define USE_MP_WIDTH        1   // corridor width-adaptive direction lock thresholds
-#define WIDTH_WIDE_THR      12  // width > this → WIDE (+WIDTH_WIDE_BONUS)
-#define WIDTH_SUPER_THR     18  // width > this → SUPER WIDE (+WIDTH_SUPER_BONUS)
-#define WIDTH_WIDE_BONUS    2.0f  // extra TH for wide corridor
-#define WIDTH_SUPER_BONUS   4.0f  // extra TH for super wide corridor
+// ========== New framework flags ==========
+#define USE_MP_CENTERLINE   1   // A* widest path centerline
+#define USE_MP_DENSITY      1   // 1D main point system
+
+// ========== Bottleneck & direction lock (always-on for narrow corridors) ==========
+#define USE_P10_BOTTLENECK  1   // P10 corridor width bottleneck detection (replaces spread)
+#define USE_TRAFFIC_VIEW    1   // TrafficView1D: per-MP task + agent flow tracking
+#define USE_BOTTLENECK_LOCK 1   // Bottleneck-only direction lock (replaces per-MP future flow locks)
+#define USE_WAVE_SCHEDULING 1   // Bottleneck wave scheduling (replaces reactive lock)
+#define USE_WIDE_INTERCEPT  0   // Wide-area interception: OFF for now (precision tool)
+
+// ========== Wave scheduling parameters ==========
+#define WAVE_EXHAUST_THR    1.0f  // demand below this = side exhausted (ready to flip)
+#define WAVE_WAKE_THR       4.0f  // demand above this = other side is waiting (green wave needed)
+#define WAVE_MIN_IDLE     20     // min ticks to wait before flip even if exhausted
+#define WAVE_FLOW_LOOKBACK 40    // recent flow window for throughput tracking
+
+// ========== Corridor width thresholds (for P10 bottleneck detection) ==========
+#define WIDTH_NARROW_THR    7   // width <= this = narrow bottleneck (always locked)
+#define WIDTH_WIDE_THR      12  // width > this = wide area (interception target)
+#define WIDTH_SUPER_THR     18  // width > this = super wide
+#define WIDTH_WIDE_BONUS    2.0f
+#define WIDTH_SUPER_BONUS   4.0f
 
 // Runtime strategy name getter (used by TaskScheduler.cpp)
 inline std::string get_orz_strategy() { return ORZ_SCHEDULER; }
