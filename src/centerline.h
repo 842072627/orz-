@@ -672,16 +672,14 @@ inline void update_mp_direction(const SharedEnvironment* env) {
 #if USE_WAVE_SCHEDULING
     // 3. MACROSCOPIC wave scheduling: bottleneck open direction based on
     // FREE TASK distribution on each side of the bottleneck (1D axis).
-    // g_mp_task_right/left = free tasks wanting to go right/left at each MP.
-    // Wave direction = side with MORE total task mass.
-    // Tasks don't move — this is STABLE, not noisy like agent positions.
-    // Flip when the other side accumulates significantly more tasks.
+    // Task distribution is STABLE (tasks don't move), direction flips
+    // smoothly when the other side accumulates more work.
     std::fill(g_mp_lock_dir.begin(), g_mp_lock_dir.end(), 0);
     
     for (int bi = 0; bi < g_bn_count; bi++) {
         int lo = g_bn_mp_start[bi], hi = g_bn_mp_end[bi];
         
-        // Sum free task mass on each side of this bottleneck
+        // Sum free task mass on each side
         float left_tasks = 0, right_tasks = 0;
         for (int si = 0; si < lo; si++) {
             right_tasks += (float)g_mp_task_right[si];
@@ -695,24 +693,28 @@ inline void update_mp_direction(const SharedEnvironment* env) {
         int cur = g_bn_wave_dir[bi];
         
         if (cur == 0) {
-            // Initial: pick majority
             cur = (right_tasks >= left_tasks) ? +1 : -1;
             g_bn_wave_dir[bi] = cur;
             g_bn_wave_age[bi] = 0;
-        } else if (cur == +1) {
-            // RIGHT wave: agents go RIGHT to pick up tasks on RIGHT side
-            // Flip when LEFT side accumulates 40%+ more tasks
-            if (left_tasks > right_tasks * 1.4f && g_bn_wave_age[bi] >= 15) {
-                cur = -1;
-                g_bn_wave_dir[bi] = -1;
-                g_bn_wave_age[bi] = 0;
-            }
-        } else { // cur == -1
-            // LEFT wave: agents go LEFT to pick up tasks on LEFT side
-            if (right_tasks > left_tasks * 1.4f && g_bn_wave_age[bi] >= 15) {
-                cur = +1;
-                g_bn_wave_dir[bi] = +1;
-                g_bn_wave_age[bi] = 0;
+        } else {
+            // Check flip conditions (only if wave stable for 30+ ticks)
+            if (g_bn_wave_age[bi] >= 30) {
+                int right_cross = g_bn_cross_right[bi];
+                int left_cross = g_bn_cross_left[bi];
+                
+                if (cur == +1) {
+                    // RIGHT wave: flip if LEFT backlog dominates OR RIGHT queue empty
+                    int flip = 0;
+                    if (left_tasks > right_tasks * 1.4f && left_tasks >= right_tasks + 3) flip = 1;
+                    if (right_cross <= 0 && left_cross > 0) flip = 1;  // queue exhausted
+                    if (flip) { cur = -1; g_bn_wave_dir[bi] = -1; g_bn_wave_age[bi] = 0; }
+                } else { // cur == -1
+                    // LEFT wave: flip if RIGHT backlog dominates OR LEFT queue empty
+                    int flip = 0;
+                    if (right_tasks > left_tasks * 1.4f && right_tasks >= left_tasks + 3) flip = 1;
+                    if (left_cross <= 0 && right_cross > 0) flip = 1;  // queue exhausted
+                    if (flip) { cur = +1; g_bn_wave_dir[bi] = +1; g_bn_wave_age[bi] = 0; }
+                }
             }
         }
         
