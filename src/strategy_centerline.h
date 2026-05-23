@@ -428,9 +428,7 @@ void pre_tick_updates(SharedEnvironment* env) {
 
 void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule) {
     auto t0 = std::chrono::steady_clock::now();
-    pre_tick_updates(env);
-    auto t_pre = std::chrono::steady_clock::now();
-
+    
     // Init parked task tracking
     if ((int)g_parked_task.size() != env->num_of_agents)
         g_parked_task.assign(env->num_of_agents, -1);
@@ -443,6 +441,7 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
     
 #if USE_WAVE_SCHEDULING
     // ====== Full-link bottleneck crossing tracking ======
+    // Run BEFORE pre_tick_updates so wave scheduler gets FRESH crossing counts
     // Scan each agent's current task, project to 1D, find bottleneck crossing
     // This feeds g_bn_cross_right/left for wave scheduling
     {
@@ -552,6 +551,9 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
         }
     }
 #endif
+    
+    pre_tick_updates(env);
+    auto t_pre = std::chrono::steady_clock::now();
     
     TimePoint endtime = t0 + std::chrono::milliseconds(limit);
     int cols = env->cols;
@@ -888,6 +890,22 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
     
     // Log assignment stats for this tick
     CorridorLog::log_assign_stats(step, g_dbg_exempt, g_dbg_branch, g_dbg_dirlock, g_dbg_cap, g_dbg_accepted);
+    
+#if USE_WAVE_SCHEDULING
+    // Print wave scheduler diagnostics every 100 ticks
+    if (step % 100 == 0) {
+        printf("DIAG[%d] assign: exempt=%d branch=%d dirlock=%d cap=%d accept=%d |",
+               step, g_dbg_exempt, g_dbg_branch, g_dbg_dirlock, g_dbg_cap, g_dbg_accepted);
+        for (int bi = 0; bi < Centerline::g_bn_count && bi < 5; bi++) {
+            int wd = Centerline::g_bn_wave_dir[bi];
+            printf(" BN%d:%s(L=%d,R=%d)", bi, (wd==1)?"R":(wd==-1)?"L":"?",
+                   Centerline::g_bn_cross_left[bi], Centerline::g_bn_cross_right[bi]);
+        }
+        printf("\n");
+        fflush(stdout);
+    }
+#endif
+    
     g_dbg_exempt = 0; g_dbg_branch = 0; g_dbg_dirlock = 0; g_dbg_cap = 0; g_dbg_accepted = 0;
 
 }
