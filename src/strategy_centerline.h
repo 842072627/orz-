@@ -552,7 +552,32 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
         }
     }
 #endif
-    
+
+#if USE_BOTTLENECK_LOCK
+    // === Bottleneck entrance control: block agents trying to enter against wave ===
+    for (int a = 0; a < env->num_of_agents; a++) {
+        int tid = env->curr_task_schedule[a];
+        if (tid < 0) {
+            PIBT_Lock::g_agent_blocked[a] = 0;  // no task, free to move
+            continue;
+        }
+        int fsm = Centerline::g_agent_fsm[a];
+        int fsm_bn = Centerline::g_agent_fsm_bn[a];
+        int cross_dir = Centerline::g_agent_fsm_dir[a];
+        if (fsm_bn < 0 || cross_dir == 0) continue;  // no bottleneck to cross
+        int wave_dir = Centerline::g_bn_wave_dir[fsm_bn];
+        if (wave_dir == 0) continue;  // wave not initialized yet
+
+        if (fsm == AS_NEAR_BN && cross_dir != wave_dir) {
+            // About to enter bottleneck against wave  BLOCK at entrance
+            PIBT_Lock::g_agent_blocked[a] = 1;
+        }
+        // AS_INSIDE: don't block even if against wave
+        // Already committed inside the bottleneck, blocking would trap them forever
+        // They will exit on their own and clear the bottleneck
+    }
+#endif
+
     TimePoint endtime = t0 + std::chrono::milliseconds(limit);
     int cols = env->cols;
     static int s_step = 0;
@@ -661,8 +686,20 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
         }
 
         std::unordered_set<int> done_tasks;
+        int timeout_counter = 0;
         for (int a : free_agents) {
             if (proposed_schedule[a] >= 0) continue;
+
+            // Timeout check: log every 10th timeout, but KEEP GOING (no break)
+            static int s_timeout_printed = 0;
+            if (std::chrono::steady_clock::now() > endtime) {
+                timeout_counter++;
+                if (timeout_counter % 10 == 1) {
+                    printf("[SCHEDULE TIMEOUT #%d] step=%d, free_agents=%zu, remain_tasks=%zu\n",
+                           timeout_counter, step, free_agents.size(), free_tasks.size());
+                    fflush(stdout);
+                }
+            }
 
             int a_loc = env->curr_states[a].location;
             int a_zone = zid(a_loc, cols);

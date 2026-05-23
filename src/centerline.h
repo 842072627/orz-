@@ -716,8 +716,14 @@ inline void update_mp_direction(const SharedEnvironment* env) {
             g_bn_wave_age[bi] = 0;
         } else {
             int flip = 0;
-            if (cur == +1 && left_tasks > right_tasks) flip = 1;  // LEFT has more macro mass
-            if (cur == -1 && right_tasks > left_tasks) flip = 1;  // RIGHT has more macro mass
+            // Primary: crossing queue depth (agents waiting to cross)
+            int left_q = g_bn_cross_left[bi];
+            int right_q = g_bn_cross_right[bi];
+            // Secondary: task distribution (fallback when queues balanced)
+            if (cur == +1 && left_q > right_q + 5) flip = 1;
+            else if (cur == -1 && right_q > left_q + 5) flip = 1;
+            else if (cur == +1 && left_tasks > right_tasks * 1.5f) flip = 1;
+            else if (cur == -1 && right_tasks > left_tasks * 1.5f) flip = 1;
             if (inside_count > 0) flip = 0;  // (C) NEVER flip if agents inside
             if (g_bn_wave_age[bi] < 20) flip = 0;  // (B) buffer
             if (flip) { cur = -cur; g_bn_wave_dir[bi] = cur; g_bn_wave_age[bi] = 0; }
