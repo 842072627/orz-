@@ -697,23 +697,17 @@ inline void update_mp_direction(const SharedEnvironment* env) {
             g_bn_wave_dir[bi] = cur;
             g_bn_wave_age[bi] = 0;
         } else {
-            // Check flip conditions (only if wave stable for 30+ ticks)
-            if (g_bn_wave_age[bi] >= 30) {
-                int right_cross = g_bn_cross_right[bi];
-                int left_cross = g_bn_cross_left[bi];
-                
-                if (cur == +1) {
-                    // RIGHT wave: flip if LEFT backlog dominates OR RIGHT queue empty
-                    int flip = 0;
-                    if (left_tasks > right_tasks * 1.4f && left_tasks >= right_tasks + 3) flip = 1;
-                    if (right_cross <= 0 && left_cross > 0) flip = 1;  // queue exhausted
-                    if (flip) { cur = -1; g_bn_wave_dir[bi] = -1; g_bn_wave_age[bi] = 0; }
-                } else { // cur == -1
-                    // LEFT wave: flip if RIGHT backlog dominates OR LEFT queue empty
-                    int flip = 0;
-                    if (right_tasks > left_tasks * 1.4f && right_tasks >= left_tasks + 3) flip = 1;
-                    if (left_cross <= 0 && right_cross > 0) flip = 1;  // queue exhausted
-                    if (flip) { cur = +1; g_bn_wave_dir[bi] = +1; g_bn_wave_age[bi] = 0; }
+            // Flip decision: three-tier
+            // 1. Force flip after 400+ ticks (guarantees both sides get service)
+            // 2. Task imbalance at 80+ ticks
+            if (g_bn_wave_age[bi] >= 400) {
+                // Force flip: no direction should dominate forever
+                cur = -cur; g_bn_wave_dir[bi] = cur; g_bn_wave_age[bi] = 0;
+            } else if (g_bn_wave_age[bi] >= 80) {
+                if (cur == +1 && left_tasks > right_tasks * 1.2f && left_tasks >= right_tasks + 3) {
+                    cur = -1; g_bn_wave_dir[bi] = -1; g_bn_wave_age[bi] = 0;
+                } else if (cur == -1 && right_tasks > left_tasks * 1.2f && right_tasks >= left_tasks + 3) {
+                    cur = +1; g_bn_wave_dir[bi] = +1; g_bn_wave_age[bi] = 0;
                 }
             }
         }
@@ -721,6 +715,9 @@ inline void update_mp_direction(const SharedEnvironment* env) {
         // Apply lock
         for (int si = lo; si <= hi; si++)
             g_mp_lock_dir[si] = cur;
+        
+        // Increment wave age every tick
+        g_bn_wave_age[bi]++;
     }
 #endif
     
