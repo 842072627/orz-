@@ -60,6 +60,19 @@ static std::vector<int> g_mp_threshold;      // [si] = density threshold for dir
 static std::vector<float> g_mp_future_right;   // [si] = distance-weighted future flow right
 static std::vector<float> g_mp_future_left;    // [si] = distance-weighted future flow left
 static std::vector<float> g_mp_width_bonus;    // [si] = extra TH from corridor width
+static std::vector<int> g_mp_width_p10;        // [si] = P10 corridor width (cells) per MP
+// Get width-adaptive direction lock threshold for MP si
+inline float get_mp_flow_th(int si) {
+#if USE_PER_WIDTH_LOCK
+    int w = g_mp_width_p10[si];
+    if (w < WIDTH_BAND_1) return FF_TH_BAND_1;
+    if (w < WIDTH_BAND_2) return FF_TH_BAND_2;
+    if (w < WIDTH_BAND_3) return FF_TH_BAND_3;
+    return 9999.0f;  // super wide: never lock
+#else
+    return FUTURE_FLOW_LOCK_TH + g_mp_width_bonus[si];
+#endif
+}
 #endif
 
 
@@ -417,6 +430,7 @@ void init(const SharedEnvironment* env) {
     g_mp_future_right.assign(g_mp_count, 0.0f);
     g_mp_future_left.assign(g_mp_count, 0.0f);
     g_mp_width_bonus.assign(g_mp_count, 0.0f);
+    g_mp_width_p10.assign(g_mp_count, 999);
     
     // Compute tangents for centerline cells
     int n_cl = (int)g_centerline_cells.size();
@@ -460,6 +474,7 @@ void init(const SharedEnvironment* env) {
             if (!cw_vals.empty()) {
                 std::sort(cw_vals.begin(), cw_vals.end());
                 int p10 = cw_vals[cw_vals.size() / 10];
+                g_mp_width_p10[si] = p10;
                 if (p10 > WIDTH_SUPER_THR) g_mp_width_bonus[si] = WIDTH_SUPER_BONUS;
                 else if (p10 > WIDTH_WIDE_THR) g_mp_width_bonus[si] = WIDTH_WIDE_BONUS;
             }
@@ -584,18 +599,18 @@ inline void update_mp_direction(const SharedEnvironment* env) {
     std::fill(g_mp_lock_dir.begin(), g_mp_lock_dir.end(), 0);
     for (int si = 0; si < g_mp_count; si++) {
         float ftotal = g_mp_future_right[si] + g_mp_future_left[si];
-        float flow_th = FUTURE_FLOW_LOCK_TH + g_mp_width_bonus[si];
-#if USE_ACTIVE_RATIO_RELAX
-        if (env->curr_timestep >= ACTIVE_RELAX_DELAY_TICKS && g_mp_density[si] < ACTIVE_RATIO_DENSITY_MAX) {
-            float active = CenterlineAccess::active_ratio;
-            if (active < ACTIVE_RATIO_BASELINE) {
-                float factor = (ACTIVE_RATIO_BASELINE - active) / ACTIVE_RATIO_BASELINE;
-#if ACTIVE_RATIO_RELAX_EXP >= 2
-                float _base = factor;
-                for (int _e = 1; _e < ACTIVE_RATIO_RELAX_EXP; _e++) factor *= _base;
-#endif
-                float relax = factor * (FUTURE_FLOW_TH_MAX - FUTURE_FLOW_LOCK_TH);
-                flow_th += relax;
+        float flow_th = get_mp_flow_th(si);
+        if (flow_th >= 9999.0f) continue;  // super wide: never lock
+#if USE_BAND_3_RELAX
+        // Apply active ratio relaxation to moderate-width zones
+        if (g_mp_width_p10[si] >= WIDTH_BAND_2 && g_mp_width_p10[si] < WIDTH_BAND_3) {
+            if (env->curr_timestep >= ACTIVE_RELAX_DELAY_TICKS && g_mp_density[si] < ACTIVE_RATIO_DENSITY_MAX) {
+                float active = CenterlineAccess::active_ratio;
+                if (active < ACTIVE_RATIO_BASELINE) {
+                    float factor = (ACTIVE_RATIO_BASELINE - active) / ACTIVE_RATIO_BASELINE;
+                    for (int _e = 1; _e < ACTIVE_RATIO_RELAX_EXP; _e++) factor *= factor;
+                    flow_th += factor * (FUTURE_FLOW_TH_MAX - FF_TH_BAND_2);
+                }
             }
         }
 #endif

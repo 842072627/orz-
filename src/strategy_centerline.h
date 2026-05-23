@@ -110,20 +110,7 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
                     if (sm < 0) continue;
                     if (sm < lo || sm > hi) continue;
                     float ftotal = Centerline::g_mp_future_right[si] + Centerline::g_mp_future_left[si];
-                    float flow_th_ex = FUTURE_FLOW_LOCK_TH + Centerline::g_mp_width_bonus[si];
-#if USE_ACTIVE_RATIO_RELAX
-                    if (step >= ACTIVE_RELAX_DELAY_TICKS && Centerline::g_mp_density[si] < ACTIVE_RATIO_DENSITY_MAX) {
-                        float active = CenterlineAccess::active_ratio;
-                        if (active < ACTIVE_RATIO_BASELINE) {
-                            float factor = (ACTIVE_RATIO_BASELINE - active) / ACTIVE_RATIO_BASELINE;
-#if ACTIVE_RATIO_RELAX_EXP >= 2
-                            float _base = factor;
-                            for (int _e = 1; _e < ACTIVE_RATIO_RELAX_EXP; _e++) factor *= _base;
-#endif
-                            flow_th_ex += factor * (FUTURE_FLOW_TH_MAX - FUTURE_FLOW_LOCK_TH);
-                        }
-                    }
-#endif
+                    float flow_th_ex = Centerline::get_mp_flow_th(si);
                     if (ftotal >= flow_th_ex) {
                         exempt = false;
                         break;
@@ -595,20 +582,8 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
                                         Centerline::g_mp_future_left[si] += w;
                                     // Instant lock: recompute lock_dir right after adding flow
                                     float ftotal = Centerline::g_mp_future_right[si] + Centerline::g_mp_future_left[si];
-                                    float flow_th_inst = FUTURE_FLOW_LOCK_TH + Centerline::g_mp_width_bonus[si];
-#if USE_ACTIVE_RATIO_RELAX
-                                    if (step >= ACTIVE_RELAX_DELAY_TICKS && Centerline::g_mp_density[si] < ACTIVE_RATIO_DENSITY_MAX) {
-                                        float active = CenterlineAccess::active_ratio;
-                                        if (active < ACTIVE_RATIO_BASELINE) {
-                                            float factor = (ACTIVE_RATIO_BASELINE - active) / ACTIVE_RATIO_BASELINE;
-#if ACTIVE_RATIO_RELAX_EXP >= 2
-                                            float _base = factor;
-                                            for (int _e = 1; _e < ACTIVE_RATIO_RELAX_EXP; _e++) factor *= _base;
-#endif
-                                            flow_th_inst += factor * (FUTURE_FLOW_TH_MAX - FUTURE_FLOW_LOCK_TH);
-                                        }
-                                    }
-#endif
+                                    float flow_th_inst = Centerline::get_mp_flow_th(si);
+                                    if (flow_th_inst >= 9999.0f) continue;  // super wide
                                     if (ftotal >= flow_th_inst) {
                                         int ndir = (Centerline::g_mp_future_right[si] > Centerline::g_mp_future_left[si]) ? +1 : -1;
                                         for (int d = -FUTURE_FLOW_LOCK_SPREAD; d <= FUTURE_FLOW_LOCK_SPREAD; d++) {
