@@ -87,7 +87,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define USE_TRAFFIC_VIEW    1   // TrafficView1D: per-MP task + agent flow tracking
 #define USE_BOTTLENECK_LOCK 1   // Bottleneck-only direction lock (replaces per-MP future flow locks)
 #define USE_WAVE_SCHEDULING 1   // Bottleneck wave scheduling (replaces reactive lock)
-#define USE_WIDE_INTERCEPT  1   // Wide-area interception: ON (Phase C step 1)
+#define USE_WIDE_INTERCEPT  0   // Wide-area interception: OFF (seems to cause PIBT issues)
 
 // ========== Wave scheduling parameters ==========
 #define WAVE_EXHAUST_THR    1.0f  // demand below this = side exhausted (ready to flip)

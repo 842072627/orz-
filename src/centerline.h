@@ -697,16 +697,14 @@ inline void update_mp_direction(const SharedEnvironment* env) {
             g_bn_wave_dir[bi] = cur;
             g_bn_wave_age[bi] = 0;
         } else {
-            // Flip decision: three-tier
-            // 1. Force flip after 400+ ticks (guarantees both sides get service)
-            // 2. Task imbalance at 80+ ticks
+            // Flip decision: proven stable parameters
+            // 1.2x task imbalance at 80+ ticks, forced flip at 400 ticks
             if (g_bn_wave_age[bi] >= 400) {
-                // Force flip: no direction should dominate forever
                 cur = -cur; g_bn_wave_dir[bi] = cur; g_bn_wave_age[bi] = 0;
             } else if (g_bn_wave_age[bi] >= 80) {
-                if (cur == +1 && left_tasks > right_tasks * 1.2f && left_tasks >= right_tasks + 3) {
+                if (cur == +1 && left_tasks > right_tasks * 1.2f) {
                     cur = -1; g_bn_wave_dir[bi] = -1; g_bn_wave_age[bi] = 0;
-                } else if (cur == -1 && right_tasks > left_tasks * 1.2f && right_tasks >= left_tasks + 3) {
+                } else if (cur == -1 && right_tasks > left_tasks * 1.2f) {
                     cur = +1; g_bn_wave_dir[bi] = +1; g_bn_wave_age[bi] = 0;
                 }
             }

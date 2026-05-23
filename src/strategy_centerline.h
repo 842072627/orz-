@@ -894,14 +894,7 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
 #if USE_WAVE_SCHEDULING
     // Print wave scheduler diagnostics every 100 ticks
     if (step % 100 == 0) {
-        printf("DIAG[%d] assign: exempt=%d branch=%d dirlock=%d cap=%d accept=%d |",
-               step, g_dbg_exempt, g_dbg_branch, g_dbg_dirlock, g_dbg_cap, g_dbg_accepted);
-        for (int bi = 0; bi < Centerline::g_bn_count && bi < 5; bi++) {
-            int wd = Centerline::g_bn_wave_dir[bi];
-            printf(" BN%d:%s(L=%d,R=%d)", bi, (wd==1)?"R":(wd==-1)?"L":"?",
-                   Centerline::g_bn_cross_left[bi], Centerline::g_bn_cross_right[bi]);
-        }
-        printf("\n");
+        printf("DIAG[%d] dirlock=%d accept=%d\n", step, g_dbg_dirlock, g_dbg_accepted);
         fflush(stdout);
     }
 #endif
