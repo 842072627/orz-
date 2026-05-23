@@ -374,20 +374,20 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
     static bool s_task_map_printed = false;
     if (!s_task_map_printed) {
         s_task_map_printed = true;
-        printf("TASK_MAIN_MAP\n");
+        // printf("TASK_MAIN_MAP\n");
         for (auto& kv : env->task_pool) {
             int tid = kv.first;
             Task& task = kv.second;
-            printf("TASK tid=%d:", tid);
+            // printf("TASK tid=%d:", tid);
             for (int loc : task.locations) {
                 int m = -1, b = -1;
                 Centerline::project(loc, m, b);
-                printf(" %d(m=%d,b=%d)", loc, m, b);
+                // printf(" %d(m=%d,b=%d)", loc, m, b);
             }
-            printf("\n");
+            // printf("\n");
         }
-        printf("TASK_MAIN_MAP_END\n");
-        fflush(stdout);
+        // printf("TASK_MAIN_MAP_END\n");
+        // fflush(stdout);
     }
 
     for (int a = 0; a < env->num_of_agents; a++) {
