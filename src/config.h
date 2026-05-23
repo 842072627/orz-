@@ -87,7 +87,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define USE_TRAFFIC_VIEW    1   // TrafficView1D: per-MP task + agent flow tracking
 #define USE_BOTTLENECK_LOCK 1   // Bottleneck-only direction lock (replaces per-MP future flow locks)
 #define USE_WAVE_SCHEDULING 1   // Bottleneck wave scheduling (replaces reactive lock)
-#define USE_WIDE_INTERCEPT  0   // Wide-area interception: OFF for now (precision tool)
+#define USE_WIDE_INTERCEPT  1   // Wide-area interception: ON (Phase C step 1)
 
 // ========== Wave scheduling parameters ==========
 #define WAVE_EXHAUST_THR    1.0f  // demand below this = side exhausted (ready to flip)
@@ -96,7 +96,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define WAVE_FLOW_LOOKBACK 40    // recent flow window for throughput tracking
 
 // ========== Corridor width thresholds (for P10 bottleneck detection) ==========
-#define WIDTH_NARROW_THR    7   // width <= this = narrow bottleneck
+#define WIDTH_NARROW_THR    5   // width <= this = narrow bottleneck (was 7, locked 57% MPs)
 #define BN_MIN_LENGTH       2   // min consecutive narrow MPs to form a bottleneck
 #define WIDTH_WIDE_THR      12  // width > this = wide area (interception target)
 #define WIDTH_SUPER_THR     18  // width > this = super wide
