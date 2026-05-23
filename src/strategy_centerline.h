@@ -33,6 +33,13 @@ static constexpr float DIVISOR_TABLE[21] = {
 static SharedEnvironment* g_env = nullptr;
 static std::vector<int> g_parked_task;  // per-agent parked second errand task id, -1=none
 
+// Assignment result counters (logged per tick)
+static int g_dbg_exempt = 0;
+static int g_dbg_branch = 0;
+static int g_dbg_dirlock = 0;
+static int g_dbg_cap = 0;
+static int g_dbg_accepted = 0;
+
 static inline int zid(int loc, int cols) { return (loc/cols/100)*100 + (loc%cols/100); }
 static inline int zh_dist(int z1, int z2) {
     return std::abs(z1/100 - z2/100) + std::abs(z1%100 - z2%100);
@@ -62,6 +69,7 @@ static inline int unified_dist(int loc_a, int loc_b) {
 void init(SharedEnvironment* env) {
     g_env = env;
     Centerline::init(env);
+    Centerline::compute_cell_width(env);
     printf("CENTERLINE_SCHEDULER: agents=%d, map=%dx%d, zones=%zu, cells=%zu\n",
            env->num_of_agents, env->cols, env->rows,
            Centerline::g_zone_ranges.size(), Centerline::g_centerline_cells.size());
@@ -132,6 +140,7 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
                     total += 1.0f / (float)(d + 1);
                     prev = loc;
                 }
+                g_dbg_exempt++;
                 return total;
             }
         }
@@ -160,6 +169,7 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
                 total += 1.0f / (float)(d + 1);
                 prev = loc;
             }
+            g_dbg_branch++;
             return total;
         }
 
@@ -209,6 +219,7 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
             if (si_m > hi) continue;  // main point is within the path segment
             int d = Centerline::g_mp_density[si];
             if (Centerline::g_mp_lock_dir[si] != 0 && Centerline::g_mp_lock_dir[si] != intent) {
+                g_dbg_dirlock++;
                 return -1e9f;
             }
             if (USE_DENSITY_CAP_80 && d >= DENSITY_CAP_80) {
@@ -371,6 +382,26 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
 
     std::vector<int> free_agents;
     std::unordered_set<int> free_tasks;
+
+    // One-time dump of task location -> main_dist
+    static bool s_task_map_printed = false;
+    if (!s_task_map_printed) {
+        s_task_map_printed = true;
+        printf("TASK_MAIN_MAP\n");
+        for (auto& kv : env->task_pool) {
+            int tid = kv.first;
+            Task& task = kv.second;
+            printf("TASK tid=%d:", tid);
+            for (int loc : task.locations) {
+                int m = -1, b = -1;
+                Centerline::project(loc, m, b);
+                printf(" %d(m=%d,b=%d)", loc, m, b);
+            }
+            printf("\n");
+        }
+        printf("TASK_MAIN_MAP_END\n");
+        fflush(stdout);
+    }
 
     for (int a = 0; a < env->num_of_agents; a++) {
         if (env->curr_task_schedule[a] < 0) free_agents.push_back(a);
@@ -626,6 +657,9 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
         }
     }
     
+    // Log assignment stats for this tick
+    CorridorLog::log_assign_stats(step, g_dbg_exempt, g_dbg_branch, g_dbg_dirlock, g_dbg_cap, g_dbg_accepted);
+    g_dbg_exempt = 0; g_dbg_branch = 0; g_dbg_dirlock = 0; g_dbg_cap = 0; g_dbg_accepted = 0;
 
 }
 

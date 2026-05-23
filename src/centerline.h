@@ -31,6 +31,10 @@ static std::vector<int> g_zone24_density;   // 2D heatmap: [zid] = live agent co
 static int g_n24c = 0, g_n24r = 0;
 static std::vector<int> g_zone_is_main;     // [zid] = 1 if centerline passes through
 
+// ====== Per-cell corridor width (16-direction normalized, uint16_t) ======
+// g_cell_width[loc] = normalized minimum pair span, 0xFFFF = wall
+static std::vector<uint16_t> g_cell_width;
+
 // ====== Zone->main range (maps each zone to its centerline main_dist range) ======
 struct ZoneMainRange {
     int zone_id;      // 24x24 zone id
@@ -233,6 +237,9 @@ inline void build_zone_ranges() {
         [](const ZoneMainRange& a, const ZoneMainRange& b) { return a.min_m < b.min_m; });
 }
 
+// Forward declaration for per-cell width computation
+inline void compute_cell_width(const SharedEnvironment* env);
+
 // ====== Init: BFS path + wall correction + build zone ranges ======
 void init(const SharedEnvironment* env) {
     g_rows = env->rows; g_cols = env->cols;
@@ -426,7 +433,10 @@ void init(const SharedEnvironment* env) {
         cl_tdx[i] = c2 - c1;  // x difference (col)
         cl_tdy[i] = r2 - r1;  // y difference (row)
     }
-    
+
+    // Pre-compute per-cell corridor width for p10 scanning
+    compute_cell_width(env);
+
     for (int si = 0; si < g_mp_count; si++) {
         int idx = si * MP_STEP;
         if (idx >= n_cl) idx = n_cl - 1;
@@ -436,9 +446,23 @@ void init(const SharedEnvironment* env) {
         // Threshold stays at ZONE_HARD_CAP (15) for all main points
 #if USE_MP_WIDTH
         if (g_mp_main_dist[si] >= 0) {
-            int w = perp_width_at(env, g_mp_loc[si], cl_tdx[idx], cl_tdy[idx]);
-            if (w > WIDTH_SUPER_THR) g_mp_width_bonus[si] = WIDTH_SUPER_BONUS;
-            else if (w > WIDTH_WIDE_THR) g_mp_width_bonus[si] = WIDTH_WIDE_BONUS;
+            int target_m = g_mp_main_dist[si];
+            int half_range = MP_STEP / 2;
+            std::vector<int> cw_vals;
+            for (int cl_loc : g_centerline_cells) {
+                auto cl_it = cl_main.find(cl_loc);
+                if (cl_it == cl_main.end()) continue;
+                if (std::abs(cl_it->second - target_m) <= half_range) {
+                    int cw = g_cell_width[cl_loc];
+                    if (cw < 500 && cw > 0) cw_vals.push_back(cw);
+                }
+            }
+            if (!cw_vals.empty()) {
+                std::sort(cw_vals.begin(), cw_vals.end());
+                int p10 = cw_vals[cw_vals.size() / 10];
+                if (p10 > WIDTH_SUPER_THR) g_mp_width_bonus[si] = WIDTH_SUPER_BONUS;
+                else if (p10 > WIDTH_WIDE_THR) g_mp_width_bonus[si] = WIDTH_WIDE_BONUS;
+            }
         }
 #endif
     }
@@ -592,6 +616,62 @@ inline void update_mp_direction(const SharedEnvironment* env) {
 //     ...
 // }
 // #endif
+
+// ====== 16-direction per-cell corridor width (static, computed once at init) ======
+// Ported from cell_width_map_v3.py: 16 pairs, step-length normalized, dead-end skip
+inline void compute_cell_width(const SharedEnvironment* env) {
+    int total = g_rows * g_cols;
+    g_cell_width.assign(total, 0xFFFF);
+    
+    // 16 direction pairs (dx1,dy1,dx2,dy2) + precomputed step lengths
+    static const int dp[16][4] = {
+        {0,-1,0,1}, {-1,0,1,0},
+        {1,-1,-1,1}, {1,1,-1,-1},
+        {2,-1,-2,1}, {2,1,-2,-1},
+        {1,-2,-1,2}, {1,2,-1,-2},
+        {3,-1,-3,1}, {3,1,-3,-1},
+        {1,-3,-1,3}, {1,3,-1,-3},
+        {3,-2,-3,2}, {3,2,-3,-2},
+        {2,-3,-2,3}, {2,3,-2,-3},
+    };
+    static const float ps[16] = {
+        1.0f, 1.0f, 1.414f, 1.414f, 2.236f, 2.236f, 2.236f, 2.236f,
+        3.162f, 3.162f, 3.162f, 3.162f, 3.606f, 3.606f, 3.606f, 3.606f
+    };
+    
+    for (int y = 0; y < g_rows; y++) {
+        for (int x = 0; x < g_cols; x++) {
+            int loc = y * g_cols + x;
+            if (env->map[loc] != 0) continue;
+            float min_span = 1e9f;
+            for (int pi = 0; pi < 16; pi++) {
+                int dx1 = dp[pi][0], dy1 = dp[pi][1];
+                int dx2 = dp[pi][2], dy2 = dp[pi][3];
+                int c1 = 0;
+                for (int k = 1; k < 100; k++) {
+                    int nx = x + dx1 * k, ny = y + dy1 * k;
+                    if (nx < 0 || nx >= g_cols || ny < 0 || ny >= g_rows) break;
+                    if (env->map[ny * g_cols + nx] != 0) break;
+                    c1++;
+                }
+                int c2 = 0;
+                for (int k = 1; k < 100; k++) {
+                    int nx = x + dx2 * k, ny = y + dy2 * k;
+                    if (nx < 0 || nx >= g_cols || ny < 0 || ny >= g_rows) break;
+                    if (env->map[ny * g_cols + nx] != 0) break;
+                    c2++;
+                }
+                if (c1 == 0 && c2 == 0) continue;
+                float span = c1 * ps[pi] + c2 * ps[pi] + 1.0f;
+                if (span < min_span) min_span = span;
+            }
+            g_cell_width[loc] = (min_span < 1e9f)
+                ? (uint16_t)(int)::round(min_span)
+                : 1;
+        }
+    }
+    printf("CELL_WIDTH: computed for %d walkable cells\n", (int)g_cell_width.size());
+}
 
 } // namespace Centerline
 

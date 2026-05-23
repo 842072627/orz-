@@ -10,6 +10,9 @@
 namespace CorridorLog {
 
 static FILE* g_fd = nullptr;
+static FILE* g_agent_fd = nullptr;
+static FILE* g_mp_fd = nullptr;
+static FILE* g_assign_fd = nullptr;
 static int g_call_count = 0;
 static SharedEnvironment* g_env_ptr = nullptr;
 
@@ -20,6 +23,21 @@ inline void init() {
                       "max_dens,p90_dens,overload15_pct,"
                       "n_mp_active,n_locked,n_hot_dens,n_flow_unlock,n_proactive\n");
         fflush(g_fd);
+    }
+    g_agent_fd = fopen("C:/Users/Administrator/.openclaw/workspace/agent_log.csv", "w");
+    if (g_agent_fd) {
+        fprintf(g_agent_fd, "tick,aid,x,y,m,b,cell_width,speed,task_id,errand_idx,lock_dir\n");
+        fflush(g_agent_fd);
+    }
+    g_mp_fd = fopen("C:/Users/Administrator/.openclaw/workspace/mp_log.csv", "w");
+    if (g_mp_fd) {
+        fprintf(g_mp_fd, "tick,si,main_m,width,lock_dir,future_right,future_left,density\n");
+        fflush(g_mp_fd);
+    }
+    g_assign_fd = fopen("C:/Users/Administrator/.openclaw/workspace/assign_log.csv", "w");
+    if (g_assign_fd) {
+        fprintf(g_assign_fd, "tick,exempt,branch,dirlock,cap,accepted\n");
+        fflush(g_assign_fd);
     }
 }
 
@@ -82,6 +100,70 @@ inline void log_tick(SharedEnvironment* env) {
             n_locked);
     // Columns: tick,mainline,free,avg,max,p90,overload%,n_active,n_locked,n_hot_dens,n_flow_unlock,n_proactive
     fflush(g_fd);
+    
+    // Per-agent log (sampled: every 3rd tick, only agents with tasks)
+    if (g_agent_fd && (g_call_count % 3 == 1)) {
+        static std::vector<int> prev_main;
+        if ((int)prev_main.size() < env->num_of_agents)
+            prev_main.assign(env->num_of_agents, -1);
+        for (int a = 0; a < env->num_of_agents && a < 5000; a++) {
+            int tid = env->curr_task_schedule[a];
+            if (tid < 0) { prev_main[a] = -1; continue; } // idle, skip
+            int loc = env->curr_states[a].location;
+            if (loc < 0) continue;
+            int m = -1, b = -1;
+            Centerline::project(loc, m, b);
+            if (m < 0) { prev_main[a] = -1; continue; }
+            int cw = (int)Centerline::g_cell_width[loc];
+            if (cw > 50000) continue; // wall
+            int speed = (prev_main[a] >= 0) ? std::abs(m - prev_main[a]) : 0;
+            prev_main[a] = m;
+            // Find nearest MP's lock_dir
+            int ld = 0;
+            int best_si = 0, best_d = 999999;
+            for (int si = 0; si < Centerline::g_mp_count; si++) {
+                int mloc = Centerline::g_mp_loc[si];
+                if (mloc < 0) continue;
+                int dr = std::abs(loc / env->cols - mloc / env->cols);
+                int dc = std::abs(loc % env->cols - mloc % env->cols);
+                int d = dr + dc;
+                if (d < best_d) { best_d = d; best_si = si; }
+            }
+            ld = Centerline::g_mp_lock_dir[best_si];
+            int errand_idx = 0; // not tracked in detail here
+            int ax = loc % env->cols;
+            int ay = loc / env->cols;
+            fprintf(g_agent_fd, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n",
+                    approx_tick, a, ax, ay, m, b, cw, speed, tid, errand_idx, ld);
+        }
+        fflush(g_agent_fd);
+    }
+    
+    // Main point log (sampled: every 3rd tick)
+    if (g_mp_fd && (g_call_count % 3 == 1)) {
+        for (int si = 0; si < Centerline::g_mp_count; si++) {
+            int mloc = Centerline::g_mp_loc[si];
+            if (mloc < 0) continue;
+            int mm = Centerline::g_mp_main_dist[si];
+            int w = (int)Centerline::g_cell_width[mloc];
+            if (w > 50000) continue;
+            fprintf(g_mp_fd, "%d,%d,%d,%d,%d,%.1f,%.1f,%d\n",
+                    approx_tick, si, mm, w,
+                    Centerline::g_mp_lock_dir[si],
+                    Centerline::g_mp_future_right[si],
+                    Centerline::g_mp_future_left[si],
+                    Centerline::g_mp_density[si]);
+        }
+        fflush(g_mp_fd);
+    }
+}
+
+// Write per-tick assignment stats (called from strategy_centerline::plan)
+inline void log_assign_stats(int tick, int exempt, int branch, int dirlock, int cap, int accepted) {
+    if (g_assign_fd) {
+        fprintf(g_assign_fd, "%d,%d,%d,%d,%d,%d\n", tick, exempt, branch, dirlock, cap, accepted);
+        fflush(g_assign_fd);
+    }
 }
 
 // Dump all task profiles (task_id -> errand1/errand2 main_dist/branch_dist)
@@ -109,6 +191,12 @@ inline void close() {
     if (g_env_ptr) dump_task_profiles(g_env_ptr);
     if (g_fd) fclose(g_fd);
     g_fd = nullptr;
+    if (g_agent_fd) fclose(g_agent_fd);
+    g_agent_fd = nullptr;
+    if (g_mp_fd) fclose(g_mp_fd);
+    g_mp_fd = nullptr;
+    if (g_assign_fd) fclose(g_assign_fd);
+    g_assign_fd = nullptr;
 }
 
 } // namespace CorridorLog
