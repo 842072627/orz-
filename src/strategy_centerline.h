@@ -5,7 +5,6 @@
 #include "utils.h"
 #include "config.h"
 #include "centerline.h"
-#include "connection_exempt.h"
 #include "pibt_lock.h"
 #include "idle_cap.h"
 #include "corridor_log.h"
@@ -31,13 +30,11 @@ static constexpr float DIVISOR_TABLE[21] = {
 };
 
 static SharedEnvironment* g_env = nullptr;
-static std::vector<int> g_parked_task;  // per-agent parked second errand task id, -1=none
+static std::vector<int> g_parked_task;
 
-// Assignment result counters (logged per tick)
 static int g_dbg_exempt = 0;
 static int g_dbg_branch = 0;
 static int g_dbg_dirlock = 0;
-static int g_dbg_cap = 0;
 static int g_dbg_accepted = 0;
 
 static inline int zid(int loc, int cols) { return (loc/cols/100)*100 + (loc%cols/100); }
@@ -45,35 +42,83 @@ static inline int zh_dist(int z1, int z2) {
     return std::abs(z1/100 - z2/100) + std::abs(z1%100 - z2%100);
 }
 
-// ====== 统一距离函数 ======
-// 返回loc_a到loc_b的最短网格路径长度
-// BFS表优先 → |Δmain|+|Δbranch| → 曼哈顿
 static inline int unified_dist(int loc_a, int loc_b) {
-    // 1) BFS表（最精确）
     int d = BFSTable::get_dist(loc_a, loc_b);
     if (d > 0) return d;
-    
-    // 2) main_dist路径
     int a_m, a_b, b_m, b_b;
     Centerline::project(loc_a, a_m, a_b);
     Centerline::project(loc_b, b_m, b_b);
-    if (a_m >= 0 && b_m >= 0) {
+    if (a_m >= 0 && b_m >= 0)
         return std::abs(b_m - a_m) + std::abs(b_b - a_b);
-    }
-    
-    // 3) 曼哈顿（兜底）
     int cols = g_env->cols;
     return std::abs(loc_a / cols - loc_b / cols) + std::abs(loc_a % cols - loc_b % cols);
+}
+
+// ====== Future flow: cumulative path distance ======
+static inline void add_agent_future_flow(
+    int agent_loc,
+    const std::vector<int>& task_locs,
+    SharedEnvironment* env,
+    bool do_instant_lock = false)
+{
+    int m_curr, b_curr;
+    Centerline::project(agent_loc, m_curr, b_curr);
+    if (m_curr < 0) return;
+
+    int prev_m = m_curr;
+    int cumul = 0;
+
+    float adj_branch = (float)(b_curr > FUTURE_FLOW_BRANCH_OFFSET
+                               ? b_curr - FUTURE_FLOW_BRANCH_OFFSET : 0);
+    float d_branch = FUTURE_FLOW_BRANCH_PENALTY * adj_branch;
+
+    for (int loc : task_locs) {
+        int tm, tb;
+        Centerline::project(loc, tm, tb);
+        if (tm < 0) continue;
+
+        int lo = std::min(prev_m, tm);
+        int hi = std::max(prev_m, tm);
+        int dir = (tm > prev_m) ? 1 : -1;
+        int seg_len = std::abs(tm - prev_m);
+
+        for (int si = 0; si < Centerline::g_mp_count; si++) {
+            int sm = Centerline::g_mp_main_dist[si];
+            if (sm < lo || sm > hi) continue;
+            if ((dir > 0 && sm <= prev_m) || (dir < 0 && sm >= prev_m)) continue;
+
+            int mp_offset = std::abs(sm - prev_m);
+            int d_main = cumul + mp_offset;
+
+            float w = 1.0f / (1.0f + (float)d_main + d_branch);
+
+            if (dir > 0)
+                Centerline::g_mp_future_right[si] += w;
+            else
+                Centerline::g_mp_future_left[si] += w;
+
+            if (do_instant_lock) {
+                float ftotal = Centerline::g_mp_future_right[si] + Centerline::g_mp_future_left[si];
+                float flow_th = Centerline::get_mp_flow_th(si);
+                if (flow_th < 9999.0f && ftotal >= flow_th) {
+                    int ndir = (Centerline::g_mp_future_right[si] > Centerline::g_mp_future_left[si]) ? +1 : -1;
+                    Centerline::g_mp_lock_dir[si] = ndir;
+                }
+            }
+        }
+
+        cumul += seg_len;
+        prev_m = tm;
+    }
 }
 
 void init(SharedEnvironment* env) {
     g_env = env;
     Centerline::init(env);
-    Centerline::compute_cell_width(env);
+    // Centerline::compute_cell_width(env);  // already called inside Centerline::init()
     printf("CENTERLINE_SCHEDULER: agents=%d, map=%dx%d, zones=%zu, cells=%zu\n",
            env->num_of_agents, env->cols, env->rows,
            Centerline::g_zone_ranges.size(), Centerline::g_centerline_cells.size());
-    
     CorridorLog::init();
     CorridorLog::set_env(env);
     static bool atexit_reg = false;
@@ -83,7 +128,7 @@ void init(SharedEnvironment* env) {
     }
 }
 
-// Per-errand base_score using zone→main range overlap
+// ====== base_score ======
 static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) {
     (void)step;
     auto it = g_env->task_pool.find(tid);
@@ -92,7 +137,7 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
     if (!Centerline::g_ready) return 1.0f;
     auto& locs = it->second.locations;
 
-    // === Future flow exemption: skip direction lock if no main point along path has high future flow ===
+    // Future flow exemption
     {
         int a_m, a_b;
         Centerline::project(a_loc, a_m, a_b);
@@ -111,10 +156,7 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
                     if (sm < lo || sm > hi) continue;
                     float ftotal = Centerline::g_mp_future_right[si] + Centerline::g_mp_future_left[si];
                     float flow_th_ex = Centerline::get_mp_flow_th(si);
-                    if (ftotal >= flow_th_ex) {
-                        exempt = false;
-                        break;
-                    }
+                    if (ftotal >= flow_th_ex) { exempt = false; break; }
                 }
                 if (!exempt) break;
                 prev_m = tm;
@@ -133,7 +175,7 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
         }
     }
 
-    // === Branch task check: BFS table (No Man Sky approach) ===
+    // Branch task check
     {
         bool is_branch = true;
         int check_prev = a_loc;
@@ -145,9 +187,7 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
             }
             check_prev = loc;
         }
-        
         if (is_branch) {
-            // Pure branch task: unified distance
             float total = 0;
             int prev = a_loc;
             for (size_t ei = (size_t)start_idx; ei < locs.size(); ei++) {
@@ -159,24 +199,6 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
             g_dbg_branch++;
             return total;
         }
-
-        // === Escape exemption ===
-        {
-            int nzc = Centerline::g_n24c;
-            if (start_idx == 0) {
-                float esc_score = connection_exempt_score(a_loc, locs,
-                    Centerline::g_zone24_density, Centerline::g_zone_is_main,
-                    g_env->map, g_env->cols, nzc);
-                if (esc_score > 0) return esc_score;
-            } else {
-                std::vector<int> remaining(locs.begin() + start_idx, locs.end());
-                float esc_score = connection_exempt_score(a_loc, remaining,
-                    Centerline::g_zone24_density, Centerline::g_zone_is_main,
-                    g_env->map, g_env->cols, nzc);
-                if (esc_score > 0) return esc_score;
-            }
-        }
-
     }
 
     int a_m, a_b;
@@ -195,77 +217,67 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
         int hi = std::max(prev_m, tm);
         int intent = (tm > prev_m) ? +1 : -1;
 
-        // Zone overlap check + direction lock (any seg locked = whole task blocked)
         int d_max_seg = 0;
-        float best_align = 1.0f;  // 1.0 = perfectly aligned, lower = against flow
-        // Direction lock based on 1D main point density
+        float best_align = 1.0f;
         for (int si = 0; si < Centerline::g_mp_count; si++) {
             int si_m = Centerline::g_mp_main_dist[si];
             if (si_m < 0) continue;
-            if (si_m < lo) continue;
-            if (si_m > hi) continue;  // main point is within the path segment
+            if (si_m < lo || si_m > hi) continue;
             int d = Centerline::g_mp_density[si];
             if (Centerline::g_mp_lock_dir[si] != 0 && Centerline::g_mp_lock_dir[si] != intent) {
                 g_dbg_dirlock++;
                 return -1e9f;
             }
-            if (USE_DENSITY_CAP_80 && d >= DENSITY_CAP_80) {
+            if (USE_DENSITY_HARD_CAP && d >= DENSITY_HARD_CAP)
                 return -1e9f;
-            }
             if (d > d_max_seg) d_max_seg = d;
-            // Future flow alignment: prefer tasks WITH predicted traffic
             float fr = Centerline::g_mp_future_right[si];
             float fl = Centerline::g_mp_future_left[si];
-            float total = fr + fl;
-            if (total >= 2.0f) {
-                float align = (intent > 0) ? (fr / total) : (fl / total);
+            float ftotal = fr + fl;
+            if (ftotal >= 2.0f) {
+                float align = (intent > 0) ? (fr / ftotal) : (fl / ftotal);
                 if (align < best_align) best_align = align;
             }
         }
 
         float seg_dist = (float)(std::abs(prev_m - tm) + std::abs(prev_b - tb));
-        // Penalize task1->task2 segment less (agents already committed)
         float seg_cost = (ei > (size_t)start_idx) ? (seg_dist * 0.3f + 1.0f) : (seg_dist + 1.0f);
         float seg_score = 1.0f / seg_cost;
         if (seg_cost > MAX_TASK_SEGMENT_DIST) {
             float penalty = (float)MAX_TASK_SEGMENT_DIST / seg_cost;
-            seg_score *= penalty * penalty;  // quadratic penalty, never blocks completely
+            seg_score *= penalty * penalty;
         }
-
         if (d_max_seg > ROUTE_THRESHOLD) {
             int idx = (d_max_seg > 40) ? 40 : d_max_seg;
             seg_score /= DIVISOR_TABLE[idx - ROUTE_THRESHOLD];
         }
-        
-        // Future flow alignment: penalize tasks against predicted traffic
         if (best_align < 0.7f) {
-            float pen = (0.7f - best_align) * 0.5f;  // align=0.7→0%, align=0.4→15%, align=0.0→35%
+            float pen = (0.7f - best_align) * 0.5f;
             if (pen > 0.35f) pen = 0.35f;
             seg_score *= (1.0f - pen);
         }
-
         total_score += seg_score;
         prev_m = tm; prev_b = tb;
     }
-
     return total_score;
 }
 
+// ====== Pre-tick updates ======
 void pre_tick_updates(SharedEnvironment* env) {
     Centerline::update_zone24_density(env);
     Centerline::update_mp_density(env);
-    
-    // Compute active agent ratio (fraction of agents with tasks)
+
     {
         int active = 0;
         for (int a = 0; a < env->num_of_agents; a++)
             if (env->curr_task_schedule[a] >= 0) active++;
         CenterlineAccess::active_ratio = (float)active / (float)env->num_of_agents;
     }
-    
-    // Compute future flow: agent pos→task path projection, distance-weighted
+
     std::fill(Centerline::g_mp_future_right.begin(), Centerline::g_mp_future_right.end(), 0.0f);
-    std::fill(Centerline::g_mp_future_left.begin(), Centerline::g_mp_future_left.end(), 0.0f);
+    std::fill(Centerline::g_mp_future_left.begin(),  Centerline::g_mp_future_left.end(),  0.0f);
+
+    // Agents with tasks
     for (int a = 0; a < env->num_of_agents; a++) {
         int tid = env->curr_task_schedule[a];
         if (tid < 0) continue;
@@ -273,92 +285,44 @@ void pre_tick_updates(SharedEnvironment* env) {
         if (it == env->task_pool.end() || it->second.locations.empty()) continue;
         int a_loc = env->curr_states[a].location;
         if (a_loc < 0) continue;
-        int m_curr = -1, b_curr;
-        Centerline::project(a_loc, m_curr, b_curr);
-        if (m_curr < 0) continue;
-        int prev_m = m_curr;
-        for (int loc : it->second.locations) {
-            int tm, tb;
-            Centerline::project(loc, tm, tb);
-            if (tm < 0) continue;
-            int lo = std::min(prev_m, tm);
-            int hi = std::max(prev_m, tm);
-            int dir = (tm > prev_m) ? 1 : -1;
-            for (int si = 0; si < Centerline::g_mp_count; si++) {
-                int sm = Centerline::g_mp_main_dist[si];
-                if (sm < lo || sm > hi) continue;
-                if ((dir > 0 && sm <= m_curr) || (dir < 0 && sm >= m_curr)) continue;
-                float d_main = (float)std::abs(sm - m_curr);
-                float adj_branch = (float)(b_curr > FUTURE_FLOW_BRANCH_OFFSET ? b_curr - FUTURE_FLOW_BRANCH_OFFSET : 0);
-                float d_branch = FUTURE_FLOW_BRANCH_PENALTY * adj_branch;
-                float w = 1.0f / (1.0f + d_main + d_branch);
-                if (dir > 0) Centerline::g_mp_future_right[si] += w;
-                else Centerline::g_mp_future_left[si] += w;
-            }
-            prev_m = tm;
-        }
+        add_agent_future_flow(a_loc, it->second.locations, env);
     }
-    
-    // Future flow from idle agents going to spawn (dummy goal)
+
+    // Idle agents returning to spawn
     for (int a = 0; a < env->num_of_agents; a++) {
-        int tid = env->curr_task_schedule[a];
-        if (tid >= 0) continue;  // skip agents with tasks (already handled above)
+        if (env->curr_task_schedule[a] >= 0) continue;
         int a_loc = env->curr_states[a].location;
         if (a_loc < 0) continue;
         int spawn_loc = env->start_states.at(a).location;
-        if (spawn_loc < 0 || spawn_loc == a_loc) continue;  // already at spawn
-        int m_curr, b_curr;
-        Centerline::project(a_loc, m_curr, b_curr);
-        if (m_curr < 0) continue;
-        int tm, tb;
-        Centerline::project(spawn_loc, tm, tb);
-        if (tm < 0) continue;
-        int lo = std::min(m_curr, tm);
-        int hi = std::max(m_curr, tm);
-        int dir = (tm > m_curr) ? 1 : -1;
-        for (int si = 0; si < Centerline::g_mp_count; si++) {
-            int sm = Centerline::g_mp_main_dist[si];
-            if (sm < lo || sm > hi) continue;
-            if ((dir > 0 && sm <= m_curr) || (dir < 0 && sm >= m_curr)) continue;
-            float d_main = (float)std::abs(sm - m_curr);
-            float adj_branch = (float)(b_curr > FUTURE_FLOW_BRANCH_OFFSET ? b_curr - FUTURE_FLOW_BRANCH_OFFSET : 0);
-            float d_branch = FUTURE_FLOW_BRANCH_PENALTY * adj_branch;
-            float w = 1.0f / (1.0f + d_main + d_branch);
-            if (dir > 0)
-                Centerline::g_mp_future_right[si] += w;
-            else
-                Centerline::g_mp_future_left[si] += w;
-        }
+        if (spawn_loc < 0 || spawn_loc == a_loc) continue;
+        add_agent_future_flow(a_loc, {spawn_loc}, env);
     }
-    
-    Centerline::compute_future_direction();
+
     Centerline::update_mp_direction(env);
-    
-    // Sync centerline data to shared pointers for PIBT wall-hugging
-    CenterlineAccess::g_branch_dist = &Centerline::g_branch_dist;
-    CenterlineAccess::g_main_dist = &Centerline::g_main_dist;
-    CenterlineAccess::g_zone_is_main = &Centerline::g_zone_is_main;
-    CenterlineAccess::g_mp_loc = &Centerline::g_mp_loc;
-    CenterlineAccess::g_mp_main_dist = &Centerline::g_mp_main_dist;
-    CenterlineAccess::g_mp_count = Centerline::g_mp_count;
-    CenterlineAccess::g_n24c = Centerline::g_n24c;
-    CenterlineAccess::g_n24r = Centerline::g_n24r;
-    
+
+    CenterlineAccess::g_branch_dist   = &Centerline::g_branch_dist;
+    CenterlineAccess::g_main_dist     = &Centerline::g_main_dist;
+    CenterlineAccess::g_zone_is_main  = &Centerline::g_zone_is_main;
+    CenterlineAccess::g_mp_loc        = &Centerline::g_mp_loc;
+    CenterlineAccess::g_mp_main_dist  = &Centerline::g_mp_main_dist;
+    CenterlineAccess::g_mp_count      = Centerline::g_mp_count;
+    CenterlineAccess::g_n24c          = Centerline::g_n24c;
+    CenterlineAccess::g_n24r          = Centerline::g_n24r;
+
     CorridorLog::log_tick(env);
 }
 
+// ====== Plan ======
 void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule) {
     auto t0 = std::chrono::steady_clock::now();
+
     pre_tick_updates(env);
     auto t_pre = std::chrono::steady_clock::now();
 
-    // Init parked task tracking
     if ((int)g_parked_task.size() != env->num_of_agents)
         g_parked_task.assign(env->num_of_agents, -1);
-    // Sync parked tasks to PIBT shared state
     for (int a = 0; a < env->num_of_agents && a < PIBT_Lock::MAX_AGENTS; a++)
         PIBT_Lock::g_parked_task[a] = g_parked_task[a];
-    // Reset PIBT block flags
     for (int a = 0; a < env->num_of_agents && a < PIBT_Lock::MAX_AGENTS; a++)
         PIBT_Lock::g_agent_blocked[a] = 0;
 
@@ -370,70 +334,46 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
     std::vector<int> free_agents;
     std::unordered_set<int> free_tasks;
 
-    // One-time dump of task location -> main_dist
+    // One-time task map dump
     static bool s_task_map_printed = false;
     if (!s_task_map_printed) {
         s_task_map_printed = true;
-        // printf("TASK_MAIN_MAP\n");
-        for (auto& kv : env->task_pool) {
-            int tid = kv.first;
-            Task& task = kv.second;
-            // printf("TASK tid=%d:", tid);
-            for (int loc : task.locations) {
-                int m = -1, b = -1;
-                Centerline::project(loc, m, b);
-                // printf(" %d(m=%d,b=%d)", loc, m, b);
-            }
-            // printf("\n");
-        }
-        // printf("TASK_MAIN_MAP_END\n");
-        // fflush(stdout);
     }
 
-    for (int a = 0; a < env->num_of_agents; a++) {
+    for (int a = 0; a < env->num_of_agents; a++)
         if (env->curr_task_schedule[a] < 0) free_agents.push_back(a);
-    }
 
     std::unordered_set<int> assigned_tasks;
     for (int a = 0; a < env->num_of_agents; a++) {
         int cur = env->curr_task_schedule[a];
         if (cur >= 0) assigned_tasks.insert(cur);
     }
-
     for (int tid : env->new_tasks) free_tasks.insert(tid);
     for (auto& kv : env->task_pool) {
         int tid = kv.first;
-        if (!assigned_tasks.count(tid))
-            free_tasks.insert(tid);
+        if (!assigned_tasks.count(tid)) free_tasks.insert(tid);
     }
 
     // Phase 1: Continue multi-errand tasks
     for (auto it = free_agents.begin(); it != free_agents.end(); ) {
         int a = *it;
         int cur = env->curr_task_schedule[a];
-        
-        // Check parked second errand first
         int parked = (a < (int)g_parked_task.size()) ? g_parked_task[a] : -1;
         if (parked >= 0) {
             int a_loc = env->curr_states[a].location;
             float bs = base_score(a_loc, parked, env->curr_timestep, 2);
             if (bs > 0) {
                 proposed_schedule[a] = parked;
-                g_parked_task[a] = -1;  // clear park
+                g_parked_task[a] = -1;
                 free_tasks.erase(parked);
                 it = free_agents.erase(it);
             } else {
                 proposed_schedule[a] = -1;
-                if (USE_HOT_ZONE_EXEMPT && is_hot_zone_exempt(a_loc, env)) {
-                    PIBT_Lock::g_agent_blocked[a] = 0; // ????:??
-                } else {
-                    PIBT_Lock::g_agent_blocked[a] = 1; // ???:???
-                }
+                PIBT_Lock::g_agent_blocked[a] = 1;
                 ++it;
             }
             continue;
         }
-        
         if (cur >= 0 && env->task_pool.count(cur) &&
             env->task_pool[cur].locations.size() > 1) {
             proposed_schedule[a] = cur;
@@ -444,7 +384,11 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
         }
     }
 
-    if (free_agents.empty()) return;
+    if (free_agents.empty()) {
+        for (int a = 0; a < env->num_of_agents; a++)
+            if (proposed_schedule[a] < 0) proposed_schedule[a] = -1;
+        return;
+    }
 
     // Phase 2: Greedy assignment
     std::unordered_map<int, std::vector<int>> tasks_by_zone;
@@ -455,7 +399,6 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
                 tasks_by_zone[zid(env->task_pool[tid].locations[0], cols)].push_back(tid);
         }
 
-        // ===== Idle cap: 8-bucket uniform capacity control =====
         int idle_budgets[IDLE_NUM_BUCKETS] = {0};
         if (USE_IDLE_CAP) {
             IdleCap::compute_budgets(env, idle_budgets);
@@ -463,7 +406,7 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
                          std::mt19937(std::random_device{}()));
         }
 
-        // ===== Garbage pile: defer bottom 15%% of free tasks by internal distance =====
+        // Garbage defer
         std::unordered_set<int> deferred_tasks;
         if ((int)free_tasks.size() > 10) {
             std::vector<int> sorted_free(free_tasks.begin(), free_tasks.end());
@@ -489,12 +432,11 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
 
         std::unordered_set<int> done_tasks;
         for (int a : free_agents) {
+            if (std::chrono::steady_clock::now() > endtime) break;
             if (proposed_schedule[a] >= 0) continue;
-
             int a_loc = env->curr_states[a].location;
             int a_zone = zid(a_loc, cols);
 
-            // ===== Idle cap: check bucket budget =====
             if (USE_IDLE_CAP) {
                 int b = IdleCap::get_bucket(env, a);
                 if (idle_budgets[b] <= 0) {
@@ -506,106 +448,56 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
             int best_tid = -1;
             float best_score = -1e9f;
 
-            // Same zone (skip garbage if possible, fallback otherwise)
+            // Same zone
             auto sz = tasks_by_zone.find(a_zone);
             if (sz != tasks_by_zone.end()) {
                 float best_fallback = -1e9f; int fallback_tid = -1;
                 for (int tid : sz->second) {
                     if (done_tasks.count(tid)) continue;
-                    float bs = base_score(a_loc, tid, step);
-                    if (bs > best_score) {
-                        if (!deferred_tasks.count(tid)) {
-                            best_score = bs; best_tid = tid;
-                        } else if (bs > best_fallback) {
-                            best_fallback = bs; fallback_tid = tid;
-                        }
-                    }
+                    if (deferred_tasks.count(tid)) { }
+                    float bs = base_score(a_loc, tid, env->curr_timestep);
+                    if (bs > best_score) { best_score = bs; best_tid = tid; }
+                    if (bs > best_fallback) { best_fallback = bs; fallback_tid = tid; }
                 }
-                if (best_tid < 0 && fallback_tid >= 0) {
-                    best_tid = fallback_tid; best_score = best_fallback;
+                if (best_tid < 0 && fallback_tid >= 0)
+                    { best_tid = fallback_tid; best_score = best_fallback; }
+            }
+
+            // Other zones
+            if (best_tid < 0) {
+                for (auto& kv : tasks_by_zone) {
+                    if (kv.first == a_zone) continue;
+                    for (int tid : kv.second) {
+                        if (done_tasks.count(tid)) continue;
+                        if (deferred_tasks.count(tid)) continue;
+                        float bs = base_score(a_loc, tid, env->curr_timestep);
+                        if (bs > best_score) { best_score = bs; best_tid = tid; }
+                    }
                 }
             }
 
-            // Adjacent zones
-            if (best_tid < 0) {
-                float best_fallback = -1e9f; int fallback_tid = -1;
-                for (auto& kv : tasks_by_zone) {
-                    int z2 = kv.first;
-                    if (z2 == a_zone || zh_dist(a_zone, z2) > 1) continue;
-                    int checked = 0;
-                    for (int tid : kv.second) {
-                        if (done_tasks.count(tid)) continue;
-                        if (checked++ >= 20) break;
-                        float bs = base_score(a_loc, tid, step);
-                        if (bs > best_score) {
-                            if (!deferred_tasks.count(tid)) {
-                                best_score = bs; best_tid = tid;
-                            } else if (bs > best_fallback) {
-                                best_fallback = bs; fallback_tid = tid;
-                            }
-                        }
-                    }
-                }
-                if (best_tid < 0 && fallback_tid >= 0) {
-                    best_tid = fallback_tid; best_score = best_fallback;
+            // Deferred fallback
+            if (best_tid < 0 && !deferred_tasks.empty()) {
+                for (int tid : deferred_tasks) {
+                    if (done_tasks.count(tid)) continue;
+                    float bs = base_score(a_loc, tid, env->curr_timestep);
+                    if (bs > best_score) { best_score = bs; best_tid = tid; }
                 }
             }
 
             if (best_tid >= 0) {
                 proposed_schedule[a] = best_tid;
-                // Per-assignment future flow update (feeds next tick's lock computation)
+                // Per-assignment future flow update + instant lock
                 {
-                    int m_c, b_c;
-                    Centerline::project(env->curr_states[a].location, m_c, b_c);
-                    if (m_c >= 0) {
-                        auto tsk = env->task_pool.find(best_tid);
-                        if (tsk != env->task_pool.end() && !tsk->second.locations.empty()) {
-                            int prv = m_c;
-                            for (int loc : tsk->second.locations) {
-                                int tm2, tb2;
-                                Centerline::project(loc, tm2, tb2);
-                                if (tm2 < 0) continue;
-                                int lo2 = (prv < tm2) ? prv : tm2;
-                                int hi2 = (prv > tm2) ? prv : tm2;
-                                int dir2 = (tm2 > prv) ? 1 : -1;
-                                for (int si = 0; si < Centerline::g_mp_count; si++) {
-                                    int sm2 = Centerline::g_mp_main_dist[si];
-                                    if (sm2 < lo2 || sm2 > hi2) continue;
-                                    if ((dir2 > 0 && sm2 <= m_c) || (dir2 < 0 && sm2 >= m_c)) continue;
-                                    float d_main = (float)((sm2 > m_c) ? (sm2 - m_c) : (m_c - sm2));
-                                    float adj_branch = (float)(b_c > FUTURE_FLOW_BRANCH_OFFSET ? b_c - FUTURE_FLOW_BRANCH_OFFSET : 0);
-                                    float d_branch = FUTURE_FLOW_BRANCH_PENALTY * adj_branch;
-                                    float w = 1.0f / (1.0f + d_main + d_branch);
-                                    if (dir2 > 0)
-                                        Centerline::g_mp_future_right[si] += w;
-                                    else
-                                        Centerline::g_mp_future_left[si] += w;
-                                    // Instant lock: recompute lock_dir right after adding flow
-                                    float ftotal = Centerline::g_mp_future_right[si] + Centerline::g_mp_future_left[si];
-                                    float flow_th_inst = Centerline::get_mp_flow_th(si);
-                                    if (flow_th_inst >= 9999.0f) continue;  // super wide
-                                    if (ftotal >= flow_th_inst) {
-                                        int ndir = (Centerline::g_mp_future_right[si] > Centerline::g_mp_future_left[si]) ? +1 : -1;
-                                        for (int d = -FUTURE_FLOW_LOCK_SPREAD; d <= FUTURE_FLOW_LOCK_SPREAD; d++) {
-                                            int ni = si + d;
-                                            if (ni >= 0 && ni < Centerline::g_mp_count)
-                                                Centerline::g_mp_lock_dir[ni] = ndir;
-                                        }
-                                    }
-                                }
-                                prv = tm2;
-                            }
-                        }
+                    auto tsk = env->task_pool.find(best_tid);
+                    if (tsk != env->task_pool.end() && !tsk->second.locations.empty()) {
+                        add_agent_future_flow(a_loc, tsk->second.locations, env, true);
                     }
                 }
-                // Park second errand for multi-location tasks
+
                 auto tit = env->task_pool.find(best_tid);
-                if (tit != env->task_pool.end()) {
-                    if (tit->second.locations.size() > 2)
-                        g_parked_task[a] = best_tid;
-                    else
-                        g_parked_task[a] = -1;  // clear stale park
-                }
+                if (tit != env->task_pool.end())
+                    g_parked_task[a] = (tit->second.locations.size() > 2) ? best_tid : -1;
                 done_tasks.insert(best_tid);
                 phase2_assigned++;
                 if (USE_IDLE_CAP) {
@@ -618,26 +510,35 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
         }
     }
 
-    for (int a : free_agents) {
+    // Fallback: ensure all free agents have proposed_schedule set
+    for (int a : free_agents)
         if (proposed_schedule[a] < 0) proposed_schedule[a] = -1;
+
+    // Timeout detection — write to CSV (reliable, like CorridorLog)
+    static FILE* g_diag_fd = nullptr;
+    if (!g_diag_fd) {
+        g_diag_fd = fopen("C:/Users/Administrator/.openclaw/workspace/schedule_diag.csv", "w");
+        if (g_diag_fd) {
+            fprintf(g_diag_fd, "step,timeout_n,free_agents,phase2_assigned,busy,free_tasks,lock_r,lock_l,lock_0,narrow_lock,wide_total,widelock_lock\n");
+            fflush(g_diag_fd);
+        }
     }
-    
-    // Timeout detection
     static int timeout_counter = 0;
     if (std::chrono::steady_clock::now() > endtime) {
         timeout_counter++;
-        if (timeout_counter % 10 == 1) {
-            printf("[SCHEDULE TIMEOUT #%d] step=%d, free_agents=%zu, phase2_assigned=%d\n",
-                   timeout_counter, step, free_agents.size(), phase2_assigned);
+        if (g_diag_fd) {
+            fprintf(g_diag_fd, "%d,%d,%zu,%d,,,,,,,,,\n",
+                    step, timeout_counter, free_agents.size(), phase2_assigned);
+            fflush(g_diag_fd);
         }
     }
-    
-    // Log assignment stats for this tick
-    CorridorLog::log_assign_stats(step, g_dbg_exempt, g_dbg_branch, g_dbg_dirlock, g_dbg_cap, g_dbg_accepted);
-    g_dbg_exempt = 0; g_dbg_branch = 0; g_dbg_dirlock = 0; g_dbg_cap = 0; g_dbg_accepted = 0;
 
-    // === DIAG: snapshot every 500 ticks to file ===
-    if (step > 0 && step % 500 == 0) {
+    // Log assignment stats
+    CorridorLog::log_assign_stats(step, g_dbg_exempt, g_dbg_branch, g_dbg_dirlock, 0, g_dbg_accepted);
+    g_dbg_exempt = 0; g_dbg_branch = 0; g_dbg_dirlock = 0; g_dbg_accepted = 0;
+
+    // DIAG every 500 ticks
+    if (env->curr_timestep > 0 && env->curr_timestep % 500 == 0) {
         int lock_r = 0, lock_l = 0, lock_0 = 0;
         int locked_narrow = 0, locked_wide = 0, wide_total = 0;
         for (int si = 0; si < Centerline::g_mp_count; si++) {
@@ -650,58 +551,13 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
         int busy = 0;
         for (int a = 0; a < env->num_of_agents; a++)
             if (env->curr_task_schedule[a] >= 0) busy++;
-        // Write to diag file (append mode, file opened once)
-        // DIAG goes to stdout, captured by test.py
-        fprintf(stderr, "[DIAG] step=%d busy=%d/%d free_task=%zu lock=(R%d L%d 0%d) narrow_lock=%d wide=%d widelock=%d\n",
-               step, busy, env->num_of_agents, free_tasks.size(),
-               lock_r, lock_l, lock_0, locked_narrow, wide_total, locked_wide);
-        fflush(stderr);
-        
-        // === Detailed 1D histogram every 2000 ticks ===
-        if (step % 2000 == 0) {
-            const int NB = 20;
-            int bins[NB] = {0};  // agent count per bin
-            int tbin[NB] = {0};  // free task target per bin
-            int mp_count = Centerline::g_mp_count;
-            for (int a = 0; a < env->num_of_agents; a++) {
-                int loc = env->curr_states[a].location;
-                if (loc < 0) continue;
-                int m = -1, b;
-                Centerline::project(loc, m, b);
-                if (m >= 0) {
-                    int bi = (m * NB) / (Centerline::g_mp_main_dist[mp_count-1] + 1);
-                    if (bi >= NB) bi = NB-1;
-                    bins[bi]++;
-                }
-            }
-            for (int tid : free_tasks) {
-                auto it = env->task_pool.find(tid);
-                if (it == env->task_pool.end() || it->second.locations.empty()) continue;
-                int last_loc = it->second.locations.back();
-                int m = -1, b;
-                Centerline::project(last_loc, m, b);
-                if (m >= 0) {
-                    int bi = (m * NB) / (Centerline::g_mp_main_dist[mp_count-1] + 1);
-                    if (bi >= NB) bi = NB-1;
-                    tbin[bi]++;
-                }
-            }
-            // Print histogram to stdout
-            fprintf(stderr, "[DIST] step=%d agent1D:", step);
-            for (int bi = 0; bi < NB; bi++) printf(" %d", bins[bi]);
-            printf("\n");
-            fprintf(stderr, "[DIST] step=%d tasks1D:", step);
-            for (int bi = 0; bi < NB; bi++) printf(" %d", tbin[bi]);
-            printf("\n");
-            fflush(stderr);
+        if (g_diag_fd) {
+            fprintf(g_diag_fd, "%d,,,,%d,%zu,%d,%d,%d,%d,%d,%d,%d\n",
+                   step, busy, free_tasks.size(),
+                   lock_r, lock_l, lock_0, locked_narrow, wide_total, locked_wide);
+            fflush(g_diag_fd);
         }
     }
-
 }
 
 } // namespace strategy_centerline
-
-
-
-
-

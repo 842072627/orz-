@@ -18,8 +18,6 @@
 
 namespace Centerline {
 
-// Direction lock uses ZONE_HARD_CAP (from config.h) as activation threshold
-
 // ====== State ======
 static bool g_ready = false;
 static int g_rows = 0, g_cols = 0;
@@ -46,7 +44,6 @@ static std::vector<ZoneMainRange> g_zone_ranges;
 static std::vector<int> g_mp_agent_last_main;   // [aid] = last tick main distance
 
 // ====== 1D main point system (MP_STEP=16 sampling along centerline) ======
-#if USE_MP_DENSITY
 static constexpr int MP_STEP = 16;           // step between main points
 static int g_mp_count = 0;                   // number of main points
 static std::vector<int> g_mp_loc;            // [si] = physical location of main point
@@ -56,24 +53,17 @@ static std::vector<int> g_mp_flow_left;      // [si] = flow towards smaller main
 static std::vector<int> g_mp_dir;            // [si] = majority flow direction (+1/-1/0)
 static std::vector<int> g_mp_lock_dir;       // [si] = direction lock (+1/-1/0)
 static std::vector<int> g_mp_main_dist;      // [si] = main_dist of this main point
-static std::vector<int> g_mp_threshold;      // [si] = density threshold for direction lock (15/20/30)
 static std::vector<float> g_mp_future_right;   // [si] = distance-weighted future flow right
 static std::vector<float> g_mp_future_left;    // [si] = distance-weighted future flow left
-static std::vector<float> g_mp_width_bonus;    // [si] = extra TH from corridor width
 static std::vector<int> g_mp_width_p10;        // [si] = P10 corridor width (cells) per MP
 // Get width-adaptive direction lock threshold for MP si
 inline float get_mp_flow_th(int si) {
-#if USE_PER_WIDTH_LOCK
     int w = g_mp_width_p10[si];
     if (w < WIDTH_BAND_1) return FF_TH_BAND_1;
     if (w < WIDTH_BAND_2) return FF_TH_BAND_2;
     if (w < WIDTH_BAND_3) return FF_TH_BAND_3;
     return 9999.0f;  // super wide: never lock
-#else
-    return FUTURE_FLOW_LOCK_TH + g_mp_width_bonus[si];
-#endif
 }
-#endif
 
 
 // ====== BFS distance-to-wall ======
@@ -178,46 +168,6 @@ static void smooth_path(const SharedEnvironment* env, const std::vector<int>& ra
             }
         if (out.empty() || out.back() != best_loc) out.push_back(best_loc);
     }
-}
-
-// ====== Perpendicular corridor width at a cell ======
-// Scans perpendicular to tangent direction, counts steps to wall on each side.
-// Skips "hole" cells (both tangent sides are walls within 1 step).
-static int perp_width_at(const SharedEnvironment* env, int loc, int tdx, int tdy) {
-    int px = -tdy, py = tdx;  // perpendicular direction
-    int cols = env->cols, rows = env->rows;
-    int gx = loc % cols, gy = loc / cols;
-    
-    // is_hole: if both tangent sides are walls within 1 step from (x,y) → hole
-    auto is_hole = [&](int x, int y) -> bool {
-        for (int s : {-1, 1}) {
-            int nx = x + tdx * s, ny = y + tdy * s;
-            if (nx >= 0 && nx < cols && ny >= 0 && ny < rows && env->map[ny * cols + nx] == 0)
-                return false;  // open on at least one side
-        }
-        return true;
-    };
-    
-    int d1 = 0, d2 = 0;
-    for (int side : {-1, 1}) {
-        int d = 0;
-        for (int k = 1; k < 100; k++) {
-            int nx = gx + px * side * k, ny = gy + py * side * k;
-            if (nx < 0 || nx >= cols || ny < 0 || ny >= rows || env->map[ny * cols + nx] != 0)
-                break;
-            if (is_hole(nx, ny)) continue;
-            d++;
-        }
-        if (side == -1) d1 = d; else d2 = d;
-    }
-    return d1 + d2 + 1;
-}
-
-// Classify corridor width into threshold
-static int classify_threshold(int width) {
-    if (width <= 8)  return 15;  // SUPER_NARROW + NARROW
-    if (width <= 12) return 20;  // MODERATE
-    return 30;  // WIDE + VERY_WIDE
 }
 
 // ====== Project loc -> (main, branch) ======
@@ -416,7 +366,6 @@ void init(const SharedEnvironment* env) {
             g_zone_is_main[zid] = 1;
     }
     
-#if USE_MP_DENSITY
     // Initialize 1D main points: sample centerline at MP_STEP intervals
     g_mp_count = (int)g_centerline_cells.size() / MP_STEP + 1;
     g_mp_loc.assign(g_mp_count, -1);
@@ -426,10 +375,8 @@ void init(const SharedEnvironment* env) {
     g_mp_dir.assign(g_mp_count, 0);
     g_mp_lock_dir.assign(g_mp_count, 0);
     g_mp_main_dist.assign(g_mp_count, -1);
-    g_mp_threshold.assign(g_mp_count, ZONE_HARD_CAP);
     g_mp_future_right.assign(g_mp_count, 0.0f);
     g_mp_future_left.assign(g_mp_count, 0.0f);
-    g_mp_width_bonus.assign(g_mp_count, 0.0f);
     g_mp_width_p10.assign(g_mp_count, 999);
     
     // Compute tangents for centerline cells
@@ -457,7 +404,6 @@ void init(const SharedEnvironment* env) {
         g_mp_loc[si] = g_centerline_cells[idx];
         auto md_it = cl_main.find(g_mp_loc[si]);
         g_mp_main_dist[si] = (md_it != cl_main.end()) ? md_it->second : -1;
-        // Threshold stays at ZONE_HARD_CAP (15) for all main points
 #if USE_MP_WIDTH
         if (g_mp_main_dist[si] >= 0) {
             int target_m = g_mp_main_dist[si];
@@ -475,13 +421,10 @@ void init(const SharedEnvironment* env) {
                 std::sort(cw_vals.begin(), cw_vals.end());
                 int p10 = cw_vals[cw_vals.size() / 10];
                 g_mp_width_p10[si] = p10;
-                if (p10 > WIDTH_SUPER_THR) g_mp_width_bonus[si] = WIDTH_SUPER_BONUS;
-                else if (p10 > WIDTH_WIDE_THR) g_mp_width_bonus[si] = WIDTH_WIDE_BONUS;
             }
         }
 #endif
     }
-#endif
 
     build_zone_ranges();
 
@@ -492,8 +435,6 @@ void init(const SharedEnvironment* env) {
 }
 
 // ====== Future flow stub (data filled by strategy_centerline) ======
-inline void compute_future_direction() {}
-
 // ====== 2D zone density (tick call) ======
 inline void update_zone24_density(const SharedEnvironment* env) {
     int n24c = (env->cols + 23) / 24, n24r = (env->rows + 23) / 24;
@@ -515,11 +456,7 @@ inline void update_zone24_density(const SharedEnvironment* env) {
     }
 }
 
-// Zone direction: now handled by 1D MP system (update_mp_direction)
-// Old 2D zone direction system removed in cleanup.
-
 // ====== 1D main point density (tick call) ======
-#if USE_MP_DENSITY
 inline void update_mp_density(const SharedEnvironment* env) {
     const int HW = 12;  // half-width of 24x24 square
     std::fill(g_mp_density.begin(), g_mp_density.end(), 0);
@@ -540,10 +477,8 @@ inline void update_mp_density(const SharedEnvironment* env) {
         }
     }
 }
-#endif
 
 // ====== 1D main point direction (tick call) ======
-#if USE_MP_DENSITY
 inline void update_mp_direction(const SharedEnvironment* env) {
     // 1. Flow tracking per main point
     std::fill(g_mp_flow_right.begin(), g_mp_flow_right.end(), 0);
@@ -595,25 +530,12 @@ inline void update_mp_direction(const SharedEnvironment* env) {
         }
     }
     
-    // 3. Direction lock: future flow + active ratio relaxation
+    // 3. Direction lock: future flow based, per-width thresholds
     std::fill(g_mp_lock_dir.begin(), g_mp_lock_dir.end(), 0);
     for (int si = 0; si < g_mp_count; si++) {
         float ftotal = g_mp_future_right[si] + g_mp_future_left[si];
         float flow_th = get_mp_flow_th(si);
         if (flow_th >= 9999.0f) continue;  // super wide: never lock
-#if USE_BAND_3_RELAX
-        // Apply active ratio relaxation to moderate-width zones
-        if (g_mp_width_p10[si] >= WIDTH_BAND_2 && g_mp_width_p10[si] < WIDTH_BAND_3) {
-            if (env->curr_timestep >= ACTIVE_RELAX_DELAY_TICKS && g_mp_density[si] < ACTIVE_RATIO_DENSITY_MAX) {
-                float active = CenterlineAccess::active_ratio;
-                if (active < ACTIVE_RATIO_BASELINE) {
-                    float factor = (ACTIVE_RATIO_BASELINE - active) / ACTIVE_RATIO_BASELINE;
-                    for (int _e = 1; _e < ACTIVE_RATIO_RELAX_EXP; _e++) factor *= factor;
-                    flow_th += factor * (FUTURE_FLOW_TH_MAX - FF_TH_BAND_2);
-                }
-            }
-        }
-#endif
         if (ftotal < flow_th) continue;
         int dir = (g_mp_future_right[si] > g_mp_future_left[si]) ? +1 : -1;
         for (int d = -FUTURE_FLOW_LOCK_SPREAD; d <= FUTURE_FLOW_LOCK_SPREAD; d++) {
@@ -623,7 +545,6 @@ inline void update_mp_direction(const SharedEnvironment* env) {
         }
     }
 }
-#endif
 // ====== NDJSON MP analysis log (disabled for cloud) ======
 // #if USE_MP_DENSITY
 // static FILE* g_mp_log_f = NULL;
