@@ -36,8 +36,8 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define WIDTH_BAND_2          9       // width 4-8: narrow
 #define WIDTH_BAND_3          16      // width 9-15: moderate
 #define FF_TH_BAND_1          1.72f   // threshold for width < 4 (very narrow)
-#define FF_TH_BAND_2          2.0f   // threshold for width 4-8 (narrow)
-#define FF_TH_BAND_3          2.2f    // threshold for width 9-15 (moderate)
+#define FF_TH_BAND_2          4.0f   // threshold for width 4-8 (narrow)
+#define FF_TH_BAND_3          8.0f    // threshold for width 9-15 (moderate)
 
 // ========== Task segment distance limit ==========
 #define MAX_TASK_SEGMENT_DIST  99999   // max main+branch distance for a single errand transition
@@ -68,6 +68,9 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define USE_MP_CENTERLINE   1   // widest path centerline
 #define USE_MP_DENSITY      1   // 1D main point density (heatmap)
 #define USE_MP_WIDTH        1   // P10 corridor width per main point
+
+// ========== Diagnostic logging ==========
+#define USE_DIAG_LOG    1   // 1 = write CSV logs + console prints; 0 = silent (cloud test)
 
 // Runtime strategy name getter (used by TaskScheduler.cpp)
 inline std::string get_orz_strategy() { return ORZ_SCHEDULER; }

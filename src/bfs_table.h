@@ -97,8 +97,10 @@ inline void init_common(const SharedEnvironment* env,
         if (g_offmain_comp[i] > 0) off_cnt++;
         else if (g_offmain_comp[i] == -2) main_cnt++;
     }
+#if USE_DIAG_LOG
     printf("BFSTABLE: offmain ready - %d comps, %d main-zone, %d offmain cells\n",
            g_offmain_comp_count, main_cnt, off_cnt);
+#endif
     g_offmain_ready = true;
 }
 
@@ -130,11 +132,13 @@ inline void build_full(const SharedEnvironment* env) {
     if (!g_offmain_ready || g_valid_count == 0) return;
 
     size_t mb_total = (size_t)g_valid_count * g_valid_count * 2 / (1024 * 1024);
+#if USE_DIAG_LOG
     printf("BFSTABLE: building full matrix %d x %d = %zu entries (~%zu MB), each row ~%zu KB\n",
            g_valid_count, g_valid_count,
            (size_t)g_valid_count * g_valid_count,
            mb_total,
            (size_t)g_valid_count * 2 / 1024);
+#endif
 
     // Allocate per-row vectors (No Man Sky approach: matrix[target][source])
     g_dist_rows.resize(g_valid_count);
@@ -218,12 +222,16 @@ inline void build_full(const SharedEnvironment* env) {
 
     if (built > 0) {
         g_full_ready = true;
+#if USE_DIAG_LOG
         printf("BFSTABLE: full matrix %s - %d/%d sources (%zu MB, ~%.1fs)\n",
                g_timeout.load() ? "TIMEOUT" : "COMPLETE",
                built, g_valid_count, mb_total,
                std::chrono::duration<double>(std::chrono::steady_clock::now() - start_time).count());
+#endif
     } else {
+#if USE_DIAG_LOG
         printf("BFSTABLE: full matrix FAILED (0 sources built)\n");
+#endif
         g_dist_rows.clear();
         g_dist_rows.shrink_to_fit();
     }
@@ -236,7 +244,9 @@ inline void init(const SharedEnvironment* env,
 #if USE_BFS_TABLE
     build_full(env);
 #else
+#if USE_DIAG_LOG
     printf("BFSTABLE: full matrix disabled (USE_BFS_TABLE=0)\n");
+#endif
 #endif
 }
 

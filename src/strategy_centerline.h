@@ -82,9 +82,12 @@ static inline void add_agent_future_flow(
         int dir = (tm > prev_m) ? 1 : -1;
         int seg_len = std::abs(tm - prev_m);
 
-        for (int si = 0; si < Centerline::g_mp_count; si++) {
+        auto lo_it = std::lower_bound(Centerline::g_mp_main_dist.begin(), Centerline::g_mp_main_dist.end(), lo);
+        auto hi_it = std::upper_bound(Centerline::g_mp_main_dist.begin(), Centerline::g_mp_main_dist.end(), hi);
+        int si_lo = (int)(lo_it - Centerline::g_mp_main_dist.begin());
+        int si_hi = (int)(hi_it - Centerline::g_mp_main_dist.begin());
+        for (int si = si_lo; si < si_hi; si++) {
             int sm = Centerline::g_mp_main_dist[si];
-            if (sm < lo || sm > hi) continue;
             if ((dir > 0 && sm <= prev_m) || (dir < 0 && sm >= prev_m)) continue;
 
             int mp_offset = std::abs(sm - prev_m);
@@ -116,9 +119,12 @@ void init(SharedEnvironment* env) {
     g_env = env;
     Centerline::init(env);
     // Centerline::compute_cell_width(env);  // already called inside Centerline::init()
+#if USE_DIAG_LOG
     printf("CENTERLINE_SCHEDULER: agents=%d, map=%dx%d, zones=%zu, cells=%zu\n",
            env->num_of_agents, env->cols, env->rows,
            Centerline::g_zone_ranges.size(), Centerline::g_centerline_cells.size());
+#endif
+#if USE_DIAG_LOG
     CorridorLog::init();
     CorridorLog::set_env(env);
     static bool atexit_reg = false;
@@ -126,13 +132,13 @@ void init(SharedEnvironment* env) {
         atexit_reg = true;
         std::atexit([]() { CorridorLog::close(); });
     }
+#endif
 }
 
 // ====== base_score ======
-static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) {
-    (void)step;
-    auto it = g_env->task_pool.find(tid);
-    if (it == g_env->task_pool.end() || it->second.locations.empty())
+static inline float base_score(int a_loc, int tid, SharedEnvironment* env, int start_idx = 0) {
+    auto it = env->task_pool.find(tid);
+    if (it == env->task_pool.end() || it->second.locations.empty())
         return -1e9f;
     if (!Centerline::g_ready) return 1.0f;
     auto& locs = it->second.locations;
@@ -150,10 +156,10 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
                 if (tm < 0) continue;
                 int lo = std::min(prev_m, tm);
                 int hi = std::max(prev_m, tm);
-                for (int si = 0; si < Centerline::g_mp_count; si++) {
-                    int sm = Centerline::g_mp_main_dist[si];
-                    if (sm < 0) continue;
-                    if (sm < lo || sm > hi) continue;
+                auto lo_it = std::lower_bound(Centerline::g_mp_main_dist.begin(), Centerline::g_mp_main_dist.end(), lo);
+                auto hi_it = std::upper_bound(Centerline::g_mp_main_dist.begin(), Centerline::g_mp_main_dist.end(), hi);
+                for (int si = (int)(lo_it - Centerline::g_mp_main_dist.begin());
+                     si < (int)(hi_it - Centerline::g_mp_main_dist.begin()); si++) {
                     float ftotal = Centerline::g_mp_future_right[si] + Centerline::g_mp_future_left[si];
                     float flow_th_ex = Centerline::get_mp_flow_th(si);
                     if (ftotal >= flow_th_ex) { exempt = false; break; }
@@ -219,10 +225,10 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
 
         int d_max_seg = 0;
         float best_align = 1.0f;
-        for (int si = 0; si < Centerline::g_mp_count; si++) {
-            int si_m = Centerline::g_mp_main_dist[si];
-            if (si_m < 0) continue;
-            if (si_m < lo || si_m > hi) continue;
+        auto lo_it = std::lower_bound(Centerline::g_mp_main_dist.begin(), Centerline::g_mp_main_dist.end(), lo);
+        auto hi_it = std::upper_bound(Centerline::g_mp_main_dist.begin(), Centerline::g_mp_main_dist.end(), hi);
+        for (int si = (int)(lo_it - Centerline::g_mp_main_dist.begin());
+             si < (int)(hi_it - Centerline::g_mp_main_dist.begin()); si++) {
             int d = Centerline::g_mp_density[si];
             if (Centerline::g_mp_lock_dir[si] != 0 && Centerline::g_mp_lock_dir[si] != intent) {
                 g_dbg_dirlock++;
@@ -309,7 +315,9 @@ void pre_tick_updates(SharedEnvironment* env) {
     CenterlineAccess::g_n24c          = Centerline::g_n24c;
     CenterlineAccess::g_n24r          = Centerline::g_n24r;
 
+#if USE_DIAG_LOG
     CorridorLog::log_tick(env);
+#endif
 }
 
 // ====== Plan ======
@@ -317,7 +325,6 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
     auto t0 = std::chrono::steady_clock::now();
 
     pre_tick_updates(env);
-    auto t_pre = std::chrono::steady_clock::now();
 
     if ((int)g_parked_task.size() != env->num_of_agents)
         g_parked_task.assign(env->num_of_agents, -1);
@@ -334,19 +341,11 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
     std::vector<int> free_agents;
     std::unordered_set<int> free_tasks;
 
-    // One-time task map dump
-    static bool s_task_map_printed = false;
-    if (!s_task_map_printed) {
-        s_task_map_printed = true;
-    }
-
-    for (int a = 0; a < env->num_of_agents; a++)
-        if (env->curr_task_schedule[a] < 0) free_agents.push_back(a);
-
     std::unordered_set<int> assigned_tasks;
     for (int a = 0; a < env->num_of_agents; a++) {
         int cur = env->curr_task_schedule[a];
-        if (cur >= 0) assigned_tasks.insert(cur);
+        if (cur < 0) free_agents.push_back(a);
+        else assigned_tasks.insert(cur);
     }
     for (int tid : env->new_tasks) free_tasks.insert(tid);
     for (auto& kv : env->task_pool) {
@@ -361,7 +360,7 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
         int parked = (a < (int)g_parked_task.size()) ? g_parked_task[a] : -1;
         if (parked >= 0) {
             int a_loc = env->curr_states[a].location;
-            float bs = base_score(a_loc, parked, env->curr_timestep, 2);
+            float bs = base_score(a_loc, parked, env, 2);
             if (bs > 0) {
                 proposed_schedule[a] = parked;
                 g_parked_task[a] = -1;
@@ -453,9 +452,8 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
             if (sz != tasks_by_zone.end()) {
                 float best_fallback = -1e9f; int fallback_tid = -1;
                 for (int tid : sz->second) {
-                    if (done_tasks.count(tid)) continue;
-                    if (deferred_tasks.count(tid)) { }
-                    float bs = base_score(a_loc, tid, env->curr_timestep);
+                    if (done_tasks.count(tid) || deferred_tasks.count(tid)) continue;
+                    float bs = base_score(a_loc, tid, env);
                     if (bs > best_score) { best_score = bs; best_tid = tid; }
                     if (bs > best_fallback) { best_fallback = bs; fallback_tid = tid; }
                 }
@@ -470,7 +468,7 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
                     for (int tid : kv.second) {
                         if (done_tasks.count(tid)) continue;
                         if (deferred_tasks.count(tid)) continue;
-                        float bs = base_score(a_loc, tid, env->curr_timestep);
+                        float bs = base_score(a_loc, tid, env);
                         if (bs > best_score) { best_score = bs; best_tid = tid; }
                     }
                 }
@@ -480,7 +478,7 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
             if (best_tid < 0 && !deferred_tasks.empty()) {
                 for (int tid : deferred_tasks) {
                     if (done_tasks.count(tid)) continue;
-                    float bs = base_score(a_loc, tid, env->curr_timestep);
+                    float bs = base_score(a_loc, tid, env);
                     if (bs > best_score) { best_score = bs; best_tid = tid; }
                 }
             }
@@ -514,6 +512,7 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
     for (int a : free_agents)
         if (proposed_schedule[a] < 0) proposed_schedule[a] = -1;
 
+#if USE_DIAG_LOG
     // Timeout detection — write to CSV (reliable, like CorridorLog)
     static FILE* g_diag_fd = nullptr;
     if (!g_diag_fd) {
@@ -532,11 +531,15 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
             fflush(g_diag_fd);
         }
     }
+#endif
 
+#if USE_DIAG_LOG
     // Log assignment stats
     CorridorLog::log_assign_stats(step, g_dbg_exempt, g_dbg_branch, g_dbg_dirlock, 0, g_dbg_accepted);
     g_dbg_exempt = 0; g_dbg_branch = 0; g_dbg_dirlock = 0; g_dbg_accepted = 0;
+#endif
 
+#if USE_DIAG_LOG
     // DIAG every 500 ticks
     if (env->curr_timestep > 0 && env->curr_timestep % 500 == 0) {
         int lock_r = 0, lock_l = 0, lock_0 = 0;
@@ -558,6 +561,7 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
             fflush(g_diag_fd);
         }
     }
+#endif
 }
 
 } // namespace strategy_centerline

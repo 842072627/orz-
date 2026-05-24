@@ -17,6 +17,7 @@ static int g_call_count = 0;
 static SharedEnvironment* g_env_ptr = nullptr;
 
 inline void init() {
+#if USE_DIAG_LOG
     g_fd = fopen("C:/Users/Administrator/.openclaw/workspace/corridor_log.csv", "w");
     if (g_fd) {
         fprintf(g_fd, "tick,on_mainline,free_agents,avg_dens,"
@@ -39,6 +40,7 @@ inline void init() {
         fprintf(g_assign_fd, "tick,exempt,branch,dirlock,cap,accepted\n");
         fflush(g_assign_fd);
     }
+#endif
 }
 
 inline void set_env(SharedEnvironment* env) {
@@ -189,6 +191,7 @@ inline void dump_task_profiles(SharedEnvironment* env) {
 inline void close() {
     // Dump task profiles before closing
     if (g_env_ptr) dump_task_profiles(g_env_ptr);
+#if USE_DIAG_LOG
     if (g_fd) fclose(g_fd);
     g_fd = nullptr;
     if (g_agent_fd) fclose(g_agent_fd);
@@ -197,6 +200,7 @@ inline void close() {
     g_mp_fd = nullptr;
     if (g_assign_fd) fclose(g_assign_fd);
     g_assign_fd = nullptr;
+#endif
 }
 
 } // namespace CorridorLog

@@ -1,3 +1,5 @@
+#include "config.h"
+
 static int g_log_interval = 100;
 
 static void init_mp_log() {
@@ -20,6 +22,7 @@ static void record_mp_snapshot(const SharedEnvironment* env) {
 }
 
 // Registered via atexit, writes to workspace path
+#if USE_DIAG_LOG
 static int g_atexit_dummy = (std::atexit([](){
     const char* path = "C:/Users/Administrator/.openclaw/workspace/mp_analysis.json";
     FILE* f = fopen(path, "w");
@@ -45,6 +48,7 @@ static int g_atexit_dummy = (std::atexit([](){
     fprintf(f,"\n  ]\n}\n");
     fclose(f);
 }), 0);
+#endif  // USE_DIAG_LOG
 #endif
 
 } // namespace Centerline

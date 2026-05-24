@@ -606,7 +606,9 @@ inline void compute_cell_width(const SharedEnvironment* env) {
                 : 1;
         }
     }
+#if USE_DIAG_LOG
     printf("CELL_WIDTH: computed for %d walkable cells\n", (int)g_cell_width.size());
+#endif
 }
 
 } // namespace Centerline
