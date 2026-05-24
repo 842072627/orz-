@@ -35,9 +35,9 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define WIDTH_BAND_1          4       // width < 4: very narrow
 #define WIDTH_BAND_2          9       // width 4-8: narrow
 #define WIDTH_BAND_3          16      // width 9-15: moderate
-#define FF_TH_BAND_1          1.6f   // threshold for width < 4 (very narrow)
-#define FF_TH_BAND_2          1.6f   // threshold for width 4-8 (narrow)
-#define FF_TH_BAND_3          1.6f    // threshold for width 9-15 (moderate)
+#define FF_TH_BAND_1          1.3f   // threshold for width < 4 (very narrow)
+#define FF_TH_BAND_2          1.3f   // threshold for width 4-8 (narrow)
+#define FF_TH_BAND_3          1.3f    // threshold for width 9-15 (moderate)
 
 // ========== Task segment distance limit ==========
 #define MAX_TASK_SEGMENT_DIST  99999   // max main+branch distance for a single errand transition
