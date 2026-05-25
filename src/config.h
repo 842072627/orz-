@@ -25,21 +25,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define ORZ_PLANNER     "default"       // ORZ planner: default PIBT
 #define ORZ_EXECUTOR    "default"       // ORZ executor: default
 
-// ========== [DEPRECATED] Future flow direction lock ==========
-// 被 USE_TRAFFIC_PREDICTION 替代
-#define FUTURE_FLOW_LOCK_TH   9999.0f  // disable
-#define FUTURE_FLOW_LOCK_SPREAD 0
-#define FUTURE_FLOW_BRANCH_PENALTY  0.0f
-#define FUTURE_FLOW_BRANCH_OFFSET   9999
-
-// ========== Per-width-zone direction lock thresholds ==========
-#define WIDTH_BAND_1          4       // width < 4: very narrow
-#define WIDTH_BAND_2          9       // width 4-8: narrow
-#define WIDTH_BAND_3          16      // width 9-15: moderate
-#define FF_TH_BAND_1          9999.0f  // disabled
-#define FF_TH_BAND_2          9999.0f  // disabled
-#define FF_TH_BAND_3          9999.0f  // disabled
-#define FF_TH_BAND_WIDE       9999.0f  // disabled
+// ========== Future flow (REMOVED, replaced by USE_TRAFFIC_PREDICTION) ==========
 
 // ========== Traffic prediction (replaces future flow) ==========
 #define USE_TRAFFIC_PREDICTION  1       // 时刻表预测开关

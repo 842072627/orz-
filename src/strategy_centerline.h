@@ -54,67 +54,6 @@ static inline int unified_dist(int loc_a, int loc_b) {
     return std::abs(loc_a / cols - loc_b / cols) + std::abs(loc_a % cols - loc_b % cols);
 }
 
-// ====== Future flow: cumulative path distance ======
-static inline void add_agent_future_flow(
-    int agent_loc,
-    const std::vector<int>& task_locs,
-    SharedEnvironment* env,
-    bool do_instant_lock = false)
-{
-    int m_curr, b_curr;
-    Centerline::project(agent_loc, m_curr, b_curr);
-    if (m_curr < 0) return;
-
-    int prev_m = m_curr;
-    int cumul = 0;
-
-    float adj_branch = (float)(b_curr > FUTURE_FLOW_BRANCH_OFFSET
-                               ? b_curr - FUTURE_FLOW_BRANCH_OFFSET : 0);
-    float d_branch = FUTURE_FLOW_BRANCH_PENALTY * adj_branch;
-
-    for (int loc : task_locs) {
-        int tm, tb;
-        Centerline::project(loc, tm, tb);
-        if (tm < 0) continue;
-
-        int lo = std::min(prev_m, tm);
-        int hi = std::max(prev_m, tm);
-        int dir = (tm > prev_m) ? 1 : -1;
-        int seg_len = std::abs(tm - prev_m);
-
-        auto lo_it = std::lower_bound(Centerline::g_mp_main_dist.begin(), Centerline::g_mp_main_dist.end(), lo);
-        auto hi_it = std::upper_bound(Centerline::g_mp_main_dist.begin(), Centerline::g_mp_main_dist.end(), hi);
-        int si_lo = (int)(lo_it - Centerline::g_mp_main_dist.begin());
-        int si_hi = (int)(hi_it - Centerline::g_mp_main_dist.begin());
-        for (int si = si_lo; si < si_hi; si++) {
-            int sm = Centerline::g_mp_main_dist[si];
-            if ((dir > 0 && sm <= prev_m) || (dir < 0 && sm >= prev_m)) continue;
-
-            int mp_offset = std::abs(sm - prev_m);
-            int d_main = cumul + mp_offset;
-
-            float w = 1.0f / (1.0f + (float)d_main + d_branch);
-
-            if (dir > 0)
-                Centerline::g_mp_future_right[si] += w;
-            else
-                Centerline::g_mp_future_left[si] += w;
-
-            if (do_instant_lock) {
-                float ftotal = Centerline::g_mp_future_right[si] + Centerline::g_mp_future_left[si];
-                float flow_th = Centerline::get_mp_flow_th(si);
-                if (flow_th < 9999.0f && ftotal >= flow_th) {
-                    int ndir = (Centerline::g_mp_future_right[si] > Centerline::g_mp_future_left[si]) ? +1 : -1;
-                    Centerline::g_mp_lock_dir[si] = ndir;
-                }
-            }
-        }
-
-        cumul += seg_len;
-        prev_m = tm;
-    }
-}
-
 void init(SharedEnvironment* env) {
     g_env = env;
     Centerline::init(env);
@@ -284,21 +223,43 @@ static inline void evaluate_narrow_segments(SharedEnvironment* env) {
     for (auto& seg : Centerline::g_segments) {
         if (!seg.is_narrow) continue;
         
-        // Simple direction: based on which side has more predicted traffic
+        // Direction based on predicted traffic
         int r = seg.right_count;
         int l = seg.left_count;
         
-        if (r > l * 2 && l == 0) seg.flow_dir = +1;   // strong right, no left
-        else if (l > r * 2 && r == 0) seg.flow_dir = -1; // strong left, no right
-        else if (r > l * 1.5f) seg.flow_dir = +1;       // right dominant
-        else if (l > r * 1.5f) seg.flow_dir = -1;       // left dominant
-        /* else: keep current flow_dir */
+        if (r > l * 1.5f) seg.flow_dir = +1;
+        else if (l > r * 1.5f) seg.flow_dir = -1;
+        else if (seg.is_narrow && r + l > 0) {
+            // Narrow with close counts: must pick one to prevent both-way
+            seg.flow_dir = (r >= l) ? +1 : -1;
+        }
         
         // Blockage detection
         if (seg.consecutive_no_exit >= BLOCK_THRESHOLD)
             seg.is_blocked = true;
         else
             seg.is_blocked = false;
+    }
+    
+    // Group enforcement: same group = same flow_dir
+    // Collect groups, pick majority direction, apply to all
+    std::unordered_map<int, std::vector<int>> group_dirs;
+    for (auto& seg : Centerline::g_segments) {
+        if (!seg.is_narrow || seg.group_id < 0) continue;
+        group_dirs[seg.group_id].push_back(seg.flow_dir);
+    }
+    for (auto& kv : group_dirs) {
+        int gid = kv.first;
+        auto& dirs = kv.second;
+        if (dirs.empty()) continue;
+        int sum = 0;
+        for (int d : dirs) sum += d;
+        int majority = (sum >= 0) ? +1 : -1;
+        // Apply majority to all segments in this group
+        for (auto& seg : Centerline::g_segments) {
+            if (!seg.is_narrow || seg.group_id != gid) continue;
+            seg.flow_dir = majority;
+        }
     }
 }
 #endif
@@ -322,6 +283,8 @@ void pre_tick_updates(SharedEnvironment* env) {
         seg.right_late = seg.left_late = 0;
         seg.entrance_queue_right = seg.entrance_queue_left = 0;
         seg.inside_count = 0;
+        seg.inside_right = 0;
+        seg.inside_left = 0;
         seg.consecutive_no_exit = 0;
         seg.is_blocked = false;
     }
@@ -343,27 +306,33 @@ void pre_tick_updates(SharedEnvironment* env) {
         int a_m, a_b;
         Centerline::project(a_loc, a_m, a_b);
         if (a_m < 0) continue;
+        int a_tid = env->curr_task_schedule[a];
+        int a_target_m = -1;
+        if (a_tid >= 0) {
+            auto tit = env->task_pool.find(a_tid);
+            if (tit != env->task_pool.end() && !tit->second.locations.empty()) {
+                int t1m, t1b;
+                Centerline::project(tit->second.locations[0], t1m, t1b);
+                a_target_m = t1m;
+            }
+        }
         for (auto& seg : Centerline::g_segments) {
             int sm_lo = Centerline::g_mp_main_dist[seg.si_lo];
             int sm_hi = Centerline::g_mp_main_dist[std::min(seg.si_hi, Centerline::g_mp_count) - 1];
             if (a_m >= sm_lo && a_m <= sm_hi) {
                 // Agent is inside this segment
                 seg.inside_count++;
+                if (a_target_m >= 0) {
+                    int dir = (a_target_m > a_m) ? +1 : -1;
+                    if (dir > 0) seg.inside_right++;
+                    else seg.inside_left++;
+                }
             } else if (a_m < sm_lo && sm_lo - a_m < 80) {
-                // Agent is left of segment (right-flow queue zone)
                 seg.entrance_queue_right++;
             } else if (a_m > sm_hi && a_m - sm_hi < 80) {
-                // Agent is right of segment (left-flow queue zone)
                 seg.entrance_queue_left++;
             }
         }
-    }
-    
-    // Simple blockage: no progress if inside_count stays high for many ticks
-    for (auto& seg : Centerline::g_segments) {
-        if (!seg.is_narrow) continue;
-        if (seg.inside_count >= seg.p10_width * 3)
-            seg.is_blocked = true;
     }
     
     Centerline::g_current_tick++;
@@ -612,29 +581,6 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
     g_dbg_exempt = 0; g_dbg_branch = 0; g_dbg_dirlock = 0; g_dbg_accepted = 0;
 #endif
 
-#if USE_DIAG_LOG
-    // DIAG every 500 ticks
-    if (env->curr_timestep > 0 && env->curr_timestep % 500 == 0) {
-        int lock_r = 0, lock_l = 0, lock_0 = 0;
-        int locked_narrow = 0, locked_wide = 0, wide_total = 0;
-        for (int si = 0; si < Centerline::g_mp_count; si++) {
-            int ld = Centerline::g_mp_lock_dir[si];
-            if (ld > 0) lock_r++; else if (ld < 0) lock_l++; else lock_0++;
-            int w = Centerline::g_mp_width_p10[si];
-            if (w >= WIDTH_BAND_3) { wide_total++; if (ld != 0) locked_wide++; }
-            else if (w < WIDTH_BAND_2) { if (ld != 0) locked_narrow++; }
-        }
-        int busy = 0;
-        for (int a = 0; a < env->num_of_agents; a++)
-            if (env->curr_task_schedule[a] >= 0) busy++;
-        if (g_diag_fd) {
-            fprintf(g_diag_fd, "%d,,,,%d,%zu,%d,%d,%d,%d,%d,%d,%d\n",
-                   step, busy, free_tasks.size(),
-                   lock_r, lock_l, lock_0, locked_narrow, wide_total, locked_wide);
-            fflush(g_diag_fd);
-        }
-    }
-#endif
 }
 
 } // namespace strategy_centerline

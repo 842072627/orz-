@@ -41,23 +41,17 @@ struct ZoneMainRange {
 static std::vector<ZoneMainRange> g_zone_ranges;
 
 // ====== 1D main point agent tracking (prev tick main_dist for flow) ======
-static std::vector<int> g_mp_agent_last_main;   // [aid] = last tick main distance
+
 
 // ====== 1D main point system (MP_STEP=16 sampling along centerline) ======
 static constexpr int MP_STEP = 16;           // step between main points
 static int g_mp_count = 0;                   // number of main points
 static std::vector<int> g_mp_loc;            // [si] = physical location of main point
 static std::vector<int> g_mp_density;        // [si] = agents in 24x24 square centered on main point
-static std::vector<int> g_mp_flow_right;     // [si] = flow towards larger main_dist
-static std::vector<int> g_mp_flow_left;      // [si] = flow towards smaller main_dist
-static std::vector<int> g_mp_dir;            // [si] = majority flow direction (+1/-1/0)
-static std::vector<int> g_mp_lock_dir;       // [si] = direction lock (+1/-1/0)
 static std::vector<int> g_mp_main_dist;      // [si] = main_dist of this main point
-static std::vector<float> g_mp_future_right;   // [si] = distance-weighted future flow right
-static std::vector<float> g_mp_future_left;    // [si] = distance-weighted future flow left
 static std::vector<int> g_mp_width_p10;        // [si] = P10 corridor width (cells) per MP
 
-// ====== Traffic prediction segment (replaces future flow) ======
+// ====== Traffic prediction segment ======
 #if USE_TRAFFIC_PREDICTION
 enum SegState {
     SEG_IDLE,
@@ -71,6 +65,7 @@ struct TrafficSegment {
     int si_lo, si_hi;         // MP range [lo, hi)
     int p10_width;             // worst (min) width in this segment
     bool is_narrow;            // p10_width <= NARROW_WIDTH_MAX
+    bool is_very_wide;         // p10_width > WIDE_BREAK (acts as group separator)
     int capacity;
     
     // Queue zone entrance (main_dist)
@@ -90,23 +85,16 @@ struct TrafficSegment {
     int entrance_queue_right;  // agents buffered at left entrance
     int entrance_queue_left;   // agents buffered at right entrance
     int inside_count;          // agents currently inside segment
+    int inside_right;          // agents going right inside segment
+    int inside_left;           // agents going left inside segment
     int consecutive_no_exit;   // ticks with no progress (blockage detection)
     bool is_blocked;
+    int group_id;              // -1=unassigned, >=0=group id (same direction enforced)
 };
 
 static std::vector<TrafficSegment> g_segments;
 static int g_current_tick = 0;
 #endif
-
-// Get width-adaptive direction lock threshold for MP si
-inline float get_mp_flow_th(int si) {
-    int w = g_mp_width_p10[si];
-    if (w < WIDTH_BAND_1) return FF_TH_BAND_1;
-    if (w < WIDTH_BAND_2) return FF_TH_BAND_2;
-    if (w < WIDTH_BAND_3) return FF_TH_BAND_3;
-    return FF_TH_BAND_WIDE;  // super wide threshold
-}
-
 
 // ====== BFS distance-to-wall ======
 static void compute_dtw(const SharedEnvironment* env, std::vector<int>& dtw) {
@@ -418,13 +406,7 @@ inline void init(const SharedEnvironment* env) {
     g_mp_count = (int)g_centerline_cells.size() / MP_STEP + 1;
     g_mp_loc.assign(g_mp_count, -1);
     g_mp_density.assign(g_mp_count, 0);
-    g_mp_flow_right.assign(g_mp_count, 0);
-    g_mp_flow_left.assign(g_mp_count, 0);
-    g_mp_dir.assign(g_mp_count, 0);
-    g_mp_lock_dir.assign(g_mp_count, 0);
     g_mp_main_dist.assign(g_mp_count, -1);
-    g_mp_future_right.assign(g_mp_count, 0.0f);
-    g_mp_future_left.assign(g_mp_count, 0.0f);
     g_mp_width_p10.assign(g_mp_count, 999);
     
     // Compute tangents for centerline cells
@@ -489,7 +471,7 @@ inline void init(const SharedEnvironment* env) {
     g_ready = true;
 }
 
-// ====== Future flow stub (data filled by strategy_centerline) ======
+// ====== Future flow removed, replaced by TrafficSegment prediction ======
 // ====== 2D zone density (tick call) ======
 inline void update_zone24_density(const SharedEnvironment* env) {
     int n24c = (env->cols + 23) / 24, n24r = (env->rows + 23) / 24;
@@ -533,80 +515,7 @@ inline void update_mp_density(const SharedEnvironment* env) {
     }
 }
 
-// ====== 1D main point direction (tick call) ======
-inline void update_mp_direction(const SharedEnvironment* env) {
-    // 1. Flow tracking per main point
-    std::fill(g_mp_flow_right.begin(), g_mp_flow_right.end(), 0);
-    std::fill(g_mp_flow_left.begin(), g_mp_flow_left.end(), 0);
-    
-    if ((int)g_mp_agent_last_main.size() < env->num_of_agents)
-        g_mp_agent_last_main.assign(env->num_of_agents + 1000, -1);
-    
-    for (int a = 0; a < env->num_of_agents; a++) {
-        int loc = env->curr_states[a].location;
-        if (loc < 0) continue;
-        int m = -1, b;
-        project(loc, m, b);
-        int prev_m = g_mp_agent_last_main[a];
-        g_mp_agent_last_main[a] = m;
-        if (prev_m >= 0 && m >= 0) {
-            // Find nearest main point
-            int best_si = 0, best_d = 999999;
-            for (int si = 0; si < g_mp_count; si++) {
-                int mloc = g_mp_loc[si];
-                if (mloc < 0) continue;
-                int mr = mloc / env->cols, mc = mloc % env->cols;
-                int dr = std::abs(loc / env->cols - mr);
-                int dc = std::abs(loc % env->cols - mc);
-                int d = dr + dc;
-                if (d < best_d) { best_d = d; best_si = si; }
-            }
-            if (m - prev_m >= 1)      g_mp_flow_right[best_si]++;
-            else if (m - prev_m <= -1) g_mp_flow_left[best_si]++;
-        }
-    }
-    
-    // 2. Majority flow direction
-    std::fill(g_mp_dir.begin(), g_mp_dir.end(), 0);
-    for (int si = 0; si < g_mp_count; si++) {
-        if (g_mp_density[si] < 10) continue;  // DIR_THRESHOLD equivalent
-        g_mp_dir[si] = (g_mp_flow_right[si] > g_mp_flow_left[si]) ? +1 :
-                       (g_mp_flow_left[si] > g_mp_flow_right[si]) ? -1 : 0;
-    }
-    
-    // Future flow direction override
-    for (int si = 0; si < g_mp_count; si++) {
-        float total = g_mp_future_right[si] + g_mp_future_left[si];
-        if (total >= 3.0f) {
-            if (g_mp_future_right[si] > g_mp_future_left[si] * 1.5f)
-                g_mp_dir[si] = +1;
-            else if (g_mp_future_left[si] > g_mp_future_right[si] * 1.5f)
-                g_mp_dir[si] = -1;
-        }
-    }
-    
-    // 3. Direction lock: future flow based, per-width thresholds
-    std::fill(g_mp_lock_dir.begin(), g_mp_lock_dir.end(), 0);
-    for (int si = 0; si < g_mp_count; si++) {
-        float ftotal = g_mp_future_right[si] + g_mp_future_left[si];
-        float flow_th = get_mp_flow_th(si);
-        if (flow_th >= 9999.0f) continue;  // super wide: never lock
-        if (ftotal < flow_th) continue;
-        int dir = (g_mp_future_right[si] > g_mp_future_left[si]) ? +1 : -1;
-        for (int d = -FUTURE_FLOW_LOCK_SPREAD; d <= FUTURE_FLOW_LOCK_SPREAD; d++) {
-            int ni = si + d;
-            if (ni < 0 || ni >= g_mp_count) continue;
-            g_mp_lock_dir[ni] = dir;
-        }
-    }
-}
-// ====== NDJSON MP analysis log (disabled for cloud) ======
-// #if USE_MP_DENSITY
-// static FILE* g_mp_log_f = NULL;
-// static void mp_log_flush() {
-//     ...
-// }
-// #endif
+// update_mp_direction removed — replaced by TrafficSegment prediction
 
 // ====== 16-direction per-cell corridor width (static, computed once at init) ======
 // Ported from cell_width_map_v3.py: 16 pairs, step-length normalized, dead-end skip
@@ -694,6 +603,8 @@ inline void init_segments() {
             seg.si_hi = si;
             seg.p10_width = min_w;
             seg.is_narrow = (min_w <= NARROW_WIDTH_MAX);
+            seg.is_very_wide = (min_w > 15);
+            seg.group_id = -1;
             seg.capacity = (seg.is_narrow) ? 1 : (min_w / 2);
             
             int prev_si = std::max(0, seg_start - 1);
@@ -714,6 +625,44 @@ inline void init_segments() {
             g_segments.push_back(seg);
             seg_start = si;
         }
+    }
+    
+    // Compute groups: merge narrow segs within 200 main_dist, unless very-wide(width>15) in between
+    // All segs in the same group must have same flow_dir
+    static constexpr int GROUP_THRESHOLD = 200;
+    static constexpr int WIDE_BREAK = 15;
+    int cur_group = 0;
+    for (int i = 0; i < (int)g_segments.size(); i++) {
+        if (g_segments[i].group_id >= 0) continue;
+        if (!g_segments[i].is_narrow) { g_segments[i].group_id = -1; continue; }
+        
+        // Scan forward to build group
+        for (int j = i; j < (int)g_segments.size(); j++) {
+            if (!g_segments[j].is_narrow) continue;
+            if (g_segments[j].group_id >= 0) continue;
+            
+            // Check if there's a very-wide segment between the group and this candidate
+            bool has_break = false;
+            int last_m = g_segments[i].si_lo;
+            int curr_m = g_segments[j].si_lo;
+            if (std::abs(last_m - curr_m) * 16 > GROUP_THRESHOLD) continue;
+            
+            for (int k = i; k < j; k++) {
+                if (g_segments[k].is_very_wide) {
+                    has_break = true; break;
+                }
+            }
+            if (has_break) break;
+            
+            g_segments[j].group_id = cur_group;
+        }
+        cur_group++;
+    }
+    
+    // Mark non-narrow segments as ungrouped
+    for (auto& seg : g_segments) {
+        if (!seg.is_narrow && seg.group_id == -1)
+            seg.group_id = -1;
     }
 }
 
@@ -772,7 +721,7 @@ inline void debug_traffic_csv() {
         fprintf(f, "tick,seg_id,si_lo,si_hi,width,is_narrow,"
                    "state,flow_dir,right_c,left_c,"
                    "right_early,right_late,left_early,left_late,"
-                   "queue_r,queue_l,inside,blocked,cleanup\n");
+                   "queue_r,queue_l,inside,in_r,in_l,blocked,cleanup\n");
     }
     for (int i = 0; i < (int)g_segments.size(); i++) {
         auto& s = g_segments[i];
@@ -787,12 +736,12 @@ inline void debug_traffic_csv() {
         fprintf(f, "%d,%d,%d,%d,%d,%d,"
                    "%s,%d,%d,%d,"
                    "%d,%d,%d,%d,"
-                   "%d,%d,%d,%d,%d\n",
+                   "%d,%d,%d,%d,%d,%d,%d\n",
                 g_current_tick, i, s.si_lo, s.si_hi, s.p10_width, (int)s.is_narrow,
                 st, s.flow_dir, s.right_count, s.left_count,
                 s.right_early, s.right_late, s.left_early, s.left_late,
                 s.entrance_queue_right, s.entrance_queue_left,
-                s.inside_count, (int)s.is_blocked, s.cleanup_ticks);
+                s.inside_count, s.inside_right, s.inside_left, (int)s.is_blocked, s.cleanup_ticks);
     }
 }
 #endif // USE_TRAFFIC_PREDICTION

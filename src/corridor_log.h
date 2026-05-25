@@ -90,11 +90,8 @@ inline void log_tick(SharedEnvironment* env) {
         p90 = (float)dens_vals[idx];
     }
     
-    // Direction lock stats
+    // Direction lock stats (removed)
     int n_locked = 0;
-    for (int si = 0; si < n_mp; si++) {
-        if (Centerline::g_mp_lock_dir[si] != 0) n_locked++;
-    }
     
     fprintf(g_fd, "%d,%d,%d,%.1f,%d,%.0f,%.1f,%d,%d,%d,%d,%d\n",
             approx_tick, on_main, free_ag, avg, max_dens,
@@ -131,7 +128,7 @@ inline void log_tick(SharedEnvironment* env) {
                 int d = dr + dc;
                 if (d < best_d) { best_d = d; best_si = si; }
             }
-            ld = Centerline::g_mp_lock_dir[best_si];
+            ld = 0; /* g_mp_lock_dir removed */
             int errand_idx = 0; // not tracked in detail here
             int ax = loc % env->cols;
             int ay = loc / env->cols;
@@ -149,11 +146,8 @@ inline void log_tick(SharedEnvironment* env) {
             int mm = Centerline::g_mp_main_dist[si];
             int w = (int)Centerline::g_cell_width[mloc];
             if (w > 50000) continue;
-            fprintf(g_mp_fd, "%d,%d,%d,%d,%d,%.1f,%.1f,%d\n",
+            fprintf(g_mp_fd, "%d,%d,%d,%d,0,0.0,0.0,%d\n",
                     approx_tick, si, mm, w,
-                    Centerline::g_mp_lock_dir[si],
-                    Centerline::g_mp_future_right[si],
-                    Centerline::g_mp_future_left[si],
                     Centerline::g_mp_density[si]);
         }
         fflush(g_mp_fd);
