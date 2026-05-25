@@ -56,13 +56,55 @@ static std::vector<int> g_mp_main_dist;      // [si] = main_dist of this main po
 static std::vector<float> g_mp_future_right;   // [si] = distance-weighted future flow right
 static std::vector<float> g_mp_future_left;    // [si] = distance-weighted future flow left
 static std::vector<int> g_mp_width_p10;        // [si] = P10 corridor width (cells) per MP
+
+// ====== Traffic prediction segment (replaces future flow) ======
+#if USE_TRAFFIC_PREDICTION
+enum SegState {
+    SEG_IDLE,
+    SEG_RIGHT_FLOW,
+    SEG_LEFT_FLOW,
+    SEG_RIGHT_CLEANUP,
+    SEG_LEFT_CLEANUP,
+};
+
+struct TrafficSegment {
+    int si_lo, si_hi;         // MP range [lo, hi)
+    int p10_width;             // worst (min) width in this segment
+    bool is_narrow;            // p10_width <= NARROW_WIDTH_MAX
+    int capacity;
+    
+    // Queue zone entrance (main_dist)
+    int entrance_left_m;       // left (small main_dist) entrance
+    int entrance_right_m;      // right (large main_dist) entrance
+    
+    // Predicted traffic (from predict_trajectory)
+    int right_count;           // right-going agents predicted
+    int left_count;            // left-going agents predicted
+    int right_early, right_late;  // arrival tick range
+    int left_early, left_late;
+    
+    // Narrow corridor state machine
+    int flow_dir;              // +1 = right, -1 = left, 0 = none
+    SegState state;
+    int cleanup_ticks;         // remaining cleanup ticks
+    int entrance_queue_right;  // agents buffered at left entrance
+    int entrance_queue_left;   // agents buffered at right entrance
+    int inside_count;          // agents currently inside segment
+    int consecutive_no_exit;   // ticks with no progress (blockage detection)
+    bool is_blocked;
+};
+
+static std::vector<TrafficSegment> g_segments;
+static int g_current_tick = 0;
+#endif
+
 // Get width-adaptive direction lock threshold for MP si
 inline float get_mp_flow_th(int si) {
     int w = g_mp_width_p10[si];
     if (w < WIDTH_BAND_1) return FF_TH_BAND_1;
     if (w < WIDTH_BAND_2) return FF_TH_BAND_2;
     if (w < WIDTH_BAND_3) return FF_TH_BAND_3;
-    return 9999.0f;  // super wide: never lock
+    return FF_TH_BAND_WIDE;  // super wide threshold
 }
 
 
@@ -203,8 +245,14 @@ inline void build_zone_ranges() {
 // Forward declaration for per-cell width computation
 inline void compute_cell_width(const SharedEnvironment* env);
 
+// ====== Forward declarations for traffic prediction ======
+#if USE_TRAFFIC_PREDICTION
+inline void init_segments();
+inline void debug_traffic_csv();
+#endif
+
 // ====== Init: BFS path + wall correction + build zone ranges ======
-void init(const SharedEnvironment* env) {
+inline void init(const SharedEnvironment* env) {
     g_rows = env->rows; g_cols = env->cols;
     g_n24c = env->cols / 24 + 1; g_n24r = env->rows / 24 + 1;
     int total = g_rows * g_cols;
@@ -431,6 +479,13 @@ void init(const SharedEnvironment* env) {
     // BFS distance table (off-main comps always; full matrix if USE_BFS_TABLE=1)
     BFSTable::init(env, g_zone_is_main, g_n24c);
 
+#if USE_TRAFFIC_PREDICTION
+    init_segments();
+#if USE_DIAG_LOG
+    debug_traffic_csv();
+#endif
+#endif
+
     g_ready = true;
 }
 
@@ -610,6 +665,137 @@ inline void compute_cell_width(const SharedEnvironment* env) {
     printf("CELL_WIDTH: computed for %d walkable cells\n", (int)g_cell_width.size());
 #endif
 }
+
+// ====== Traffic prediction: segment initialization ======
+#if USE_TRAFFIC_PREDICTION
+inline void init_segments() {
+    g_segments.clear();
+    if (g_mp_count <= 0) return;
+    
+    int seg_start = 0;
+    for (int si = 1; si <= g_mp_count; si++) {
+        bool split = false;
+        if (si == g_mp_count) split = true;
+        else if (si > 0 && std::abs(g_mp_width_p10[si] - g_mp_width_p10[seg_start]) >= 3)
+            split = true;
+        else if (si - seg_start >= 4)
+            split = true;
+        
+        if (split) {
+            int seg_len = si - seg_start;
+            if (seg_len <= 0) { seg_start = si; continue; }
+            
+            int min_w = 9999;
+            for (int s = seg_start; s < si; s++)
+                if (g_mp_width_p10[s] < min_w) min_w = g_mp_width_p10[s];
+            
+            TrafficSegment seg;
+            seg.si_lo = seg_start;
+            seg.si_hi = si;
+            seg.p10_width = min_w;
+            seg.is_narrow = (min_w <= NARROW_WIDTH_MAX);
+            seg.capacity = (seg.is_narrow) ? 1 : (min_w / 2);
+            
+            int prev_si = std::max(0, seg_start - 1);
+            seg.entrance_left_m = g_mp_main_dist[prev_si];
+            seg.entrance_right_m = g_mp_main_dist[std::min(si, g_mp_count - 1)];
+            
+            seg.right_count = seg.left_count = 0;
+            seg.right_early = seg.left_early = 999999;
+            seg.right_late = seg.left_late = 0;
+            seg.flow_dir = 0;
+            seg.state = SEG_IDLE;
+            seg.cleanup_ticks = 0;
+            seg.entrance_queue_right = seg.entrance_queue_left = 0;
+            seg.inside_count = 0;
+            seg.consecutive_no_exit = 0;
+            seg.is_blocked = false;
+            
+            g_segments.push_back(seg);
+            seg_start = si;
+        }
+    }
+}
+
+// Predict trajectory for one agent along its task path
+inline void predict_trajectory(int /*aid*/, int curr_loc,
+                                const std::vector<int>& task_locs,
+                                SharedEnvironment* env) {
+    int curr_m, curr_b;
+    project(curr_loc, curr_m, curr_b);
+    if (curr_m < 0) return;
+    
+    int prev_m = curr_m;
+    int cumul_dist = 0;
+    
+    for (int loc : task_locs) {
+        int tm, tb;
+        project(loc, tm, tb);
+        if (tm < 0) continue;
+        
+        int seg_lo = std::min(prev_m, tm);
+        int seg_hi = std::max(prev_m, tm);
+        int dir = (tm > prev_m) ? +1 : -1;
+        int seg_len = std::abs(tm - prev_m);
+        
+        for (auto& seg : g_segments) {
+            int sm_lo = g_mp_main_dist[seg.si_lo];
+            int sm_hi = g_mp_main_dist[std::min(seg.si_hi, g_mp_count - 1)];
+            if (seg_hi <= sm_lo || seg_lo >= sm_hi) continue;
+            
+            int overlap_lo = std::max(seg_lo, sm_lo);
+            int dist_to_seg = cumul_dist + std::abs(overlap_lo - prev_m);
+            int arrival = (int)((float)dist_to_seg / PREDICT_SPEED);
+            int exit = (int)((float)(dist_to_seg + seg_len) / PREDICT_SPEED);
+            
+            if (dir > 0) {
+                seg.right_count++;
+                if (arrival < seg.right_early) seg.right_early = arrival;
+                if (exit > seg.right_late) seg.right_late = exit;
+            } else {
+                seg.left_count++;
+                if (arrival < seg.left_early) seg.left_early = arrival;
+                if (exit > seg.left_late) seg.left_late = exit;
+            }
+        }
+        
+        cumul_dist += seg_len;
+        prev_m = tm;
+    }
+}
+
+// Debug CSV
+inline void debug_traffic_csv() {
+    static FILE* f = nullptr;
+    if (!f) {
+        f = fopen("C:/Users/Administrator/.openclaw/workspace/traffic_prediction.csv", "w");
+        fprintf(f, "tick,seg_id,si_lo,si_hi,width,is_narrow,"
+                   "state,flow_dir,right_c,left_c,"
+                   "right_early,right_late,left_early,left_late,"
+                   "queue_r,queue_l,inside,blocked,cleanup\n");
+    }
+    for (int i = 0; i < (int)g_segments.size(); i++) {
+        auto& s = g_segments[i];
+        const char* st = "IDLE";
+        switch (s.state) {
+            case SEG_RIGHT_FLOW: st = "R_FLOW"; break;
+            case SEG_LEFT_FLOW:  st = "L_FLOW"; break;
+            case SEG_RIGHT_CLEANUP: st = "R_CLEAN"; break;
+            case SEG_LEFT_CLEANUP:  st = "L_CLEAN"; break;
+            default: break;
+        }
+        fprintf(f, "%d,%d,%d,%d,%d,%d,"
+                   "%s,%d,%d,%d,"
+                   "%d,%d,%d,%d,"
+                   "%d,%d,%d,%d,%d\n",
+                g_current_tick, i, s.si_lo, s.si_hi, s.p10_width, (int)s.is_narrow,
+                st, s.flow_dir, s.right_count, s.left_count,
+                s.right_early, s.right_late, s.left_early, s.left_late,
+                s.entrance_queue_right, s.entrance_queue_left,
+                s.inside_count, (int)s.is_blocked, s.cleanup_ticks);
+    }
+}
+#endif // USE_TRAFFIC_PREDICTION
 
 } // namespace Centerline
 

@@ -22,4 +22,7 @@ namespace CenterlineAccess {
     extern int g_n24c;
     extern int g_n24r;
     extern float active_ratio;       // [0-1] fraction of agents with tasks this tick
+#if USE_TRAFFIC_PREDICTION
+    extern const void* g_segments_ptr;  // points to std::vector<Centerline::TrafficSegment>*
+#endif
 }

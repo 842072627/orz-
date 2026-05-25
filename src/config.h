@@ -25,19 +25,30 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define ORZ_PLANNER     "default"       // ORZ planner: default PIBT
 #define ORZ_EXECUTOR    "default"       // ORZ executor: default
 
-// ========== Future flow direction lock (pure prediction, per-width thresholds) ==========
-#define FUTURE_FLOW_LOCK_TH   1.4f    // baseline threshold for wide corridors
-#define FUTURE_FLOW_LOCK_SPREAD 2       // lock radius: 0 = no propagation, each MP independent
-#define FUTURE_FLOW_BRANCH_PENALTY  0.6f
-#define FUTURE_FLOW_BRANCH_OFFSET   14
+// ========== [DEPRECATED] Future flow direction lock ==========
+// 被 USE_TRAFFIC_PREDICTION 替代
+#define FUTURE_FLOW_LOCK_TH   9999.0f  // disable
+#define FUTURE_FLOW_LOCK_SPREAD 0
+#define FUTURE_FLOW_BRANCH_PENALTY  0.0f
+#define FUTURE_FLOW_BRANCH_OFFSET   9999
 
 // ========== Per-width-zone direction lock thresholds ==========
 #define WIDTH_BAND_1          4       // width < 4: very narrow
 #define WIDTH_BAND_2          9       // width 4-8: narrow
 #define WIDTH_BAND_3          16      // width 9-15: moderate
-#define FF_TH_BAND_1          1.3f   // threshold for width < 4 (very narrow)
-#define FF_TH_BAND_2          1.3f   // threshold for width 4-8 (narrow)
-#define FF_TH_BAND_3          1.3f    // threshold for width 9-15 (moderate)
+#define FF_TH_BAND_1          9999.0f  // disabled
+#define FF_TH_BAND_2          9999.0f  // disabled
+#define FF_TH_BAND_3          9999.0f  // disabled
+#define FF_TH_BAND_WIDE       9999.0f  // disabled
+
+// ========== Traffic prediction (replaces future flow) ==========
+#define USE_TRAFFIC_PREDICTION  1       // 时刻表预测开关
+#define PREDICT_SPEED          1.5f     // 保守速度 (main_dist / tick)
+#define NARROW_WIDTH_MAX       5        // ≤5 视为窄段, 严格单向
+#define MAX_QUEUE              30       // 排队区最大容量
+#define CLEANUP_TICKS          10       // 切换清空期长度 (ticks)
+#define BLOCK_THRESHOLD         5       // 连续几tick无进展视为堵塞 (PIBT延迟正常20+)
+#define WAIT_PENALTY           0.3f     // base_score 中等待惩罚系数
 
 // ========== Task segment distance limit ==========
 #define MAX_TASK_SEGMENT_DIST  99999   // max main+branch distance for a single errand transition
@@ -54,7 +65,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define USE_DENSITY_EXCLUDE_IDLE  false    // 排除无任务/被截停agent的密度贡献
 
 // ========== Wall-hugging in corridors (PIBT tie-breaker + A* guide path) ==========
-#define USE_WALL_HUGGING        false    // master switch for all wall-hugging features
+#define USE_WALL_HUGGING        true    // master switch for all wall-hugging features
 #define USE_WALL_HUGGING_PIBT    true    // PIBT successor tie-breaker wall-hugging
 #define USE_WALL_HUGGING_ASTAR   true    // A* guide path branch-dist bias
 #define WALL_HUG_WIDTH_MAX       20      // max corridor width (cells) for wall-hugging
@@ -70,7 +81,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define USE_MP_WIDTH        1   // P10 corridor width per main point
 
 // ========== Diagnostic logging ==========
-#define USE_DIAG_LOG    0   // 1 = write CSV logs + console prints; 0 = silent (cloud test)
+#define USE_DIAG_LOG    1   // 1 = write CSV logs + console prints; 0 = silent (cloud test)
 
 // Runtime strategy name getter (used by TaskScheduler.cpp)
 inline std::string get_orz_strategy() { return ORZ_SCHEDULER; }

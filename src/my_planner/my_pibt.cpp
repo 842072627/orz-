@@ -3,6 +3,7 @@
 
 #include "my_pibt.h"
 #include "../pibt_lock.h"
+#include "../centerline.h"
 #include <cstdint>
 
 namespace MyPlanner{
@@ -135,6 +136,41 @@ bool causalMY_PIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
         }
     }
 #endif
+
+#if USE_TRAFFIC_PREDICTION
+    // Narrow corridor entry check: ONLY when agent's NEXT STEP enters a narrow cell
+    if (CenterlineAccess::g_segments_ptr && CenterlineAccess::g_main_dist) {
+        int a_m = (*CenterlineAccess::g_main_dist)[prev_loc];
+        if (a_m >= 0) {
+            int task_m = lns.tasks.at(curr_id);
+            int dir = (task_m > a_m) ? +1 : -1;
+            typedef Centerline::TrafficSegment Seg;
+            const std::vector<Seg>* segs = (const std::vector<Seg>*)CenterlineAccess::g_segments_ptr;
+            if (segs) {
+                // Check if ANY successor location enters a blocked narrow segment
+                for (auto& succ : successors) {
+                    int s_m = (*CenterlineAccess::g_main_dist)[succ.location];
+                    if (s_m < 0) continue;
+                    for (auto& seg : *segs) {
+                        if (!seg.is_narrow) continue;
+                        int sm_lo = seg.si_lo < (int)CenterlineAccess::g_mp_main_dist->size() ?
+                            (*CenterlineAccess::g_mp_main_dist)[seg.si_lo] : 999999;
+                        int sm_hi = (seg.si_hi > 0 && seg.si_hi-1 < (int)CenterlineAccess::g_mp_main_dist->size()) ?
+                            (*CenterlineAccess::g_mp_main_dist)[seg.si_hi-1] : 999999;
+                        // succ is inside narrow segment, current is NOT inside
+                        bool entering = (s_m >= sm_lo && s_m <= sm_hi) && 
+                                        !(a_m >= sm_lo && a_m <= sm_hi);
+                        if (entering && seg.flow_dir != 0 && dir != 0 && dir != seg.flow_dir) {
+                            // Penalize this successor (but don't force WAIT, just prefer other directions)
+                            succ.heuristic += 99999;
+                        }
+                    }
+                }
+            }
+        }
+    }
+#endif
+
 	std::sort(successors.begin(), successors.end(), 
 		[&](MY_PIBT_C& a, MY_PIBT_C& b)
 		{
