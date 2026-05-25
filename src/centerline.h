@@ -603,7 +603,7 @@ inline void init_segments() {
             seg.si_hi = si;
             seg.p10_width = min_w;
             seg.is_narrow = (min_w <= NARROW_WIDTH_MAX);
-            seg.is_very_wide = (min_w > 15);
+            seg.is_very_wide = (min_w > WIDE_BREAK);
             seg.group_id = -1;
             seg.capacity = (seg.is_narrow) ? 1 : (min_w / 2);
             
@@ -627,10 +627,8 @@ inline void init_segments() {
         }
     }
     
-    // Compute groups: merge narrow segs within 200 main_dist, unless very-wide(width>15) in between
+    // Compute groups: merge narrow segs within GROUP_THRESHOLD main_dist
     // All segs in the same group must have same flow_dir
-    static constexpr int GROUP_THRESHOLD = 200;
-    static constexpr int WIDE_BREAK = 15;
     int cur_group = 0;
     for (int i = 0; i < (int)g_segments.size(); i++) {
         if (g_segments[i].group_id >= 0) continue;

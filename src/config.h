@@ -27,18 +27,22 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 
 // ========== Future flow (REMOVED, replaced by USE_TRAFFIC_PREDICTION) ==========
 
-// ========== Traffic prediction (replaces future flow) ==========
-#define USE_TRAFFIC_PREDICTION  1       // 时刻表预测开关
-#define PREDICT_SPEED          1.5f     // 保守速度 (main_dist / tick)
-#define NARROW_WIDTH_MAX       5        // ≤5 视为窄段, 严格单向
-#define MAX_QUEUE              30       // 排队区最大容量
-#define CLEANUP_TICKS          10       // 切换清空期长度 (ticks)
-#define BLOCK_THRESHOLD         5       // 连续几tick无进展视为堵塞 (PIBT延迟正常20+)
-#define WAIT_PENALTY           0.3f     // base_score 中等待惩罚系数
+// ========== Traffic prediction ==========
+#define USE_TRAFFIC_PREDICTION  1
+#define PREDICT_SPEED          1.5f
+#define NARROW_WIDTH_MAX       5
+
+// ========== Direction lock thresholds ==========
+#define HEAT_UNLOCK_THRESHOLD    7    // 组内MP热度低于此值 → 解锁
+#define HEAT_AGENT_TASK_REJECT  20    // 逆向取任务时经过MP的最大热度
+#define HEAT_STOP_FAIL          30    // 热度高于此值 → 截停失效
+#define GROUP_THRESHOLD        200    // 窄段分组最大 main_dist 距离
+#define WIDE_BREAK              15    // 宽度>此值 → 分组断开
+#define USE_DUMMY_GOAL        false   // 空闲agent回spawn
 
 // ========== Task segment distance limit ==========
 #define MAX_TASK_SEGMENT_DIST  99999   // max main+branch distance for a single errand transition
-#define GARBAGE_TASK_RATIO      0.05f  // bottom fraction of free tasks deferred each tick (0.0-1.0)
+#define GARBAGE_TASK_RATIO      0.0f  // bottom fraction of free tasks deferred each tick (0.0-1.0)
 
 // ========== Hard density limit ==========
 #define USE_DENSITY_HARD_CAP  true    // enable hard density cap
@@ -48,7 +52,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define ORZ_PIBT_DIRECTION_BLOCK  false    // scheduler + PIBT direction block linkage
 
 // ========== Density exclusion ==========
-#define USE_DENSITY_EXCLUDE_IDLE  false    // 排除无任务/被截停agent的密度贡献
+#define USE_DENSITY_EXCLUDE_IDLE  true    // 排除无任务/被截停agent的密度贡献
 
 // ========== Wall-hugging in corridors (PIBT tie-breaker + A* guide path) ==========
 #define USE_WALL_HUGGING        true    // master switch for all wall-hugging features

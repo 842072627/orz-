@@ -1,4 +1,4 @@
-// strategy_centerline.h — V3: zone-range + per-errand scoring
+// strategy_centerline.h — V4: heat-based direction lock + narrow group control
 #include "TaskScheduler.h"
 #include "scheduler.h"
 #include "const.h"
@@ -19,15 +19,6 @@
 #include <cmath>
 
 namespace strategy_centerline {
-
-static constexpr int ROUTE_THRESHOLD = 20;
-static constexpr float DIVISOR_TABLE[21] = {
-    1.0f, 1.1f, 1.2f, 1.3f, 1.4f,
-    1.5f, 1.6f, 1.7f, 1.8f, 1.9f,
-    2.0f, 2.1f, 2.2f, 2.3f, 2.4f,
-    2.5f, 2.6f, 2.7f, 2.8f, 2.9f,
-    3.0f
-};
 
 static SharedEnvironment* g_env = nullptr;
 static std::vector<int> g_parked_task;
@@ -57,20 +48,12 @@ static inline int unified_dist(int loc_a, int loc_b) {
 void init(SharedEnvironment* env) {
     g_env = env;
     Centerline::init(env);
-    // Centerline::compute_cell_width(env);  // already called inside Centerline::init()
 #if USE_DIAG_LOG
     printf("CENTERLINE_SCHEDULER: agents=%d, map=%dx%d, zones=%zu, cells=%zu\n",
            env->num_of_agents, env->cols, env->rows,
            Centerline::g_zone_ranges.size(), Centerline::g_centerline_cells.size());
-#endif
-#if USE_DIAG_LOG
     CorridorLog::init();
     CorridorLog::set_env(env);
-    static bool atexit_reg = false;
-    if (!atexit_reg) {
-        atexit_reg = true;
-        std::atexit([]() { CorridorLog::close(); });
-    }
 #endif
 }
 
@@ -81,184 +64,121 @@ static inline float base_score(int a_loc, int tid, SharedEnvironment* env, int s
         return -1e9f;
     if (!Centerline::g_ready) return 1.0f;
     auto& locs = it->second.locations;
-
-    // Exempt: fast path for trajectories that don't cross any narrow segment
-    #if USE_TRAFFIC_PREDICTION
-    {
-        int a_m, a_b;
-        Centerline::project(a_loc, a_m, a_b);
-        if (a_m >= 0) {
-            bool passes_narrow = false;
-            int prev_m = a_m;
-            for (auto& loc : locs) {
-                int tm, tb;
-                Centerline::project(loc, tm, tb);
-                if (tm < 0) continue;
-                int lo = std::min(prev_m, tm);
-                int hi = std::max(prev_m, tm);
-                for (auto& seg : Centerline::g_segments) {
-                    if (!seg.is_narrow) continue;
-                    int sm_lo = Centerline::g_mp_main_dist[seg.si_lo];
-                    int sm_hi = Centerline::g_mp_main_dist[std::min(seg.si_hi, Centerline::g_mp_count) - 1];
-                    if (hi > sm_lo && lo < sm_hi) { passes_narrow = true; break; }
-                }
-                if (passes_narrow) break;
-                prev_m = tm;
-            }
-            if (!passes_narrow) {
-                float total = 0;
-                int prev = a_loc;
-                for (auto& loc : locs) {
-                    int d = unified_dist(prev, loc);
-                    total += 1.0f / (float)(d + 1);
-                    prev = loc;
-                }
-                g_dbg_exempt++;
-                return total;
-            }
-        }
-    }
-    #endif
-
-    // Branch task check
-    {
-        bool is_branch = true;
-        int check_prev = a_loc;
-        for (size_t ei = (size_t)start_idx; ei < locs.size(); ei++) {
-            int loc = locs[ei];
-            if (!BFSTable::is_branch_path(check_prev, loc)) {
-                is_branch = false;
-                break;
-            }
-            check_prev = loc;
-        }
-        if (is_branch) {
-            float total = 0;
-            int prev = a_loc;
-            for (size_t ei = (size_t)start_idx; ei < locs.size(); ei++) {
-                int loc = locs[ei];
-                int d = unified_dist(prev, loc);
-                total += 1.0f / (float)(d + 1);
-                prev = loc;
-            }
-            g_dbg_branch++;
-            return total;
-        }
-    }
-
+    
     int a_m, a_b;
     Centerline::project(a_loc, a_m, a_b);
-    if (a_m < 0) return 1.0f;
-
-    float total_score = 0;
-    int prev_m = a_m, prev_b = a_b;
-
-    for (size_t ei = (size_t)start_idx; ei < locs.size(); ei++) {
-        int tm, tb;
-        Centerline::project(locs[ei], tm, tb);
-        if (tm < 0) continue;
-
-        int lo = std::min(prev_m, tm);
-        int hi = std::max(prev_m, tm);
-        int intent = (tm > prev_m) ? +1 : -1;
-
-        int d_max_seg = 0;
-        auto lo_it = std::lower_bound(Centerline::g_mp_main_dist.begin(), Centerline::g_mp_main_dist.end(), lo);
-        auto hi_it = std::upper_bound(Centerline::g_mp_main_dist.begin(), Centerline::g_mp_main_dist.end(), hi);
-        for (int si = (int)(lo_it - Centerline::g_mp_main_dist.begin());
-             si < (int)(hi_it - Centerline::g_mp_main_dist.begin()); si++) {
-            int d = Centerline::g_mp_density[si];
-            if (USE_DENSITY_HARD_CAP && d >= DENSITY_HARD_CAP)
-                return -1e9f;
-            if (d > d_max_seg) d_max_seg = d;
-        }
-        
-        // Traffic prediction segment check
-        #if USE_TRAFFIC_PREDICTION
+    
+    // Step 1: compute task1→task2 direction and distance
+    int t1_m = -1, t2_m = -1;
+    if (!locs.empty()) {
+        int tb;
+        Centerline::project(locs[0], t1_m, tb);
+    }
+    if (locs.size() > 1) {
+        int tb;
+        Centerline::project(locs[1], t2_m, tb);
+    }
+    
+    int task_dir = 0;
+    int task_dist = 0;
+    if (t1_m >= 0 && t2_m >= 0) {
+        task_dir = (t2_m > t1_m) ? +1 : (t2_m < t1_m) ? -1 : 0;
+        task_dist = std::abs(t2_m - t1_m);
+    }
+    
+    // Step 2: direction lock check on all narrow groups that task1→task2 passes
+    bool dir_blocked = false;
+    if (task_dir != 0 && t1_m >= 0 && t2_m >= 0) {
+        int lo = std::min(t1_m, t2_m);
+        int hi = std::max(t1_m, t2_m);
         for (auto& seg : Centerline::g_segments) {
             if (!seg.is_narrow) continue;
+            if (seg.flow_dir == 0) continue;  // unlocked
             int sm_lo = Centerline::g_mp_main_dist[seg.si_lo];
-            int sm_hi = Centerline::g_mp_main_dist[std::min(seg.si_hi, Centerline::g_mp_count - 1)];
+            int sm_hi = Centerline::g_mp_main_dist[std::min(seg.si_hi, Centerline::g_mp_count) - 1];
             if (hi <= sm_lo || lo >= sm_hi) continue;
-            
-            if (seg.flow_dir != 0 && intent != 0 && intent != seg.flow_dir) {
-                // Agent direction doesn't match segment flow
-                // Allow if agent is already inside or in queue zone
-                int a_m_here, a_b_here;
-                Centerline::project(a_loc, a_m_here, a_b_here);
-                bool in_queue = false;
-                if (intent > 0 && a_m_here < sm_lo && sm_lo - a_m_here < 80)
-                    in_queue = true;
-                if (intent < 0 && a_m_here > sm_hi && a_m_here - sm_hi < 80)
-                    in_queue = true;
-                bool inside = (a_m_here >= sm_lo && a_m_here <= sm_hi);
-                if (!in_queue && !inside) {
-                    g_dbg_dirlock++;
-                    return -1e9f;
+            if (task_dir != seg.flow_dir) {
+                dir_blocked = true;
+                break;
+            }
+        }
+    }
+    if (dir_blocked) {
+        g_dbg_dirlock++;
+        return -1e9f;
+    }
+    
+    // Step 3: agent→task1 heat check (only if direction mismatches flow and flow is locked)
+    if (a_m >= 0 && t1_m >= 0) {
+        int agent_dir = (t1_m > a_m) ? +1 : (t1_m < a_m) ? -1 : 0;
+        bool check_heat = false;
+        // Only check heat if agent_dir mismatches some group's flow_dir
+        int alo = std::min(a_m, t1_m);
+        int ahi = std::max(a_m, t1_m);
+        for (auto& seg : Centerline::g_segments) {
+            if (!seg.is_narrow || seg.flow_dir == 0) continue;
+            int sm_lo = Centerline::g_mp_main_dist[seg.si_lo];
+            int sm_hi = Centerline::g_mp_main_dist[std::min(seg.si_hi, Centerline::g_mp_count) - 1];
+            if (ahi <= sm_lo || alo >= sm_hi) continue;
+            if (agent_dir != seg.flow_dir) {
+                check_heat = true;
+                break;
+            }
+        }
+        if (check_heat) {
+            for (int si = 0; si < Centerline::g_mp_count; si++) {
+                int sm = Centerline::g_mp_main_dist[si];
+                if (sm >= alo && sm <= ahi) {
+                    if (Centerline::g_mp_density[si] >= HEAT_AGENT_TASK_REJECT) {
+                        return -1e9f;
+                    }
                 }
             }
         }
-        #endif
-
-        float seg_dist = (float)(std::abs(prev_m - tm) + std::abs(prev_b - tb));
-        float seg_cost = (ei > (size_t)start_idx) ? (seg_dist * 0.3f + 1.0f) : (seg_dist + 1.0f);
-        float seg_score = 1.0f / seg_cost;
-        if (seg_cost > MAX_TASK_SEGMENT_DIST) {
-            float penalty = (float)MAX_TASK_SEGMENT_DIST / seg_cost;
-            seg_score *= penalty * penalty;
-        }
-        if (d_max_seg > ROUTE_THRESHOLD) {
-            int idx = (d_max_seg > 40) ? 40 : d_max_seg;
-            seg_score /= DIVISOR_TABLE[idx - ROUTE_THRESHOLD];
-        }
-        total_score += seg_score;
-        prev_m = tm; prev_b = tb;
-    }
-    return total_score;
-}
-
-// ====== Narrow segment direction evaluation ======
-#if USE_TRAFFIC_PREDICTION
-static inline void evaluate_narrow_segments(SharedEnvironment* env) {
-    for (auto& seg : Centerline::g_segments) {
-        if (!seg.is_narrow) continue;
-        
-        // Direction based on predicted traffic
-        int r = seg.right_count;
-        int l = seg.left_count;
-        
-        if (r > l * 1.5f) seg.flow_dir = +1;
-        else if (l > r * 1.5f) seg.flow_dir = -1;
-        else if (seg.is_narrow && r + l > 0) {
-            // Narrow with close counts: must pick one to prevent both-way
-            seg.flow_dir = (r >= l) ? +1 : -1;
-        }
-        
-        // Blockage detection
-        if (seg.consecutive_no_exit >= BLOCK_THRESHOLD)
-            seg.is_blocked = true;
-        else
-            seg.is_blocked = false;
     }
     
-    // Group enforcement: same group = same flow_dir
-    // Collect groups, pick majority direction, apply to all
-    std::unordered_map<int, std::vector<int>> group_dirs;
+    // Step 4: distance score (agent→task1)
+    float d = (float)unified_dist(a_loc, locs[0]);
+    return -(d + 1.0f);  // negative = shorter is better (sorted separately by task_dist)
+}
+
+// ====== evaluate narrow segments (heat-based lock/unlock) ======
+#if USE_TRAFFIC_PREDICTION
+static inline void evaluate_narrow_segments(SharedEnvironment* env) {
+    // Step 1: per-segment raw direction from prediction
+    for (auto& seg : Centerline::g_segments) {
+        if (!seg.is_narrow) continue;
+        int r = seg.right_count, l = seg.left_count;
+        if (r > l) seg.flow_dir = +1;
+        else if (l > r) seg.flow_dir = -1;
+        else seg.flow_dir = (r + l > 0) ? ((rand()%2==0)?+1:-1) : seg.flow_dir;
+    }
+    
+    // Step 2: collect per-group stats
+    std::unordered_map<int, std::pair<int,int>> group_flow;
+    std::unordered_map<int, int> group_max_heat;
     for (auto& seg : Centerline::g_segments) {
         if (!seg.is_narrow || seg.group_id < 0) continue;
-        group_dirs[seg.group_id].push_back(seg.flow_dir);
+        int gid = seg.group_id;
+        group_flow[gid].first += seg.right_count;
+        group_flow[gid].second += seg.left_count;
+        for (int si = seg.si_lo; si < seg.si_hi && si < Centerline::g_mp_count; si++) {
+            int h = Centerline::g_mp_density[si];
+            if (h > group_max_heat[gid]) group_max_heat[gid] = h;
+        }
     }
-    for (auto& kv : group_dirs) {
-        int gid = kv.first;
-        auto& dirs = kv.second;
-        if (dirs.empty()) continue;
-        int sum = 0;
-        for (int d : dirs) sum += d;
-        int majority = (sum >= 0) ? +1 : -1;
-        // Apply majority to all segments in this group
-        for (auto& seg : Centerline::g_segments) {
-            if (!seg.is_narrow || seg.group_id != gid) continue;
-            seg.flow_dir = majority;
+    
+    // Step 3: heat-based lock/unlock, group enforcement
+    for (auto& seg : Centerline::g_segments) {
+        if (!seg.is_narrow || seg.group_id < 0) continue;
+        int gid = seg.group_id;
+        int max_heat = group_max_heat[gid];
+        if (max_heat < HEAT_UNLOCK_THRESHOLD) {
+            seg.flow_dir = 0;  // unlock
+        } else {
+            int sum_r = group_flow[gid].first;
+            int sum_l = group_flow[gid].second;
+            seg.flow_dir = (sum_r >= sum_l) ? +1 : -1;
         }
     }
 }
@@ -276,22 +196,21 @@ void pre_tick_updates(SharedEnvironment* env) {
         CenterlineAccess::active_ratio = (float)active / (float)env->num_of_agents;
     }
 
-    // Agents with tasks: predict their trajectories
+    // Clear and predict agent trajectories
     for (auto& seg : Centerline::g_segments) {
         seg.right_count = seg.left_count = 0;
         seg.right_early = seg.left_early = 999999;
         seg.right_late = seg.left_late = 0;
         seg.entrance_queue_right = seg.entrance_queue_left = 0;
         seg.inside_count = 0;
-        seg.inside_right = 0;
-        seg.inside_left = 0;
+        seg.inside_right = seg.inside_left = 0;
         seg.consecutive_no_exit = 0;
         seg.is_blocked = false;
     }
     
     for (int a = 0; a < env->num_of_agents; a++) {
         int tid = env->curr_task_schedule[a];
-        if (tid < 0) continue;  // idle agents: no prediction
+        if (tid < 0) continue;
         auto it = env->task_pool.find(tid);
         if (it == env->task_pool.end() || it->second.locations.empty()) continue;
         int a_loc = env->curr_states[a].location;
@@ -299,7 +218,7 @@ void pre_tick_updates(SharedEnvironment* env) {
         Centerline::predict_trajectory(a, a_loc, it->second.locations, env);
     }
     
-    // Track agent positions relative to narrow segments
+    // Track agent positions
     for (int a = 0; a < env->num_of_agents; a++) {
         int a_loc = env->curr_states[a].location;
         if (a_loc < 0) continue;
@@ -320,7 +239,6 @@ void pre_tick_updates(SharedEnvironment* env) {
             int sm_lo = Centerline::g_mp_main_dist[seg.si_lo];
             int sm_hi = Centerline::g_mp_main_dist[std::min(seg.si_hi, Centerline::g_mp_count) - 1];
             if (a_m >= sm_lo && a_m <= sm_hi) {
-                // Agent is inside this segment
                 seg.inside_count++;
                 if (a_target_m >= 0) {
                     int dir = (a_target_m > a_m) ? +1 : -1;
@@ -354,7 +272,6 @@ void pre_tick_updates(SharedEnvironment* env) {
 
 #if USE_DIAG_LOG
     CorridorLog::log_tick(env);
-    // Only write debug CSV every 10 ticks to keep performance
     if (env->curr_timestep % 10 == 0)
         Centerline::debug_traffic_csv();
 #endif
@@ -363,7 +280,6 @@ void pre_tick_updates(SharedEnvironment* env) {
 // ====== Plan ======
 void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule) {
     auto t0 = std::chrono::steady_clock::now();
-
     pre_tick_updates(env);
 
     if ((int)g_parked_task.size() != env->num_of_agents)
@@ -393,7 +309,7 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
         if (!assigned_tasks.count(tid)) free_tasks.insert(tid);
     }
 
-    // Phase 1: Continue multi-errand tasks
+    // Phase 1: Continue multi-errand tasks (same as before)
     for (auto it = free_agents.begin(); it != free_agents.end(); ) {
         int a = *it;
         int cur = env->curr_task_schedule[a];
@@ -429,7 +345,7 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
         return;
     }
 
-    // Phase 2: Greedy assignment
+    // Phase 2: Greedy assignment with task1→task2 distance ordering
     std::unordered_map<int, std::vector<int>> tasks_by_zone;
     int phase2_assigned = 0;
     if (!free_agents.empty() && !free_tasks.empty() && std::chrono::steady_clock::now() <= endtime) {
@@ -445,7 +361,7 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
                          std::mt19937(std::random_device{}()));
         }
 
-        // Garbage defer
+        // Garbage defer (same as before)
         std::unordered_set<int> deferred_tasks;
         if ((int)free_tasks.size() > 10) {
             std::vector<int> sorted_free(free_tasks.begin(), free_tasks.end());
@@ -469,6 +385,8 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
                 deferred_tasks.insert(sorted_free[i]);
         }
 
+        // Sort free_tasks by task1→task2 distance (shorter first)
+        // This is done per-agent in the loop below using the score
         std::unordered_set<int> done_tasks;
         for (int a : free_agents) {
             if (std::chrono::steady_clock::now() > endtime) break;
@@ -487,45 +405,76 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
             int best_tid = -1;
             float best_score = -1e9f;
 
+            // Collect all candidate tasks for this agent
+            struct TaskCand {
+                int tid;
+                int task_dist;   // task1→task2
+                float agent_dist; // agent→task1
+            };
+            std::vector<TaskCand> candidates;
+            
             // Same zone
             auto sz = tasks_by_zone.find(a_zone);
             if (sz != tasks_by_zone.end()) {
-                float best_fallback = -1e9f; int fallback_tid = -1;
                 for (int tid : sz->second) {
                     if (done_tasks.count(tid) || deferred_tasks.count(tid)) continue;
-                    float bs = base_score(a_loc, tid, env);
-                    if (bs > best_score) { best_score = bs; best_tid = tid; }
-                    if (bs > best_fallback) { best_fallback = bs; fallback_tid = tid; }
+                    auto it = env->task_pool.find(tid);
+                    if (it == env->task_pool.end() || it->second.locations.size() < 2) continue;
+                    int m1, b1, m2, b2;
+                    Centerline::project(it->second.locations[0], m1, b1);
+                    Centerline::project(it->second.locations[1], m2, b2);
+                    if (m1 < 0 || m2 < 0) continue;
+                    int td = std::abs(m2 - m1);
+                    float ad = (float)unified_dist(a_loc, it->second.locations[0]);
+                    candidates.push_back({tid, td, ad});
                 }
-                if (best_tid < 0 && fallback_tid >= 0)
-                    { best_tid = fallback_tid; best_score = best_fallback; }
             }
-
             // Other zones
-            if (best_tid < 0) {
-                for (auto& kv : tasks_by_zone) {
-                    if (kv.first == a_zone) continue;
-                    for (int tid : kv.second) {
-                        if (done_tasks.count(tid)) continue;
-                        if (deferred_tasks.count(tid)) continue;
-                        float bs = base_score(a_loc, tid, env);
-                        if (bs > best_score) { best_score = bs; best_tid = tid; }
-                    }
+            for (auto& kv : tasks_by_zone) {
+                if (kv.first == a_zone) continue;
+                for (int tid : kv.second) {
+                    if (done_tasks.count(tid)) continue;
+                    if (deferred_tasks.count(tid)) continue;
+                    auto it = env->task_pool.find(tid);
+                    if (it == env->task_pool.end() || it->second.locations.size() < 2) continue;
+                    int m1, b1, m2, b2;
+                    Centerline::project(it->second.locations[0], m1, b1);
+                    Centerline::project(it->second.locations[1], m2, b2);
+                    if (m1 < 0 || m2 < 0) continue;
+                    int td = std::abs(m2 - m1);
+                    float ad = (float)unified_dist(a_loc, it->second.locations[0]);
+                    candidates.push_back({tid, td, ad});
                 }
             }
-
             // Deferred fallback
-            if (best_tid < 0 && !deferred_tasks.empty()) {
-                for (int tid : deferred_tasks) {
-                    if (done_tasks.count(tid)) continue;
-                    float bs = base_score(a_loc, tid, env);
-                    if (bs > best_score) { best_score = bs; best_tid = tid; }
-                }
+            for (int tid : deferred_tasks) {
+                if (done_tasks.count(tid)) continue;
+                auto it = env->task_pool.find(tid);
+                if (it == env->task_pool.end() || it->second.locations.size() < 2) continue;
+                int m1, b1, m2, b2;
+                Centerline::project(it->second.locations[0], m1, b1);
+                Centerline::project(it->second.locations[1], m2, b2);
+                if (m1 < 0 || m2 < 0) continue;
+                int td = std::abs(m2 - m1);
+                float ad = (float)unified_dist(a_loc, it->second.locations[0]);
+                candidates.push_back({tid, td, ad});
+            }
+            
+            // Sort by task_dist first, then agent_dist
+            std::sort(candidates.begin(), candidates.end(),
+                [&](const TaskCand& a, const TaskCand& b) {
+                    if (a.task_dist != b.task_dist) return a.task_dist < b.task_dist;
+                    return a.agent_dist < b.agent_dist;
+                });
+            
+            // Score in sorted order (shorter tasks first)
+            for (auto& cand : candidates) {
+                float bs = base_score(a_loc, cand.tid, env);
+                if (bs > best_score) { best_score = bs; best_tid = cand.tid; }
             }
 
             if (best_tid >= 0) {
                 proposed_schedule[a] = best_tid;
-                // Per-assignment: add trajectory to prediction table
                 #if USE_TRAFFIC_PREDICTION
                 {
                     auto tsk = env->task_pool.find(best_tid);
@@ -550,37 +499,9 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
         }
     }
 
-    // Fallback: ensure all free agents have proposed_schedule set
+    // Fallback
     for (int a : free_agents)
         if (proposed_schedule[a] < 0) proposed_schedule[a] = -1;
-
-#if USE_DIAG_LOG
-    // Timeout detection — write to CSV (reliable, like CorridorLog)
-    static FILE* g_diag_fd = nullptr;
-    if (!g_diag_fd) {
-        g_diag_fd = fopen("C:/Users/Administrator/.openclaw/workspace/schedule_diag.csv", "w");
-        if (g_diag_fd) {
-            fprintf(g_diag_fd, "step,timeout_n,free_agents,phase2_assigned,busy,free_tasks,lock_r,lock_l,lock_0,narrow_lock,wide_total,widelock_lock\n");
-            fflush(g_diag_fd);
-        }
-    }
-    static int timeout_counter = 0;
-    if (std::chrono::steady_clock::now() > endtime) {
-        timeout_counter++;
-        if (g_diag_fd) {
-            fprintf(g_diag_fd, "%d,%d,%zu,%d,,,,,,,,,\n",
-                    step, timeout_counter, free_agents.size(), phase2_assigned);
-            fflush(g_diag_fd);
-        }
-    }
-#endif
-
-#if USE_DIAG_LOG
-    // Log assignment stats
-    CorridorLog::log_assign_stats(step, g_dbg_exempt, g_dbg_branch, g_dbg_dirlock, 0, g_dbg_accepted);
-    g_dbg_exempt = 0; g_dbg_branch = 0; g_dbg_dirlock = 0; g_dbg_accepted = 0;
-#endif
-
 }
 
 } // namespace strategy_centerline
