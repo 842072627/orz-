@@ -76,7 +76,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define IDLE_RATIO           0.4f  // 最大活跃 agent 比例 (0~1.0)
 
 // ========== BFS distance table (0=offmain only, 1=full matrix for cloud) ==========
-#define USE_BFS_TABLE       0   // 0: off-main组件 (本地), 1: 全量BFS距离矩阵 (云端)
+#define USE_BFS_TABLE       1   // 0: off-main组件 (本地), 1: 全量BFS距离矩阵 (云端)
 
 // ========== Migration flags (step-by-step control, can revert individually) ==========
 #define USE_MP_CENTERLINE   1   // Phase 1: A* widest path centerline (matches heatmap analysis)
