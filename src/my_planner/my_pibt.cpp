@@ -137,38 +137,6 @@ bool causalMY_PIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
     }
 #endif
 
-#if USE_TRAFFIC_PREDICTION
-    // Narrow corridor stop: entering narrow segment against flow, only in main zone
-    if (CenterlineAccess::g_segments_ptr && CenterlineAccess::g_main_dist && CenterlineAccess::g_mp_main_dist) {
-        int a_m = (*CenterlineAccess::g_main_dist)[prev_loc];
-        if (a_m >= 0) {
-            int task_m = lns.tasks.at(curr_id);
-            int dir = (task_m > a_m) ? +1 : -1;
-            typedef Centerline::TrafficSegment Seg;
-            const std::vector<Seg>* segs = (const std::vector<Seg>*)CenterlineAccess::g_segments_ptr;
-            if (segs) {
-                for (auto& succ : successors) {
-                    int s_m = (*CenterlineAccess::g_main_dist)[succ.location];
-                    if (s_m < 0) continue;
-                    for (auto& seg : *segs) {
-                        if (!seg.is_narrow || seg.flow_dir == 0) continue;
-                        int sm_lo = seg.si_lo < (int)CenterlineAccess::g_mp_main_dist->size() ?
-                            (*CenterlineAccess::g_mp_main_dist)[seg.si_lo] : 999999;
-                        int sm_hi = (seg.si_hi > 0 && seg.si_hi-1 < (int)CenterlineAccess::g_mp_main_dist->size()) ?
-                            (*CenterlineAccess::g_mp_main_dist)[seg.si_hi-1] : 999999;
-                        bool inside = (a_m >= sm_lo && a_m <= sm_hi);
-                        bool entering = (s_m >= sm_lo && s_m <= sm_hi) && !inside;
-                        if (entering && dir != seg.flow_dir) {
-                            succ.heuristic += 99999;
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-    }
-#endif
-
 	std::sort(successors.begin(), successors.end(), 
 		[&](MY_PIBT_C& a, MY_PIBT_C& b)
 		{
@@ -180,16 +148,6 @@ bool causalMY_PIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
 					if (a.location!=orien_next_v && b.location==orien_next_v)
 						return false;
 
-#if USE_WALL_HUGGING && USE_WALL_HUGGING_PIBT
-                    // Wall-hugging: prefer side closer to own wall
-                    if (corridor_dir != 0) {
-                        int ba = (*CenterlineAccess::g_branch_dist)[a.location];
-                        int bb = (*CenterlineAccess::g_branch_dist)[b.location];
-                        ba *= corridor_dir;
-                        bb *= corridor_dir;
-                        if (ba != bb) return ba > bb;
-                    }
-#endif
                     // random tie break
                     return a.tie_breaker < b.tie_breaker;
 

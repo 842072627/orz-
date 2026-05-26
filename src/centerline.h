@@ -51,6 +51,11 @@ static std::vector<int> g_mp_density;        // [si] = agents in 24x24 square ce
 static std::vector<int> g_mp_main_dist;      // [si] = main_dist of this main point
 static std::vector<int> g_mp_width_p10;        // [si] = P10 corridor width (cells) per MP
 
+// ====== Dual lane system ======
+static std::vector<int> g_cl_tdx;  // [cl_idx] = centerline tangent dx (col difference)
+static std::vector<int> g_cl_tdy;  // [cl_idx] = centerline tangent dy (row difference)
+static std::vector<int> g_cell_lane;  // [loc] = +1 right lane, -1 left lane, 0 centerline/shared
+
 // ====== Traffic prediction segment ======
 #if USE_TRAFFIC_PREDICTION
 enum SegState {
@@ -411,7 +416,8 @@ inline void init(const SharedEnvironment* env) {
     
     // Compute tangents for centerline cells
     int n_cl = (int)g_centerline_cells.size();
-    std::vector<int> cl_tdx(n_cl, 0), cl_tdy(n_cl, 0);
+    g_cl_tdx.assign(n_cl, 0);
+    g_cl_tdy.assign(n_cl, 0);
     for (int i = 0; i < n_cl; i++) {
         int r1, c1, r2, c2;
         if (i == 0) {
@@ -421,8 +427,8 @@ inline void init(const SharedEnvironment* env) {
             r1 = g_centerline_cells[i-1] / g_cols; c1 = g_centerline_cells[i-1] % g_cols;
             r2 = g_centerline_cells[i] / g_cols; c2 = g_centerline_cells[i] % g_cols;
         }
-        cl_tdx[i] = c2 - c1;  // x difference (col)
-        cl_tdy[i] = r2 - r1;  // y difference (row)
+        g_cl_tdx[i] = c2 - c1;
+        g_cl_tdy[i] = r2 - r1;
     }
 
     // Pre-compute per-cell corridor width for p10 scanning
@@ -460,6 +466,33 @@ inline void init(const SharedEnvironment* env) {
 
     // BFS distance table (off-main comps always; full matrix if USE_BFS_TABLE=1)
     BFSTable::init(env, g_zone_is_main, g_n24c);
+
+    // ====== Compute dual lane for all walkable cells ======
+    g_cell_lane.assign(total, 0);
+    int n_cl_lane = (int)g_centerline_cells.size();
+    for (int i = 0; i < total; i++) {
+        if (env->map[i] != 0) continue;
+        int r = i / g_cols, c = i % g_cols;
+        int best_cl = -1, best_d2 = 99999999;
+        for (int j = 0; j < n_cl_lane; j++) {
+            int cr = g_centerline_cells[j] / g_cols, cc = g_centerline_cells[j] % g_cols;
+            int dr = r - cr, dc = c - cc;
+            int d2 = dr*dr + dc*dc;
+            if (d2 < best_d2) { best_d2 = d2; best_cl = j; }
+        }
+        if (best_cl < 0) continue;
+        int dx = g_cl_tdx[best_cl];
+        int dy = g_cl_tdy[best_cl];
+        if (dx == 0 && dy == 0) {
+            g_cell_lane[i] = 0;  // no tangent direction
+            continue;
+        }
+        int cr = g_centerline_cells[best_cl] / g_cols, cc = g_centerline_cells[best_cl] % g_cols;
+        int cross = dx * (r - cr) - dy * (c - cc);
+        if (cross > 0) g_cell_lane[i] = +1;
+        else if (cross < 0) g_cell_lane[i] = -1;
+        else g_cell_lane[i] = 0;
+    }
 
 #if USE_TRAFFIC_PREDICTION
     init_segments();

@@ -37,7 +37,7 @@ namespace CenterlineAccess {
     int g_n24r = 0;
     float active_ratio = 0.0f;
 #if USE_TRAFFIC_PREDICTION
-    const void* g_segments_ptr = nullptr;
+    const std::vector<int>* g_cell_lane = nullptr;
 #endif
 }
 
