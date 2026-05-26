@@ -76,16 +76,20 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define IDLE_RATIO           0.4f  // 最大活跃 agent 比例 (0~1.0)
 
 // ========== BFS distance table (0=offmain only, 1=full matrix for cloud) ==========
-#define USE_BFS_TABLE       1   // 0: off-main组件 (本地), 1: 全量BFS距离矩阵 (云端)
+#define USE_BFS_TABLE       0   // 0: off-main only (本地), 1: 全量矩阵 (云端)
 
 // ========== Migration flags (step-by-step control, can revert individually) ==========
 #define USE_MP_CENTERLINE   1   // Phase 1: A* widest path centerline (matches heatmap analysis)
 #define USE_MP_DENSITY      1   // Phase 2: 1D main point density (24x24 squares centered on main points)
-#define USE_MP_WIDTH        1   // corridor width-adaptive direction lock thresholds
-#define WIDTH_WIDE_THR      12  // width > this → WIDE (+WIDTH_WIDE_BONUS)
-#define WIDTH_SUPER_THR     18  // width > this → SUPER WIDE (+WIDTH_SUPER_BONUS)
-#define WIDTH_WIDE_BONUS    2.0f  // extra TH for wide corridor
-#define WIDTH_SUPER_BONUS   4.0f  // extra TH for super wide corridor
+#define USE_MP_WIDTH        1   // P10 width gradient → direct flow threshold
+#define WIDTH_GRAD_1        12   // width < this → TH_GRAD_1 (极窄)
+#define WIDTH_GRAD_2        18   // width < this → TH_GRAD_2 (窄, baseline)
+#define WIDTH_GRAD_3        999  // width < this → TH_GRAD_3 (中)
+// width >= WIDTH_GRAD_3 → TH_GRAD_4 (宽不锁)
+#define TH_GRAD_1           1.72f
+#define TH_GRAD_2           3.72f
+#define TH_GRAD_3           5.72f
+#define TH_GRAD_4           5.72f   // 宽走廊不锁
 
 // Runtime strategy name getter (used by TaskScheduler.cpp)
 inline std::string get_orz_strategy() { return ORZ_SCHEDULER; }

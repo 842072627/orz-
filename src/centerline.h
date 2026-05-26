@@ -41,6 +41,12 @@ static std::vector<ZoneMainRange> g_zone_ranges;
 // ====== 1D main point agent tracking (prev tick main_dist for flow) ======
 static std::vector<int> g_mp_agent_last_main;   // [aid] = last tick main distance
 
+// ====== Per-cell cross width (16-direction, uint16_t = 0xFFFF = wall) ======
+static std::vector<uint16_t> g_cell_width;
+
+// ====== Per-MP P10 width (10th percentile of cell_width in +/-8 main_dist window) ======
+static std::vector<int> g_mp_width_p10;
+
 // ====== 1D main point system (MP_STEP=16 sampling along centerline) ======
 #if USE_MP_DENSITY
 static constexpr int MP_STEP = 16;           // step between main points
@@ -55,7 +61,7 @@ static std::vector<int> g_mp_main_dist;      // [si] = main_dist of this main po
 static std::vector<int> g_mp_threshold;      // [si] = density threshold for direction lock (15/20/30)
 static std::vector<float> g_mp_future_right;   // [si] = distance-weighted future flow right
 static std::vector<float> g_mp_future_left;    // [si] = distance-weighted future flow left
-static std::vector<float> g_mp_width_bonus;    // [si] = extra TH from corridor width
+static std::vector<float> g_mp_width_bonus;    // [si] = direct flow threshold from P10 width (TH_GRAD_1~4)
 #endif
 
 
@@ -160,6 +166,71 @@ static void smooth_path(const SharedEnvironment* env, const std::vector<int>& ra
                 }
             }
         if (out.empty() || out.back() != best_loc) out.push_back(best_loc);
+    }
+}
+
+// ====== 16-direction cross width (replicates Python system_p10_width.py) ======
+// For each walkable cell, measures minimum span across 16 direction pairs.
+// g_cell_width[loc] = uint16_t min span, 0xFFFF = wall
+struct CrossPair { int dx1, dy1, dx2, dy2; float scale; };
+static const CrossPair CROSS_PAIRS[16] = {
+    {0,-1,0,1, 1.0f},   {-1,0,1,0, 1.0f},
+    {1,-1,-1,1, 1.414f},{1,1,-1,-1, 1.414f},
+    {2,-1,-2,1, 2.236f},{2,1,-2,-1, 2.236f},
+    {1,-2,-1,2, 2.236f},{1,2,-1,-2, 2.236f},
+    {3,-1,-3,1, 3.162f},{3,1,-3,-1, 3.162f},
+    {1,-3,-1,3, 3.162f},{1,3,-1,-3, 3.162f},
+    {3,-2,-3,2, 3.606f},{3,2,-3,-2, 3.606f},
+    {2,-3,-2,3, 3.606f},{2,3,-2,-3, 3.606f},
+};
+inline void compute_cross_width(const SharedEnvironment* env) {
+    int total = g_rows * g_cols;
+    g_cell_width.assign(total, 0xFFFF);
+    for (int loc = 0; loc < total; loc++) {
+        if (env->map[loc] != 0) continue;
+        int gx = loc % g_cols, gy = loc / g_cols;
+        uint16_t min_span = 0xFFFF;
+        for (int pi = 0; pi < 16; pi++) {
+            int c1 = 0, c2 = 0;
+            for (int k = 1; k < 100; k++) {
+                int nx = gx + CROSS_PAIRS[pi].dx1 * k, ny = gy + CROSS_PAIRS[pi].dy1 * k;
+                if (nx < 0 || nx >= g_cols || ny < 0 || ny >= g_rows || env->map[ny*g_cols+nx] != 0) break;
+                c1++;
+            }
+            for (int k = 1; k < 100; k++) {
+                int nx = gx + CROSS_PAIRS[pi].dx2 * k, ny = gy + CROSS_PAIRS[pi].dy2 * k;
+                if (nx < 0 || nx >= g_cols || ny < 0 || ny >= g_rows || env->map[ny*g_cols+nx] != 0) break;
+                c2++;
+            }
+            if (c1 == 0 && c2 == 0) continue;
+            float span = (float)(c1 + c2) * CROSS_PAIRS[pi].scale + 1.0f;
+            uint16_t s = (uint16_t)(span + 0.5f);
+            if (s < min_span) min_span = s;
+        }
+        g_cell_width[loc] = min_span;
+    }
+}
+
+// ====== P10 width per main point (10th percentile in +/-8 window) ======
+inline void compute_mp_p10(const std::unordered_map<int,int>& cl_main) {
+    int half_range = MP_STEP / 2;  // 8
+    g_mp_width_p10.assign(g_mp_count, 0);
+    for (int si = 0; si < g_mp_count; si++) {
+        int target_m = g_mp_main_dist[si];
+        if (target_m < 0) continue;
+        std::vector<int> vals;
+        vals.reserve(32);
+        for (int cl_loc : g_centerline_cells) {
+            auto it = cl_main.find(cl_loc);
+            if (it == cl_main.end()) continue;
+            int d = std::abs(it->second - target_m);
+            if (d > half_range) continue;
+            uint16_t cw = g_cell_width[cl_loc];
+            if (cw < 500 && cw > 0) vals.push_back((int)cw);
+        }
+        if (vals.empty()) continue;
+        std::sort(vals.begin(), vals.end());
+        g_mp_width_p10[si] = vals[vals.size() / 10];  // 10th percentile
     }
 }
 
@@ -409,7 +480,7 @@ void init(const SharedEnvironment* env) {
     g_mp_threshold.assign(g_mp_count, ZONE_HARD_CAP);
     g_mp_future_right.assign(g_mp_count, 0.0f);
     g_mp_future_left.assign(g_mp_count, 0.0f);
-    g_mp_width_bonus.assign(g_mp_count, 0.0f);
+    g_mp_width_bonus.assign(g_mp_count, FUTURE_FLOW_LOCK_TH);
     
     // Compute tangents for centerline cells
     int n_cl = (int)g_centerline_cells.size();
@@ -437,12 +508,17 @@ void init(const SharedEnvironment* env) {
 #if USE_MP_WIDTH
         if (g_mp_main_dist[si] >= 0) {
             int w = perp_width_at(env, g_mp_loc[si], cl_tdx[idx], cl_tdy[idx]);
-            if (w > WIDTH_SUPER_THR) g_mp_width_bonus[si] = WIDTH_SUPER_BONUS;
-            else if (w > WIDTH_WIDE_THR) g_mp_width_bonus[si] = WIDTH_WIDE_BONUS;
+            if (w > WIDTH_GRAD_2)      g_mp_width_bonus[si] = TH_GRAD_3;
+            else if (w > WIDTH_GRAD_1) g_mp_width_bonus[si] = TH_GRAD_2;
+            else                        g_mp_width_bonus[si] = TH_GRAD_1;
         }
 #endif
     }
 #endif
+
+    // P10 width: 16-direction cross width + per-MP 10th percentile
+    compute_cross_width(env);
+    compute_mp_p10(cl_main);
 
     build_zone_ranges();
 
@@ -560,7 +636,7 @@ inline void update_mp_direction(const SharedEnvironment* env) {
     std::fill(g_mp_lock_dir.begin(), g_mp_lock_dir.end(), 0);
     for (int si = 0; si < g_mp_count; si++) {
         float ftotal = g_mp_future_right[si] + g_mp_future_left[si];
-        float flow_th = FUTURE_FLOW_LOCK_TH + g_mp_width_bonus[si];
+        float flow_th = g_mp_width_bonus[si];
 #if USE_ACTIVE_RATIO_RELAX
         if (env->curr_timestep >= ACTIVE_RELAX_DELAY_TICKS && g_mp_density[si] < ACTIVE_RATIO_DENSITY_MAX) {
             float active = CenterlineAccess::active_ratio;

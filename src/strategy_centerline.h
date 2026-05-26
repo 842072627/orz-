@@ -102,7 +102,7 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
                     if (sm < 0) continue;
                     if (sm < lo || sm > hi) continue;
                     float ftotal = Centerline::g_mp_future_right[si] + Centerline::g_mp_future_left[si];
-                    float flow_th_ex = FUTURE_FLOW_LOCK_TH + Centerline::g_mp_width_bonus[si];
+                    float flow_th_ex = Centerline::g_mp_width_bonus[si];
 #if USE_ACTIVE_RATIO_RELAX
                     if (step >= ACTIVE_RELAX_DELAY_TICKS && Centerline::g_mp_density[si] < ACTIVE_RATIO_DENSITY_MAX) {
                         float active = CenterlineAccess::active_ratio;
@@ -564,7 +564,7 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
                                         Centerline::g_mp_future_left[si] += w;
                                     // Instant lock: recompute lock_dir right after adding flow
                                     float ftotal = Centerline::g_mp_future_right[si] + Centerline::g_mp_future_left[si];
-                                    float flow_th_inst = FUTURE_FLOW_LOCK_TH + Centerline::g_mp_width_bonus[si];
+                                    float flow_th_inst = Centerline::g_mp_width_bonus[si];
 #if USE_ACTIVE_RATIO_RELAX
                                     if (step >= ACTIVE_RELAX_DELAY_TICKS && Centerline::g_mp_density[si] < ACTIVE_RATIO_DENSITY_MAX) {
                                         float active = CenterlineAccess::active_ratio;
