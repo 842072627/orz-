@@ -51,6 +51,12 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 // ========== Feature flags ==========
 #define ORZ_PIBT_DIRECTION_BLOCK  true    // scheduler + PIBT direction block linkage
 
+// ========== Bottleneck debug and entry gating ==========
+#define BOTTLENECK_DEBUG     0   // 收集完毕，关闭
+#define BOTTLENECK_CSV_WRITE_INTERVAL 1  // 每N tick写一次
+#define BOTTLENECK_WIDTH_TH  5       // cell_width <= 此值视为窄道瓶颈
+#define USE_ENTRY_GATING     0   // 已废弃，改用 base_score 瓶颈惩罚
+
 // ========== Density exclusion ==========
 #define USE_DENSITY_EXCLUDE_IDLE  false    // 排除无任务/被截停agent的密度贡献
 
@@ -76,7 +82,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define IDLE_RATIO           0.4f  // 最大活跃 agent 比例 (0~1.0)
 
 // ========== BFS distance table (0=offmain only, 1=full matrix for cloud) ==========
-#define USE_BFS_TABLE       0   // 0: off-main only (本地), 1: 全量矩阵 (云端)
+#define USE_BFS_TABLE       1   // 0: off-main only (本地), 1: 全量矩阵 (云端)
 
 // ========== Migration flags (step-by-step control, can revert individually) ==========
 #define USE_MP_CENTERLINE   1   // Phase 1: A* widest path centerline (matches heatmap analysis)

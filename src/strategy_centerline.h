@@ -166,18 +166,44 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
         // === Escape exemption ===
         {
             int nzc = Centerline::g_n24c;
+            // connection_exempt 触发统计
+            static FILE* g_ce_f = nullptr;
+            static int g_ce_total = 0, g_ce_hits = 0;
+            static int g_ce_step = 0;
+            if (!g_ce_f) {
+                g_ce_f = fopen("conn_exempt.csv", "w");
+                if (g_ce_f) {
+                    fprintf(g_ce_f, "step,total_calls,hits,misses\n");
+                    std::atexit([](){
+                        if (g_ce_f) { fclose(g_ce_f); }
+                    });
+                }
+            }
+            g_ce_total++;
+
             if (start_idx == 0) {
                 float esc_score = connection_exempt_score(a_loc, locs,
                     Centerline::g_zone24_density, Centerline::g_zone_is_main,
                     g_env->map, g_env->cols, nzc);
-                if (esc_score > 0) return esc_score;
+                if (esc_score > 0) {
+                    g_ce_hits++;
+                    if (g_ce_f && (g_ce_step % 100 == 0))
+                        fprintf(g_ce_f, "%d,%d,%d,%d\n", g_ce_step, g_ce_total, g_ce_hits, g_ce_total - g_ce_hits);
+                    return esc_score;
+                }
             } else {
                 std::vector<int> remaining(locs.begin() + start_idx, locs.end());
                 float esc_score = connection_exempt_score(a_loc, remaining,
                     Centerline::g_zone24_density, Centerline::g_zone_is_main,
                     g_env->map, g_env->cols, nzc);
-                if (esc_score > 0) return esc_score;
+                if (esc_score > 0) {
+                    g_ce_hits++;
+                    if (g_ce_f && (g_ce_step % 100 == 0))
+                        fprintf(g_ce_f, "%d,%d,%d,%d\n", g_ce_step, g_ce_total, g_ce_hits, g_ce_total - g_ce_hits);
+                    return esc_score;
+                }
             }
+            g_ce_step++;
         }
 
     }
@@ -367,6 +393,181 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
     TimePoint endtime = t0 + std::chrono::milliseconds(limit);
     int cols = env->cols;
     static int s_step = 0;
+
+#if BOTTLENECK_DEBUG
+    // ---- Bottleneck debug CSV ----
+    {
+        static FILE* g_bn_f = nullptr;
+        if (!g_bn_f) {
+            g_bn_f = fopen("bottleneck_debug.csv", "w");
+            if (g_bn_f) {
+                fprintf(g_bn_f, "step,mp_si,main_dist,width,mp_density,lock_dir,"
+                    "future_left,future_right,agents_left,agents_right\n");
+                std::atexit([](){ if (g_bn_f) fclose(g_bn_f); });
+            }
+        }
+        if (g_bn_f && (s_step % BOTTLENECK_CSV_WRITE_INTERVAL == 0)) {
+            // Precompute per-agent main_dist for quick lookup
+            std::vector<int> agent_md(env->num_of_agents, -1);
+            std::vector<int> agent_dir(env->num_of_agents, 0); // +1=right, -1=left
+            for (int a = 0; a < env->num_of_agents; a++) {
+                int loc = env->curr_states[a].location;
+                if (loc < 0) continue;
+                int m, b;
+                Centerline::project(loc, m, b);
+                if (m < 0) continue;
+                agent_md[a] = m;
+                // Direction from task, if any
+                int tid = env->curr_task_schedule[a];
+                if (tid >= 0) {
+                    auto it = env->task_pool.find(tid);
+                    if (it != env->task_pool.end() && !it->second.locations.empty()) {
+                        int tm, tb;
+                        Centerline::project(it->second.locations[0], tm, tb);
+                        if (tm >= 0) {
+                            agent_dir[a] = (tm > m) ? 1 : (tm < m) ? -1 : 0;
+                        }
+                    }
+                }
+            }
+            // Each main point
+            for (int si = 0; si < Centerline::g_mp_count; si++) {
+                int w = Centerline::g_mp_width_p10[si];
+                if (w > BOTTLENECK_WIDTH_TH && Centerline::g_cell_width[Centerline::g_mp_loc[si]] > BOTTLENECK_WIDTH_TH)
+                    continue; // skip wide zones (unless narrow by cell_width)
+                int mp_md = Centerline::g_mp_main_dist[si];
+                if (mp_md < 0) continue;
+                const int HALF = 8; // MP_STEP/2
+                int lo_m = mp_md - HALF;
+                int hi_m = mp_md + HALF;
+                int cnt_left = 0, cnt_right = 0;
+                for (int a = 0; a < env->num_of_agents; a++) {
+                    if (agent_md[a] < 0) continue;
+                    // agent's path passes through this MP's range?
+                    int tid = env->curr_task_schedule[a];
+                    if (tid < 0) continue;
+                    auto it = env->task_pool.find(tid);
+                    if (it == env->task_pool.end() || it->second.locations.empty()) continue;
+                    int tm, tb;
+                    Centerline::project(it->second.locations[0], tm, tb);
+                    if (tm < 0) continue;
+                    int lo = std::min(agent_md[a], tm);
+                    int hi = std::max(agent_md[a], tm);
+                    if (mp_md < lo || mp_md > hi) continue; // path doesn't cross this MP
+                    if (agent_dir[a] > 0) cnt_right++;
+                    else if (agent_dir[a] < 0) cnt_left++;
+                }
+                float fl = Centerline::g_mp_future_left[si];
+                float fr = Centerline::g_mp_future_right[si];
+                int cw = (int)Centerline::g_cell_width[Centerline::g_mp_loc[si]];
+                fprintf(g_bn_f, "%d,%d,%d,%d,%d,%d,%.1f,%.1f,%d,%d\n",
+                    s_step, si, mp_md,
+                    (cw < 500) ? cw : w,
+                    Centerline::g_mp_density[si],
+                    Centerline::g_mp_lock_dir[si],
+                    (double)fl, (double)fr,
+                    cnt_left, cnt_right);
+            }
+            fflush(g_bn_f);
+        }
+    }
+#endif
+#if USE_ENTRY_GATING
+    // ---- 窄道入口限流 ----
+    {
+        const int HALF = 8;
+        const int IMBALANCE_TH = 8;
+        const int MAX_ENTRY_DENSITY = 25;
+
+        std::vector<int> dir_to_gate(Centerline::g_mp_count, 0);
+        std::vector<int> agent_md(env->num_of_agents, -1);
+        for (int a = 0; a < env->num_of_agents; a++) {
+            int loc = env->curr_states[a].location;
+            if (loc < 0) continue;
+            int m, b;
+            Centerline::project(loc, m, b);
+            if (m >= 0) agent_md[a] = m;
+        }
+
+        for (int si = 0; si < Centerline::g_mp_count; si++) {
+            int mp_md = Centerline::g_mp_main_dist[si];
+            if (mp_md < 0) continue;
+            if (Centerline::g_mp_density[si] < MAX_ENTRY_DENSITY) continue;
+            int cw = (int)Centerline::g_cell_width[Centerline::g_mp_loc[si]];
+            if (cw > BOTTLENECK_WIDTH_TH) continue;
+
+            int lo_m = mp_md - HALF;
+            int hi_m = mp_md + HALF;
+            int entering_right = 0, entering_left = 0;
+
+            for (int a = 0; a < env->num_of_agents; a++) {
+                if (agent_md[a] < 0) continue;
+                int tid = proposed_schedule[a];
+                if (tid < 0) tid = env->curr_task_schedule[a];
+                if (tid < 0) continue;
+                auto it = env->task_pool.find(tid);
+                if (it == env->task_pool.end() || it->second.locations.empty()) continue;
+                int tm, tb;
+                Centerline::project(it->second.locations[0], tm, tb);
+                if (tm < 0) continue;
+                int lo = std::min(agent_md[a], tm);
+                int hi = std::max(agent_md[a], tm);
+                if (mp_md < lo || mp_md > hi) continue;
+                int dir = (tm > agent_md[a]) ? 1 : (tm < agent_md[a]) ? -1 : 0;
+                if (dir == 0) continue;
+                bool outside = (dir == 1 && agent_md[a] < lo_m) ||
+                               (dir == -1 && agent_md[a] > hi_m);
+                if (!outside) continue;
+                if (dir == 1) entering_right++;
+                else entering_left++;
+            }
+
+            if (entering_right >= entering_left + IMBALANCE_TH)
+                dir_to_gate[si] = 1;
+            else if (entering_left >= entering_right + IMBALANCE_TH)
+                dir_to_gate[si] = -1;
+        }
+
+        for (int a = 0; a < env->num_of_agents && a < PIBT_Lock::MAX_AGENTS; a++) {
+            if (agent_md[a] < 0) continue;
+            if (PIBT_Lock::g_agent_blocked[a]) continue;
+            int tid = proposed_schedule[a];
+            if (tid < 0) tid = env->curr_task_schedule[a];
+            if (tid < 0) continue;
+            auto it = env->task_pool.find(tid);
+            if (it == env->task_pool.end() || it->second.locations.empty()) continue;
+            int tm, tb;
+            Centerline::project(it->second.locations[0], tm, tb);
+            if (tm < 0) continue;
+            int dir = (tm > agent_md[a]) ? 1 : (tm < agent_md[a]) ? -1 : 0;
+            if (dir == 0) continue;
+
+            for (int si = 0; si < Centerline::g_mp_count; si++) {
+                if (dir_to_gate[si] == 0) continue;
+                if (dir != dir_to_gate[si]) continue;
+                int mp_md = Centerline::g_mp_main_dist[si];
+                if (mp_md < 0) continue;
+                int lo = std::min(agent_md[a], tm);
+                int hi = std::max(agent_md[a], tm);
+                if (mp_md < lo || mp_md > hi) continue;
+                int lo_m = mp_md - 8;
+                int hi_m = mp_md + 8;
+                bool outside = (dir == 1 && agent_md[a] < lo_m) ||
+                               (dir == -1 && agent_md[a] > hi_m);
+                if (outside) {
+                    PIBT_Lock::g_agent_blocked[a] = 1;
+                    break;
+                }
+            }
+        }
+
+        for (int a = 0; a < env->num_of_agents && a < PIBT_Lock::MAX_AGENTS; a++) {
+            if (PIBT_Lock::g_agent_blocked[a]) {
+                proposed_schedule[a] = -1;
+            }
+        }
+    }
+#endif
     int step = s_step++;
 
     std::vector<int> free_agents;

@@ -62,6 +62,8 @@ static std::vector<int> g_mp_threshold;      // [si] = density threshold for dir
 static std::vector<float> g_mp_future_right;   // [si] = distance-weighted future flow right
 static std::vector<float> g_mp_future_left;    // [si] = distance-weighted future flow left
 static std::vector<float> g_mp_width_bonus;    // [si] = direct flow threshold from P10 width (TH_GRAD_1~4)
+static std::vector<int> g_mp_approach_left;    // [si] = approaching agents from left (going right)
+static std::vector<int> g_mp_approach_right;   // [si] = approaching agents from right (going left)
 #endif
 
 
@@ -481,6 +483,8 @@ void init(const SharedEnvironment* env) {
     g_mp_future_right.assign(g_mp_count, 0.0f);
     g_mp_future_left.assign(g_mp_count, 0.0f);
     g_mp_width_bonus.assign(g_mp_count, FUTURE_FLOW_LOCK_TH);
+    g_mp_approach_left.assign(g_mp_count, 0);
+    g_mp_approach_right.assign(g_mp_count, 0);
     
     // Compute tangents for centerline cells
     int n_cl = (int)g_centerline_cells.size();
