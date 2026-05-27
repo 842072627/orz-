@@ -53,7 +53,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 
 // ========== Bottleneck debug and entry gating ==========
 #define BOTTLENECK_DEBUG     0   // 收集完毕，关闭
-#define BOTTLENECK_CSV_WRITE_INTERVAL 1  // 每N tick写一次
+#define BOTTLENECK_CSV_WRITE_INTERVAL 100  // 不启用
 #define BOTTLENECK_WIDTH_TH  5       // cell_width <= 此值视为窄道瓶颈
 #define USE_ENTRY_GATING     0   // 已废弃，改用 base_score 瓶颈惩罚
 
@@ -82,12 +82,22 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define IDLE_RATIO           0.4f  // 最大活跃 agent 比例 (0~1.0)
 
 // ========== BFS distance table (0=offmain only, 1=full matrix for cloud) ==========
-#define USE_BFS_TABLE       1   // 0: off-main only (本地), 1: 全量矩阵 (云端)
+#define USE_BFS_TABLE       0   // 0: off-main only (本地), 1: 全量矩阵 (云端)
 
 // ========== Migration flags (step-by-step control, can revert individually) ==========
 #define USE_MP_CENTERLINE   1   // Phase 1: A* widest path centerline (matches heatmap analysis)
 #define USE_MP_DENSITY      1   // Phase 2: 1D main point density (24x24 squares centered on main points)
 #define USE_MP_WIDTH        1   // P10 width gradient → direct flow threshold
+
+// ========== Main Zone 容量截停 ==========
+#define USE_ZONE_CAPACITY_INTERCEPT  true    // 总开关
+#define ZONE_CAP_W3       0      // width ≤ 3: 有任何对向就拦
+#define ZONE_CAP_W4       0      // width = 4: 对向 ≥ 4 时拦
+#define ZONE_CAP_W5       2      // width = 5: 对向 ≥ 6 时拦
+// width ≥ 6: 不拦截
+#define ZONE_INTERCEPT_NEAR  15    // unified_dist < 此值：太近了（已到门口）→ 放行
+#define ZONE_INTERCEPT_FAR   50   // unified_dist > 此值：太远了（还没到）→ 不管
+                                   // [NEAR, FAR] 之间 → 拦截
 #define WIDTH_GRAD_1        12   // width < this → TH_GRAD_1 (极窄)
 #define WIDTH_GRAD_2        18   // width < this → TH_GRAD_2 (窄, baseline)
 #define WIDTH_GRAD_3        999  // width < this → TH_GRAD_3 (中)
