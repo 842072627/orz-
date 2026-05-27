@@ -17,7 +17,7 @@
 #include <algorithm>
 
 // ====== 配置 ======
-constexpr int EX_MAIN_CAP   = 35;  // main zone 阈值
+constexpr int EX_MAIN_CAP   = 20;  // main zone 阈值
 constexpr int EX_NONMAIN_CAP = 80; // 非 main zone 阈值
 
 // ====== 逃逸豁免主函数 ======

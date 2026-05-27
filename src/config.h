@@ -98,6 +98,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define ZONE_INTERCEPT_NEAR  15    // unified_dist < 此值：太近了（已到门口）→ 放行
 #define ZONE_INTERCEPT_FAR   50   // unified_dist > 此值：太远了（还没到）→ 不管
                                    // [NEAR, FAR] 之间 → 拦截
+#define USE_HOT_ZONE_EXEMPT 1    // agent在热区(密度≥15)时不拦截
 #define WIDTH_GRAD_1        12   // width < this → TH_GRAD_1 (极窄)
 #define WIDTH_GRAD_2        18   // width < this → TH_GRAD_2 (窄, baseline)
 #define WIDTH_GRAD_3        999  // width < this → TH_GRAD_3 (中)

@@ -467,63 +467,31 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
     }
 
     // 拦截检查：对每个有任务的agent，检查路径上的MP
-    std::vector<int> agent_md(max_a, -1);
-    std::vector<int> agent_dir(max_a, 0);
+    // 方向 = agent当前位置 → 当前任务的第一个location（最简单：task main > agent main 则+1，反之-1）
     for (int a = 0; a < max_a; a++) {
         int loc = env->curr_states[a].location;
         if (loc < 0) continue;
         int am, ab;
         Centerline::project(loc, am, ab);
         if (am < 0) continue;
-        agent_md[a] = am;
-        // 方向：物理移动
-        int last_m = Centerline::g_mp_agent_last_main[a];
-        if (last_m >= 0 && am != last_m) {
-            agent_dir[a] = (am > last_m) ? 1 : -1;
-        } else {
-            // 兜底用任务方向
-            int tid = env->curr_task_schedule[a];
-            if (tid >= 0) {
-                auto it = env->task_pool.find(tid);
-                if (it != env->task_pool.end() && !it->second.locations.empty()) {
-                    int tm, tb;
-                    Centerline::project(it->second.locations[0], tm, tb);
-                    if (tm >= 0) agent_dir[a] = (tm > am) ? 1 : -1;
-                }
-            }
-        }
-    }
 
-    for (int a = 0; a < max_a; a++) {
-        if (agent_dir[a] == 0) continue;
-        if (Centerline::g_highway_blocked[a]) continue;  // 已经拦截了
-        int am = agent_md[a];
-        if (am < 0) continue;
-        int loc = env->curr_states[a].location;
-        if (loc < 0) continue;
+        if (Centerline::g_highway_blocked[a]) continue;  // 已经在拦截
+
         int tid = env->curr_task_schedule[a];
         if (tid < 0) continue;
         auto it = env->task_pool.find(tid);
         if (it == env->task_pool.end() || it->second.locations.empty()) continue;
 
-        // 找agent任务路径上的MP
-        int intent = agent_dir[a];
-        // 先确定agent的剩余路径范围
-        // 从当前位置到所有未到达的任务点
-        bool found_ahead = false;
-        int lo = am, hi = am;
-        for (int task_loc : it->second.locations) {
-            int tm, tb;
-            Centerline::project(task_loc, tm, tb);
-            if (tm < 0) continue;
-            if ((intent > 0 && tm > am) || (intent < 0 && tm < am)) {
-                // 这个任务点在agent前方
-                lo = std::min(lo, tm);
-                hi = std::max(hi, tm);
-                found_ahead = true;
-            }
-        }
-        if (!found_ahead) continue;  // 没有前方的任务点，不检查
+        int tm, tb;
+        Centerline::project(it->second.locations[0], tm, tb);
+        if (tm < 0) continue;
+
+        int intent = (tm > am) ? 1 : (tm < am) ? -1 : 0;
+        if (intent == 0) continue;
+
+        // agent路径在main上的范围: [agent, first task] 之间的main_dist
+        int lo = std::min(am, tm);
+        int hi = std::max(am, tm);
 
         for (int si = 0; si < Centerline::g_mp_count; si++) {
             int sm = Centerline::g_mp_main_dist[si];
