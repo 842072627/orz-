@@ -4,6 +4,8 @@
 #include "my_pibt.h"
 #include "../pibt_lock.h"
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 
 namespace MyPlanner{
 
@@ -96,6 +98,110 @@ bool causalMY_PIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
 		//fist agent in the chain, disallow cyclic movments by preventing other agents moving to first agent's previous location
 		occupied[prev_loc] = true;
 	}
+#if USE_CONGESTION_AVOIDANCE
+	// ---- Congestion avoidance (lock_dir detection) ----
+	float congestion_penalty = 0.0f;
+	int cg_opp_main = -1;
+	uint16_t cg_cw = 0;
+	int cg_agents_near = 0;
+	int cg_my_m = -1, cg_t_m = -1;
+	int cg_lo = 0, cg_hi = 0;
+
+#if CONGESTION_CSV_INTERVAL > 0
+	static FILE* g_cong_csv = nullptr;
+	if (!g_cong_csv) {
+		g_cong_csv = fopen("congestion_log.csv", "w");
+		if (g_cong_csv) {
+			fprintf(g_cong_csv, "tick,aid,my_m,target_m,opp_m,cw,agents_near,inside,penalty\n");
+		}
+	}
+#endif
+
+	if (CenterlineAccess::g_main_dist && CenterlineAccess::g_mp_lock_dir &&
+		CenterlineAccess::g_mp_loc && CenterlineAccess::g_mp_main_dist &&
+		CenterlineAccess::g_mp_count > 0 && CenterlineAccess::g_cell_width) {
+
+		cg_my_m = (*CenterlineAccess::g_main_dist)[prev_loc];
+		int tgt = lns.tasks.at(curr_id);
+		cg_t_m = (tgt >= 0) ? (*CenterlineAccess::g_main_dist)[tgt] : -1;
+
+		if (cg_my_m >= 0 && cg_t_m >= 0) {
+			int cg_dir = (cg_t_m > cg_my_m) ? 1 : -1;
+			cg_lo = std::min(cg_my_m, cg_t_m);
+			cg_hi = std::max(cg_my_m, cg_t_m);
+
+			static std::vector<int> s_cell_occ;
+			static int s_cache_tick = -1;
+			if (s_cache_tick != lns.env->curr_timestep) {
+				s_cache_tick = lns.env->curr_timestep;
+				s_cell_occ.assign(lns.env->map.size(), 0);
+				for (int a = 0; a < lns.env->num_of_agents; a++) {
+					int loc = prev_states[a].location;
+					if (loc >= 0 && loc < (int)s_cell_occ.size())
+						s_cell_occ[loc]++;
+				}
+			}
+
+			for (int si = 0; si < CenterlineAccess::g_mp_count; si++) {
+				int sm = (*CenterlineAccess::g_mp_main_dist)[si];
+				if (sm < cg_lo || sm > cg_hi) continue;
+				int ld = (*CenterlineAccess::g_mp_lock_dir)[si];
+				if (ld == 0 || ld == cg_dir) continue;
+
+				cg_opp_main = sm;
+				int mp_loc = (*CenterlineAccess::g_mp_loc)[si];
+				cg_cw = (*CenterlineAccess::g_cell_width)[mp_loc];
+
+				int cols = lns.env->cols;
+				int mx = mp_loc % cols, my = mp_loc / cols;
+				int cr = CONGESTION_CHECK_RANGE;
+				for (int dy = -cr; dy <= cr && cg_agents_near == 0; dy++) {
+					for (int dx = -cr; dx <= cr && cg_agents_near == 0; dx++) {
+						int cx = mx + dx, cy = my + dy;
+						if (cx < 0 || cx >= cols || cy < 0 || cy >= lns.env->rows) continue;
+						if (s_cell_occ[cy * cols + cx] > 0)
+							cg_agents_near++;
+					}
+				}
+				break;
+			}
+		}
+	}
+
+	bool cg_active = (cg_opp_main >= 0 && cg_agents_near > 0 &&
+					   cg_cw != 0xFFFF && cg_cw < 6);
+
+	if (cg_active) {
+		bool inside_corridor = (cg_my_m >= cg_lo && cg_my_m <= cg_hi);
+		float cw_factor = (6.0f - (float)cg_cw) / 5.0f;
+
+		if (inside_corridor) {
+			congestion_penalty = cw_factor * (float)cg_agents_near * CONGESTION_INNER_WEIGHT;
+		} else {
+			int dist = std::abs(cg_my_m - cg_opp_main);
+			float prox = 1.0f - (float)dist / (float)CONGESTION_LOOK_AHEAD;
+			if (prox > 0)
+				congestion_penalty = cw_factor * CONGESTION_OUTER_WEIGHT * prox;
+		}
+	}
+
+#if CONGESTION_CSV_INTERVAL > 0
+	if (g_cong_csv && congestion_penalty > 0) {
+		int t = lns.env->curr_timestep;
+		if (t % CONGESTION_CSV_INTERVAL == 0) {
+			bool inside = (cg_my_m >= cg_lo && cg_my_m <= cg_hi);
+			fprintf(g_cong_csv, "%d,%d,%d,%d,%d,%d,%d,%d,%.2f\n",
+					t, curr_id, cg_my_m, cg_t_m,
+					cg_opp_main, (int)cg_cw, cg_agents_near,
+					inside ? 1 : 0, congestion_penalty);
+			fflush(g_cong_csv);
+		}
+	}
+#endif
+
+	// Apply congestion penalty to successor computation below
+#endif
+
 
 	// for each neighbor of (prev_loc,prev_direction), and a wait copy of current location, generate a successor
 	std::vector<int> neighbors;
@@ -107,12 +213,38 @@ bool causalMY_PIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
 
 		int min_heuristic = get_gp_h(lns, curr_id, neighbor);
 
+		#if USE_CONGESTION_AVOIDANCE
+		float succ_cong = 0.0f;
+		if (cg_active) {
+			int n_m = (*CenterlineAccess::g_main_dist)[neighbor];
+			if (n_m >= 0) {
+				int nd = std::abs(n_m - cg_opp_main);
+				int od = std::abs(cg_my_m - cg_opp_main);
+				if (nd <= od) succ_cong = congestion_penalty;
+			}
+		}
+		successors.emplace_back(neighbor,min_heuristic,-1,rand(), succ_cong);
+		#else
 		successors.emplace_back(neighbor,min_heuristic,-1,rand());
+		#endif
 	}
 
 	int wait_heuristic = get_gp_h(lns, curr_id, prev_loc);
 
+#if USE_CONGESTION_AVOIDANCE
+	float wait_cong = 0.0f;
+	if (cg_active) {
+		int p_m = (*CenterlineAccess::g_main_dist)[prev_loc];
+		if (p_m >= 0) {
+			int cd = std::abs(p_m - cg_opp_main);
+			int od = std::abs(cg_my_m - cg_opp_main);
+			if (cd < od) wait_cong = congestion_penalty;
+		}
+	}
+	successors.emplace_back(prev_loc, wait_heuristic,-1,rand(), wait_cong);
+#else
 	successors.emplace_back(prev_loc, wait_heuristic,-1,rand());
+#endif
 
 
 
@@ -139,7 +271,13 @@ bool causalMY_PIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
 		[&](MY_PIBT_C& a, MY_PIBT_C& b)
 		{
 			int diff[4] = {1,lns.env->cols,-1,-lns.env->cols};
+#if USE_CONGESTION_AVOIDANCE
+			float sa = (float)a.heuristic + a.congestion;
+			float sb = (float)b.heuristic + b.congestion;
+			if (sa == sb){
+#else
 			if (a.heuristic == b.heuristic){
+#endif
 					//tie break on prefer moving forward
 					if (a.location==orien_next_v && b.location!=orien_next_v)
 						return true;
@@ -160,7 +298,11 @@ bool causalMY_PIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
                     return a.tie_breaker < b.tie_breaker;
 
 			}
+#if USE_CONGESTION_AVOIDANCE
+			return sa < sb;
+#else
 			return a.heuristic < b.heuristic; 
+#endif
 		});
 
 

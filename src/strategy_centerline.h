@@ -165,7 +165,6 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
 
         // === Escape exemption ===
         {
-            int nzc = Centerline::g_n24c;
             // connection_exempt 触发统计
             static FILE* g_ce_f = nullptr;
             static int g_ce_total = 0, g_ce_hits = 0;
@@ -181,21 +180,19 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
             }
             g_ce_total++;
 
-            if (start_idx == 0) {
-                float esc_score = connection_exempt_score(a_loc, locs,
+            int n24c = Centerline::g_n24c;
+            if (check_connection_path(a_loc, locs,
                     Centerline::g_zone24_density, Centerline::g_zone_is_main,
-                    g_env->map, g_env->cols, nzc);
-                if (esc_score > 0) {
-                    g_ce_hits++;
-                    if (g_ce_f && (g_ce_step % 100 == 0))
-                        fprintf(g_ce_f, "%d,%d,%d,%d\n", g_ce_step, g_ce_total, g_ce_hits, g_ce_total - g_ce_hits);
-                    return esc_score;
-                }
-            } else {
-                std::vector<int> remaining(locs.begin() + start_idx, locs.end());
-                float esc_score = connection_exempt_score(a_loc, remaining,
-                    Centerline::g_zone24_density, Centerline::g_zone_is_main,
-                    g_env->map, g_env->cols, nzc);
+                    g_env->map, g_env->cols, n24c))
+            {
+                // 路径可用 → 用 unified_dist 评分
+                float da1 = (float)unified_dist(a_loc, locs[0]);
+                float d12 = (locs.size() >= 2)
+                    ? (float)unified_dist(locs[0], locs[1])
+                    : da1;
+                float esc_score = CONNECTION_EXEMPT_WEIGHT_D12 / (d12 + 1.0f)
+                                + CONNECTION_EXEMPT_WEIGHT_DA1 / (da1 + 1.0f);
+
                 if (esc_score > 0) {
                     g_ce_hits++;
                     if (g_ce_f && (g_ce_step % 100 == 0))
@@ -419,6 +416,8 @@ void pre_tick_updates(SharedEnvironment* env) {
     CenterlineAccess::g_mp_count = Centerline::g_mp_count;
     CenterlineAccess::g_n24c = Centerline::g_n24c;
     CenterlineAccess::g_n24r = Centerline::g_n24r;
+    CenterlineAccess::g_mp_lock_dir = &Centerline::g_mp_lock_dir;
+    CenterlineAccess::g_cell_width = &Centerline::g_cell_width;
     
     CorridorLog::log_tick(env);
 }

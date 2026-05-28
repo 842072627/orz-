@@ -3,6 +3,8 @@
 #define utils_hpp
 
 #include "my_Types.h"
+#include <algorithm>
+#include <cmath>
 
 namespace MyPlanner{
 int get_d(int diff, const SharedEnvironment* env)  ;
@@ -22,5 +24,4 @@ void getNeighborLocs(const Neighbors* ns, int neighbors[], int location) ;
 
 bool is_large_map(const SharedEnvironment* env);
 }
-
 #endif

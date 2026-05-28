@@ -42,7 +42,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 
 // ========== Task segment distance limit ==========
 #define MAX_TASK_SEGMENT_DIST  99999   // max main+branch distance for a single errand transition
-#define GARBAGE_TASK_RATIO      0.05f // bottom fraction of free tasks deferred each tick (0.0-1.0)
+#define GARBAGE_TASK_RATIO      0.04f // bottom fraction of free tasks deferred each tick (0.0-1.0)
 
 // ========== Hard density limit ==========
 #define USE_DENSITY_CAP_80  true   // enable hard density cap
@@ -64,7 +64,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define USE_HOT_ZONE_EXEMPT  true   // 热区豁免：热区agent不设block，PIBT正常执行
 
 // ========== Wall-hugging in corridors (PIBT tie-breaker + A* guide path) ==========
-#define USE_WALL_HUGGING        true    // master switch for all wall-hugging features
+#define USE_WALL_HUGGING        false    // master switch for all wall-hugging features
 #define USE_WALL_HUGGING_PIBT    true    // PIBT successor tie-breaker wall-hugging
 #define USE_WALL_HUGGING_ASTAR   true    // A* guide path branch-dist bias
 #define WALL_HUG_WIDTH_MAX       20      // max corridor width (cells) for wall-hugging
@@ -82,7 +82,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define IDLE_RATIO           0.4f  // 最大活跃 agent 比例 (0~1.0)
 
 // ========== BFS distance table (0=offmain only, 1=full matrix for cloud) ==========
-#define USE_BFS_TABLE       1   // 0: off-main only (本地), 1: 全量矩阵 (云端)
+#define USE_BFS_TABLE       0   // 0: off-main only (本地), 1: 全量矩阵 (云端)
 
 // ========== Migration flags (step-by-step control, can revert individually) ==========
 #define USE_MP_CENTERLINE   1   // Phase 1: A* widest path centerline (matches heatmap analysis)
@@ -98,7 +98,23 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define ZONE_INTERCEPT_NEAR  15    // unified_dist < 此值：太近了（已到门口）→ 放行
 #define ZONE_INTERCEPT_FAR   40   // unified_dist > 此值：太远了（还没到）→ 不管
                                    // [NEAR, FAR] 之间 → 拦截
-#define USE_HOT_ZONE_EXEMPT 1    // agent在热区(密度≥15)时不拦截
+
+// ========== PIBT Swept-Rect 连续空间碰撞检测 ==========
+#define USE_PIBT_SWEPT_CHECK   0     // PIBT successor选择时做连续空间swept-rect碰撞检测
+#define SWEPT_RANGE           3      // 搜索半径: (2R+1)x(2R+1)窗口查已提交agent
+                                     // R=2 → 5x5窗口, 覆盖所有单步swept-rect可能的碰撞
+
+// ========== PIBT Congestion Avoidance ==========
+#define USE_CONGESTION_AVOIDANCE   1       // 拥塞避免总开关
+#define CONGESTION_LOOK_AHEAD     20      // 衰减距离: 10步外开始感受
+#define CONGESTION_OUTER_WEIGHT   6.0f    // 走廊外停权重
+#define CONGESTION_INNER_WEIGHT   2.0f    // 走廊内逼退权重
+#define CONGESTION_CHECK_RANGE    2       // 锁MP周围±几格查agent
+#define CONGESTION_CSV_INTERVAL  500    // CSV打印间隔(tick), 0=不打印
+
+// ========== Connection Exempt 评分权重 ==========
+#define CONNECTION_EXEMPT_WEIGHT_D12 1.1f   // task1→task2 距离权重（主导项）
+#define CONNECTION_EXEMPT_WEIGHT_DA1 1.0f   // agent→task1 距离权重（次优项）
 #define WIDTH_GRAD_1        12   // width < this → TH_GRAD_1 (极窄)
 #define WIDTH_GRAD_2        18   // width < this → TH_GRAD_2 (窄, baseline)
 #define WIDTH_GRAD_3        999  // width < this → TH_GRAD_3 (中)

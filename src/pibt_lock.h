@@ -18,6 +18,8 @@ namespace CenterlineAccess {
     extern const std::vector<int>* g_zone_is_main;    // [zone_id]
     extern const std::vector<int>* g_mp_loc;          // [si] = main point map location
     extern const std::vector<int>* g_mp_main_dist;    // [si] = main_dist at main point
+    extern const std::vector<int>* g_mp_lock_dir;     // [si] = direction lock (+1/-1/0)
+    extern const std::vector<uint16_t>* g_cell_width; // [loc] = cell cross width, 0xFFFF=wall
     extern int g_mp_count;
     extern int g_n24c;
     extern int g_n24r;

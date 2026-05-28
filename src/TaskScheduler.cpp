@@ -35,6 +35,8 @@ namespace CenterlineAccess {
     int g_mp_count = 0;
     int g_n24c = 0;
     int g_n24r = 0;
+    const std::vector<int>* g_mp_lock_dir = nullptr;
+    const std::vector<uint16_t>* g_cell_width = nullptr;
     float active_ratio = 0.0f;
 }
 

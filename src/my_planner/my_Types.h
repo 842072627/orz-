@@ -47,10 +47,11 @@ namespace MyPlanner{
 		int heuristic;
 		int orientation;  // 0:east, 1:south, 2:west, 3:north
 		int tie_breaker;
+		float congestion;  // ADDED: congestion penalty
 
 		//constructor
-		MY_PIBT_C(int location, int heuristic, int orientation, int tie_breaker):
-			location(location), heuristic(heuristic), orientation(orientation), tie_breaker(tie_breaker) {};
+		MY_PIBT_C(int location, int heuristic, int orientation, int tie_breaker, float congestion = 0):
+			location(location), heuristic(heuristic), orientation(orientation), tie_breaker(tie_breaker), congestion(congestion) {};
 	};
 
 	struct HNode
