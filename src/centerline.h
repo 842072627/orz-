@@ -673,6 +673,29 @@ inline void update_mp_direction(const SharedEnvironment* env) {
 // }
 // #endif
 
+// ====== One-shot dump of centerline data for lane direction analysis ======
+inline void dump_centerline_debug(const SharedEnvironment* env) {
+    static bool dumped = false;
+    if (dumped) return;
+    dumped = true;
+    FILE* f = fopen("C:\\Users\\Administrator\\Desktop\\test-studio-mapf\\hermes-workplace\\centerline_dump.csv", "w");
+    if (!f) { printf("WARN: could not open centerline_dump.csv\n"); return; }
+    // Dump main_dist + branch_dist for ALL cells (compact format for speed)
+    int total = g_rows * g_cols;
+    fprintf(f, "---MAIN_BRANCH---\n");
+    for (int loc = 0; loc < total && loc < (int)g_main_dist.size(); loc++) {
+        if (g_main_dist[loc] >= 0)
+            fprintf(f, "%d,%d,%d,%u\n", loc, g_main_dist[loc], g_branch_dist[loc], (unsigned)g_cell_width[loc]);
+    }
+    // Dump centerline path cells
+    fprintf(f, "---CENTERLINE_PATH---\n");
+    for (size_t i = 0; i < g_centerline_cells.size(); i++) {
+        fprintf(f, "%d,%zu\n", g_centerline_cells[i], i);
+    }
+    fclose(f);
+    printf("[Centerline] Dumped debug data\n");
+}
+
 } // namespace Centerline
 
 

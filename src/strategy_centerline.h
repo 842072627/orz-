@@ -62,6 +62,7 @@ static inline int unified_dist(int loc_a, int loc_b) {
 void init(SharedEnvironment* env) {
     g_env = env;
     Centerline::init(env);
+    Centerline::dump_centerline_debug(env);
     printf("CENTERLINE_SCHEDULER: agents=%d, map=%dx%d, zones=%zu, cells=%zu\n",
            env->num_of_agents, env->cols, env->rows,
            Centerline::g_zone_ranges.size(), Centerline::g_centerline_cells.size());

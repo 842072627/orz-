@@ -3,6 +3,7 @@
 
 #include "my_pibt.h"
 #include "../pibt_lock.h"
+#include "../lane_enforcer.h"
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -207,9 +208,27 @@ bool causalMY_PIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
 	std::vector<int> neighbors;
 	std::vector<MY_PIBT_C> successors;
 	getNeighborLocs(&(lns.neighbors),neighbors,prev_loc);
+	
+#if USE_LANE_ENFORCEMENT
+	// Compute agent travel direction for lane enforcement
+	int lane_travel_dir = 0;
+	int lane_tgt = lns.tasks.at(curr_id);
+	if (lane_tgt >= 0 && CenterlineAccess::g_main_dist) {
+		int cur_m = (*CenterlineAccess::g_main_dist)[prev_loc];
+		int tgt_m = (*CenterlineAccess::g_main_dist)[lane_tgt];
+		if (cur_m >= 0 && tgt_m >= 0)
+			lane_travel_dir = (tgt_m > cur_m) ? 1 : -1;
+	}
+#endif
+
 	for (auto& neighbor: neighbors){
 
 		assert(validateMove(prev_loc, neighbor, lns.env));
+
+#if USE_LANE_ENFORCEMENT
+		if (lane_travel_dir != 0 && !LaneEnforcer::can_enter(neighbor, lane_travel_dir))
+			continue;
+#endif
 
 		int min_heuristic = get_gp_h(lns, curr_id, neighbor);
 

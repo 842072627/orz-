@@ -64,11 +64,14 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define USE_HOT_ZONE_EXEMPT  true   // 热区豁免：热区agent不设block，PIBT正常执行
 
 // ========== Wall-hugging in corridors (PIBT tie-breaker + A* guide path) ==========
-#define USE_WALL_HUGGING        true    // master switch for all wall-hugging features
+#define USE_WALL_HUGGING        false    // master switch for all wall-hugging features
 #define USE_WALL_HUGGING_PIBT    true    // PIBT successor tie-breaker wall-hugging
 #define USE_WALL_HUGGING_ASTAR   true    // A* guide path branch-dist bias
 #define WALL_HUG_WIDTH_MAX       20      // max corridor width (cells) for wall-hugging
 #define WALL_HUG_BRANCH_BIAS_MAX 2       // max per-step branch bias for A* (0-5, larger = stronger)
+
+// ========== Lane direction enforcement (manual annotation) ==========
+#define USE_LANE_ENFORCEMENT   false   // 基于手动标注的车道方向管制
 
 // ========== Active agent ratio lock relaxation (global, replaces per-main-point density relax) ==========
 #define USE_ACTIVE_RATIO_RELAX   true    // global active-agent ratio relaxation
@@ -82,7 +85,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define IDLE_RATIO           0.4f  // 最大活跃 agent 比例 (0~1.0)
 
 // ========== BFS distance table (0=offmain only, 1=full matrix for cloud) ==========
-#define USE_BFS_TABLE       1   // 0: off-main only (本地), 1: 全量矩阵 (云端)
+#define USE_BFS_TABLE       0   // 0: off-main only (本地), 1: 全量矩阵 (云端)
 
 // ========== Migration flags (step-by-step control, can revert individually) ==========
 #define USE_MP_CENTERLINE   1   // Phase 1: A* widest path centerline (matches heatmap analysis)
