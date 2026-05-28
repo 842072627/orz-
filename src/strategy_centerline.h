@@ -165,6 +165,7 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
 
         // === Escape exemption ===
         {
+            int nzc = Centerline::g_n24c;
             // connection_exempt 触发统计
             static FILE* g_ce_f = nullptr;
             static int g_ce_total = 0, g_ce_hits = 0;
@@ -180,19 +181,21 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
             }
             g_ce_total++;
 
-            int n24c = Centerline::g_n24c;
-            if (check_connection_path(a_loc, locs,
+            if (start_idx == 0) {
+                float esc_score = connection_exempt_score(a_loc, locs,
                     Centerline::g_zone24_density, Centerline::g_zone_is_main,
-                    g_env->map, g_env->cols, n24c))
-            {
-                // 路径可用 → 用 unified_dist 评分
-                float da1 = (float)unified_dist(a_loc, locs[0]);
-                float d12 = (locs.size() >= 2)
-                    ? (float)unified_dist(locs[0], locs[1])
-                    : da1;
-                float esc_score = CONNECTION_EXEMPT_WEIGHT_D12 / (d12 + 1.0f)
-                                + CONNECTION_EXEMPT_WEIGHT_DA1 / (da1 + 1.0f);
-
+                    g_env->map, g_env->cols, nzc);
+                if (esc_score > 0) {
+                    g_ce_hits++;
+                    if (g_ce_f && (g_ce_step % 100 == 0))
+                        fprintf(g_ce_f, "%d,%d,%d,%d\n", g_ce_step, g_ce_total, g_ce_hits, g_ce_total - g_ce_hits);
+                    return esc_score;
+                }
+            } else {
+                std::vector<int> remaining(locs.begin() + start_idx, locs.end());
+                float esc_score = connection_exempt_score(a_loc, remaining,
+                    Centerline::g_zone24_density, Centerline::g_zone_is_main,
+                    g_env->map, g_env->cols, nzc);
                 if (esc_score > 0) {
                     g_ce_hits++;
                     if (g_ce_f && (g_ce_step % 100 == 0))
@@ -359,54 +362,6 @@ void pre_tick_updates(SharedEnvironment* env) {
     Centerline::compute_future_direction();
     Centerline::update_mp_direction(env);
     
-#if USE_ZONE_CAPACITY_INTERCEPT
-    // Zone 级物理流量统计
-    {
-        int n24c = Centerline::g_n24c;
-        int nz = n24c * Centerline::g_n24r;
-        std::fill(Centerline::g_zone_flow_right.begin(), Centerline::g_zone_flow_right.end(), 0);
-        std::fill(Centerline::g_zone_flow_left.begin(), Centerline::g_zone_flow_left.end(), 0);
-        for (int a = 0; a < env->num_of_agents; a++) {
-            int tid = env->curr_task_schedule[a];
-            if (tid < 0) continue;
-            int loc = env->curr_states[a].location;
-            if (loc < 0) continue;
-            int am, ab;
-            Centerline::project(loc, am, ab);
-            if (am < 0) continue;
-            auto it = env->task_pool.find(tid);
-            if (it == env->task_pool.end() || it->second.locations.empty()) continue;
-            // 用物理移动方向：上一tick main_dist → 当前 main_dist
-            int dir = 0;
-            int last_m = Centerline::g_mp_agent_last_main[a];
-            if (last_m >= 0 && am != last_m) {
-                dir = (am > last_m) ? 1 : -1;
-            }
-            // 兜底：刚出生或其他原因没有last_m，用任务方向
-            if (dir == 0) {
-                int tm, tb;
-                Centerline::project(it->second.locations[0], tm, tb);
-                if (tm >= 0) dir = (tm > am) ? 1 : -1;
-            }
-            int zi = (loc / env->cols / 24) * n24c + (loc % env->cols / 24);
-            if (zi >= 0 && zi < nz) {
-                if (dir > 0) Centerline::g_zone_flow_right[zi]++;
-                else Centerline::g_zone_flow_left[zi]++;
-            }
-        }
-        // MP 对向流量
-        for (int si = 0; si < Centerline::g_mp_count; si++) {
-            int ld = Centerline::g_mp_lock_dir[si];
-            if (ld == 0) { Centerline::g_mp_opposing[si] = 0; continue; }
-            int mp_loc = Centerline::g_mp_loc[si];
-            if (mp_loc < 0) { Centerline::g_mp_opposing[si] = 0; continue; }
-            int zi = (mp_loc / env->cols / 24) * n24c + (mp_loc % env->cols / 24);
-            if (zi < 0 || zi >= nz) { Centerline::g_mp_opposing[si] = 0; continue; }
-            Centerline::g_mp_opposing[si] = (ld > 0) ? Centerline::g_zone_flow_left[zi] : Centerline::g_zone_flow_right[zi];
-        }
-    }
-#endif
-    
     // Sync centerline data to shared pointers for PIBT wall-hugging
     CenterlineAccess::g_branch_dist = &Centerline::g_branch_dist;
     CenterlineAccess::g_main_dist = &Centerline::g_main_dist;
@@ -416,8 +371,6 @@ void pre_tick_updates(SharedEnvironment* env) {
     CenterlineAccess::g_mp_count = Centerline::g_mp_count;
     CenterlineAccess::g_n24c = Centerline::g_n24c;
     CenterlineAccess::g_n24r = Centerline::g_n24r;
-    CenterlineAccess::g_mp_lock_dir = &Centerline::g_mp_lock_dir;
-    CenterlineAccess::g_cell_width = &Centerline::g_cell_width;
     
     CorridorLog::log_tick(env);
 }
@@ -436,95 +389,6 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
     // Reset PIBT block flags
     for (int a = 0; a < env->num_of_agents && a < PIBT_Lock::MAX_AGENTS; a++)
         PIBT_Lock::g_agent_blocked[a] = 0;
-
-#if USE_ZONE_CAPACITY_INTERCEPT
-    // 只清本模块拦截的agent（不影响其他模块）
-    int max_a = env->num_of_agents;
-    if ((int)Centerline::g_highway_blocked.size() != max_a)
-        Centerline::g_highway_blocked.assign(max_a, 0);
-    for (int a = 0; a < max_a; a++) {
-        if (Centerline::g_highway_blocked[a]) {
-            Centerline::g_highway_blocked[a] = 0;
-            if (a < PIBT_Lock::MAX_AGENTS)
-                PIBT_Lock::g_agent_blocked[a] = 0;
-        }
-    }
-
-    // 释放检查
-    for (int si = 0; si < Centerline::g_mp_count; si++) {
-        if (!Centerline::g_mp_intercepting[si]) continue;
-        if (Centerline::g_mp_lock_dir[si] == 0) {
-            Centerline::g_mp_intercepting[si] = false;
-            continue;
-        }
-        int cw = (int)Centerline::g_cell_width[Centerline::g_mp_loc[si]];
-        if (cw >= 6) { Centerline::g_mp_intercepting[si] = false; continue; }
-        int cap = (cw <= 3) ? ZONE_CAP_W3 : (cw == 4) ? ZONE_CAP_W4 : ZONE_CAP_W5;
-        if (Centerline::g_mp_opposing[si] <= cap) {
-            Centerline::g_mp_intercepting[si] = false;
-        }
-    }
-
-    // 拦截检查：对每个有任务的agent，检查路径上的MP
-    // 方向 = agent当前位置 → 当前任务的第一个location（最简单：task main > agent main 则+1，反之-1）
-    for (int a = 0; a < max_a; a++) {
-        int loc = env->curr_states[a].location;
-        if (loc < 0) continue;
-        int am, ab;
-        Centerline::project(loc, am, ab);
-        if (am < 0) continue;
-
-        if (Centerline::g_highway_blocked[a]) continue;  // 已经在拦截
-
-        int tid = env->curr_task_schedule[a];
-        if (tid < 0) continue;
-        auto it = env->task_pool.find(tid);
-        if (it == env->task_pool.end() || it->second.locations.empty()) continue;
-
-        int tm, tb;
-        Centerline::project(it->second.locations[0], tm, tb);
-        if (tm < 0) continue;
-
-        int intent = (tm > am) ? 1 : (tm < am) ? -1 : 0;
-        if (intent == 0) continue;
-
-        // agent路径在main上的范围: [agent, first task] 之间的main_dist
-        int lo = std::min(am, tm);
-        int hi = std::max(am, tm);
-
-        for (int si = 0; si < Centerline::g_mp_count; si++) {
-            int sm = Centerline::g_mp_main_dist[si];
-            if (sm < 0) continue;
-            if (sm < lo || sm > hi) continue;  // MP不在路径上
-            // 只检查agent前方的MP（agent还没经过的）
-            if ((intent > 0 && sm <= am) || (intent < 0 && sm >= am)) continue;
-
-            int ld = Centerline::g_mp_lock_dir[si];
-            if (ld == 0 || ld == intent) continue;  // 没锁或同向
-            if (Centerline::g_mp_intercepting[si]) continue;  // 已经在拦截
-
-            int cw = (int)Centerline::g_cell_width[Centerline::g_mp_loc[si]];
-            if (cw >= 6) continue;
-            int cap = (cw <= 3) ? ZONE_CAP_W3 : (cw == 4) ? ZONE_CAP_W4 : ZONE_CAP_W5;
-            if (Centerline::g_mp_opposing[si] <= cap) continue;  // 没超容量
-
-            int dist = unified_dist(loc, Centerline::g_mp_loc[si]);
-            if (dist < ZONE_INTERCEPT_NEAR) continue;  // 太近了，放行
-            if (dist > ZONE_INTERCEPT_FAR) continue;   // 太远了，不管
-
-            // 热区豁免：agent自己在热区里，截停会导致堵塞更严重
-            if (USE_HOT_ZONE_EXEMPT && is_hot_zone_exempt(loc, env)) continue;
-
-            // 拦截
-            if (a < PIBT_Lock::MAX_AGENTS) {
-                Centerline::g_highway_blocked[a] = 1;
-                PIBT_Lock::g_agent_blocked[a] = 1;
-                Centerline::g_mp_intercepting[si] = true;
-            }
-            break;  // 一个agent只拦截一次
-        }
-    }
-#endif
 
     TimePoint endtime = t0 + std::chrono::milliseconds(limit);
     int cols = env->cols;

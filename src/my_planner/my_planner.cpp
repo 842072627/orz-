@@ -22,9 +22,6 @@
 #include "my_const.h"
 #include <chrono>
 #include <iostream>
-#include <unordered_map>
-#include <cmath>
-#include <algorithm>
 
 
 namespace MyPlanner{
@@ -225,80 +222,6 @@ namespace MyPlanner{
         }
     }
 
-    // ==== 连续空间 swept-rect 碰撞检测辅助函数 ====
-    static bool swept_interval(float d0, float dv, float lower, float upper,
-                                float& out_t0, float& out_t1) {
-        const float eps = 1e-6f;
-        if (dv > -eps && dv < eps) {
-            if (d0 > lower + eps && d0 < upper - eps) {
-                out_t0 = 0.0f; out_t1 = 1.0f;
-                return true;
-            }
-            return false;
-        }
-        float t0 = (lower - d0) / dv;
-        float t1 = (upper - d0) / dv;
-        if (t0 > t1) std::swap(t0, t1);
-        const float teps = eps / std::fabs(dv);
-        t0 += teps; t1 -= teps;
-        out_t0 = std::max(0.0f, t0);
-        out_t1 = std::min(1.0f, t1);
-        return out_t0 <= out_t1;
-    }
-
-    // 检查两个 agent 的 FW 动作在连续空间中是否 swept-rect 碰撞
-    // 输入：两个 agent 在 prev_states 和 next_states 中的位置
-    // 返回 true 如果它们的 1x1 box 在 [0,1] 时间内碰撞
-    static bool swept_collision_check(int i, int j,
-        const std::vector<State>& prev_states,
-        const std::vector<State>& next_states,
-        int cols, int rows)
-    {
-        const float AGENT_SIZE = 1.0f;
-
-        int pi_loc = prev_states[i].location;
-        int pj_loc = prev_states[j].location;
-        int ni_loc = next_states[i].location;
-        int nj_loc = next_states[j].location;
-
-        if (ni_loc < 0 || nj_loc < 0) return false;
-        if (pi_loc == pj_loc) return true;  // 同格子出发 → 必然碰撞
-
-        float xi0 = (float)(pi_loc % cols);
-        float yi0 = (float)(pi_loc / cols);
-        float xi1 = (float)(ni_loc % cols);
-        float yi1 = (float)(ni_loc / cols);
-        float xj0 = (float)(pj_loc % cols);
-        float yj0 = (float)(pj_loc / cols);
-        float xj1 = (float)(nj_loc % cols);
-        float yj1 = (float)(nj_loc / cols);
-
-        // 轴对齐 swept 包围盒预筛
-        float ri_min_x = std::min(xi0, xi1);
-        float ri_max_x = std::max(xi0, xi1) + AGENT_SIZE;
-        float ri_min_y = std::min(yi0, yi1);
-        float ri_max_y = std::max(yi0, yi1) + AGENT_SIZE;
-        float rj_min_x = std::min(xj0, xj1);
-        float rj_max_x = std::max(xj0, xj1) + AGENT_SIZE;
-        float rj_min_y = std::min(yj0, yj1);
-        float rj_max_y = std::max(yj0, yj1) + AGENT_SIZE;
-
-        if (ri_min_x >= rj_max_x || ri_max_x <= rj_min_x ||
-            ri_min_y >= rj_max_y || ri_max_y <= rj_min_y)
-            return false;
-
-        // 精确连续时间碰撞
-        float d0x = xi0 - xj0;
-        float d0y = yi0 - yj0;
-        float dvx = (xi1 - xi0) - (xj1 - xj0);
-        float dvy = (yi1 - yi0) - (yj1 - yj0);
-
-        float tx0 = 0, tx1 = 0, ty0 = 0, ty1 = 0;
-        bool cx = swept_interval(d0x, dvx, -AGENT_SIZE, AGENT_SIZE, tx0, tx1);
-        bool cy = swept_interval(d0y, dvy, -AGENT_SIZE, AGENT_SIZE, ty0, ty1);
-        return cx && cy && std::max(tx0, ty0) <= std::min(tx1, ty1);
-    }
-
     static void run_multistep_pibt_once(SharedEnvironment* env, std::vector<double>& local_priority,
                                         std::vector<Action>& one_step_actions)
     {
@@ -338,101 +261,6 @@ namespace MyPlanner{
                 moveCheck(id,checked,decided,one_step_actions,prev_decision);
             }
         }
-
-    // ==== 连续空间碰撞过滤 ====
-    // 只检测对向流（同一轴线上相反方向）且距离 ≤ 2 的 FW agent 对
-    {
-        int cols = env->cols;
-
-        // 收集每个 FW agent 的运动方向
-        struct DirVec { int dx, dy; };
-        std::vector<DirVec> fw_dir(env->num_of_agents, {0, 0});
-        for (int i = 0; i < env->num_of_agents; i++) {
-            if (one_step_actions[i] != Action::FW) continue;
-            int pi = prev_states[i].location;
-            int ni = next_states[i].location;
-            if (ni < 0) continue;
-            fw_dir[i].dx = (ni % cols) - (pi % cols);
-            fw_dir[i].dy = (ni / cols) - (pi / cols);
-        }
-
-        // 按 next_state 位置分 bin（只放 FW agent）
-        std::unordered_map<int, std::vector<int>> bins;
-        for (int i = 0; i < env->num_of_agents; i++) {
-            if (one_step_actions[i] != Action::FW) continue;
-            int nloc = next_states[i].location;
-            if (nloc >= 0) bins[nloc].push_back(i);
-        }
-
-        // 每个 agent 查周围 3x3 cell
-        static const int dr[9] = {0, -1, 1, 0, 0, -1, -1, 1, 1};
-        static const int dc[9] = {0, 0, 0, -1, 1, -1, 1, -1, 1};
-
-        for (int i = 0; i < env->num_of_agents; i++) {
-            if (one_step_actions[i] != Action::FW) continue;
-            int ni = next_states[i].location;
-            if (ni < 0) continue;
-            int ri = ni / cols, ci = ni % cols;
-            int dxi = fw_dir[i].dx, dyi = fw_dir[i].dy;
-
-            for (int d = 0; d < 9; d++) {
-                int nr = ri + dr[d], nc = ci + dc[d];
-                if (nr < 0 || nr >= env->rows || nc < 0 || nc >= cols) continue;
-                auto it = bins.find(nr * cols + nc);
-                if (it == bins.end()) continue;
-
-                for (int j : it->second) {
-                    if (j <= i) continue;
-                    if (one_step_actions[j] != Action::FW) continue;
-                    if (next_states[j].location < 0) continue;
-
-                    // === 方向性预筛：只处理对向流 ===
-                    int dxj = fw_dir[j].dx, dyj = fw_dir[j].dy;
-
-                    // 两 agent 必须在同一轴线上且方向相反
-                    // 即 (dxi * dxj < 0 && dyi == 0 && dyj == 0) 水平对向
-                    // 或 (dyi * dyj < 0 && dxi == 0 && dxj == 0) 垂直对向
-                    bool head_on = false;
-                    if (dxi != 0 && dxj != 0 && dyi == 0 && dyj == 0 && dxi * dxj < 0)
-                        head_on = true;
-                    else if (dyi != 0 && dyj != 0 && dxi == 0 && dxj == 0 && dyi * dyj < 0)
-                        head_on = true;
-
-                    if (!head_on) continue;
-
-                    // === 距离预筛：在运动方向上的距离 ≤ 2 ===
-                    int pi_loc = prev_states[i].location;
-                    int pj_loc = prev_states[j].location;
-                    int dist = 999;
-                    if (dxi != 0)  // 水平对向
-                        dist = std::abs(pi_loc % cols - pj_loc % cols);
-                    else  // 垂直对向
-                        dist = std::abs(pi_loc / cols - pj_loc / cols);
-                    if (dist > 2) continue;
-
-                    // swept-rect 检查（与 ActionModel 相同逻辑）
-                    if (!swept_collision_check(i, j, prev_states, next_states, cols, env->rows))
-                        continue;
-
-                    // 碰撞！低 priority 的 wait
-                    int loser, winner;
-                    if (local_priority[i] < local_priority[j]) {
-                        loser = i; winner = j;
-                    } else {
-                        loser = j; winner = i;
-                    }
-
-                    one_step_actions[loser] = Action::W;
-                    int old_loc = next_states[loser].location;
-                    if (old_loc >= 0 && old_loc < (int)decision.size())
-                        decision[old_loc] = -1;
-                    decided[loser].loc = prev_states[loser].location;
-                    decided[loser].state = DONE::DONE;
-                    next_states[loser] = prev_states[loser];
-                }
-            }
-        }
-    }
 
         prev_states = next_states;
 

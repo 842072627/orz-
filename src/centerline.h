@@ -66,15 +66,6 @@ static std::vector<int> g_mp_approach_left;    // [si] = approaching agents from
 static std::vector<int> g_mp_approach_right;   // [si] = approaching agents from right (going left)
 #endif
 
-// ====== Main Zone 容量截停 ======
-#if USE_ZONE_CAPACITY_INTERCEPT
-static std::vector<int> g_zone_flow_right;   // [zid] = 方向朝右的 agent 数
-static std::vector<int> g_zone_flow_left;    // [zid] = 方向朝左的 agent 数
-static std::vector<int> g_mp_opposing;       // [si] = 跟 lock_dir 相反方向的 agent 数
-static std::vector<bool> g_mp_intercepting;  // [si] = 当前是否正在拦截
-static std::vector<int> g_highway_blocked;   // [aid] = 本模块拦截的agent
-#endif
-
 
 // ====== BFS distance-to-wall ======
 static void compute_dtw(const SharedEnvironment* env, std::vector<int>& dtw) {
@@ -539,14 +530,6 @@ void init(const SharedEnvironment* env) {
     BFSTable::init(env, g_zone_is_main, g_n24c);
 
     g_ready = true;
-
-#if USE_ZONE_CAPACITY_INTERCEPT
-    g_zone_flow_right.assign(g_n24c * g_n24r, 0);
-    g_zone_flow_left.assign(g_n24c * g_n24r, 0);
-    g_mp_opposing.assign(g_mp_count, 0);
-    g_mp_intercepting.assign(g_mp_count, false);
-    g_highway_blocked.assign(env->num_of_agents, 0);
-#endif
 }
 
 // ====== Future flow stub (data filled by strategy_centerline) ======
