@@ -155,6 +155,10 @@ static inline float base_score(int a_loc, int tid, SharedEnvironment* env, int s
         if (a_m >= 0) {
             bool exempt = true;
             int prev_m = a_m;
+            int a_zone = -1;
+#if EXCLUDE_AGENT_ZONE
+            a_zone = (a_loc / g_env->cols / 24) * Centerline::g_n24c + (a_loc % g_env->cols / 24);
+#endif
             for (auto& loc : locs) {
                 int tm, tb;
                 Centerline::project(loc, tm, tb);
@@ -165,6 +169,15 @@ static inline float base_score(int a_loc, int tid, SharedEnvironment* env, int s
                 auto hi_it = std::upper_bound(Centerline::g_mp_main_dist.begin(), Centerline::g_mp_main_dist.end(), hi);
                 for (int si = (int)(lo_it - Centerline::g_mp_main_dist.begin());
                      si < (int)(hi_it - Centerline::g_mp_main_dist.begin()); si++) {
+#if EXCLUDE_AGENT_ZONE
+                    if (a_zone >= 0) {
+                        int mloc = Centerline::g_mp_loc[si];
+                        if (mloc >= 0) {
+                            int mp_z = (mloc / g_env->cols / 24) * Centerline::g_n24c + (mloc % g_env->cols / 24);
+                            if (mp_z == a_zone) continue;
+                        }
+                    }
+#endif
                     float ftotal = Centerline::g_mp_future_right[si] + Centerline::g_mp_future_left[si];
                     float flow_th_ex = Centerline::get_mp_flow_th(si);
                     if (ftotal >= flow_th_ex) { exempt = false; break; }
@@ -226,6 +239,10 @@ static inline float base_score(int a_loc, int tid, SharedEnvironment* env, int s
     float global_worst_align = 1.0f;
     int prev_m = a_m, prev_b = a_b;
     int prev_loc = a_loc;
+    int a_zone = -1;
+#if EXCLUDE_AGENT_ZONE
+    a_zone = (a_loc / g_env->cols / 24) * Centerline::g_n24c + (a_loc % g_env->cols / 24);
+#endif
 
     for (size_t ei = (size_t)start_idx; ei < locs.size(); ei++) {
         int tm, tb;
@@ -242,6 +259,15 @@ static inline float base_score(int a_loc, int tid, SharedEnvironment* env, int s
         auto hi_it = std::upper_bound(Centerline::g_mp_main_dist.begin(), Centerline::g_mp_main_dist.end(), hi);
         for (int si = (int)(lo_it - Centerline::g_mp_main_dist.begin());
              si < (int)(hi_it - Centerline::g_mp_main_dist.begin()); si++) {
+#if EXCLUDE_AGENT_ZONE
+            if (a_zone >= 0) {
+                int mloc = Centerline::g_mp_loc[si];
+                if (mloc >= 0) {
+                    int mp_z = (mloc / g_env->cols / 24) * Centerline::g_n24c + (mloc % g_env->cols / 24);
+                    if (mp_z == a_zone) continue;
+                }
+            }
+#endif
             int d = Centerline::g_mp_density[si];
             if (Centerline::g_mp_lock_dir[si] != 0 && Centerline::g_mp_lock_dir[si] != intent) {
                 g_dbg_dirlock++;
