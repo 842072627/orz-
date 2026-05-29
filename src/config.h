@@ -77,12 +77,16 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define ACTIVE_RATIO_DENSITY_MAX 30     // per-main-point density >= this  skip relaxation (zone still hot)
 #define ACTIVE_RELAX_DELAY_TICKS 100     // ticks before active ratio relaxation kicks in
 
+// ========== Task segment scoring coefficients (connection_exempt + scheduler unified) ==========
+#define COEFF_AGENT_TASK1   1.0f    // agent→first errand 距离系数
+#define COEFF_TASK1_TASK2   1.01f   // task1→task2 距离系数（默认略高于1.0，优先短第二段）
+
 // ========== Idle capacity control (空载均匀空跑) ==========
 #define USE_IDLE_CAP         false   // 空载容量控制开关
 #define IDLE_RATIO           0.4f  // 最大活跃 agent 比例 (0~1.0)
 
 // ========== BFS distance table (0=offmain only, 1=full matrix for cloud) ==========
-#define USE_BFS_TABLE       1   // 0: off-main only (本地), 1: 全量矩阵 (云端)
+#define USE_BFS_TABLE       0   // 0: off-main only (本地), 1: 全量矩阵 (云端)
 
 // ========== Migration flags (step-by-step control, can revert individually) ==========
 #define USE_MP_CENTERLINE   1   // Phase 1: A* widest path centerline (matches heatmap analysis)

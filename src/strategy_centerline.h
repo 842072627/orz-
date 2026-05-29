@@ -59,6 +59,21 @@ static inline int unified_dist(int loc_a, int loc_b) {
     return std::abs(loc_a / cols - loc_b / cols) + std::abs(loc_a % cols - loc_b % cols);
 }
 
+// ====== 统一任务评分函数 ======
+// 对 agent_loc → task_locs[] 各段，按 unified_dist + config系数加权计算总分
+// 所有评分路径共用（future flow exempt / branch task / connection exempt / main scoring baseline）
+static inline float compute_task_segment_score(int a_loc, const std::vector<int>& locs, size_t start_idx) {
+    float total = 0.0f;
+    int prev = a_loc;
+    for (size_t ei = start_idx; ei < locs.size(); ei++) {
+        int d = unified_dist(prev, locs[ei]);
+        float coeff = (ei == start_idx) ? COEFF_AGENT_TASK1 : COEFF_TASK1_TASK2;
+        total += 1.0f / ((float)d * coeff + 1.0f);
+        prev = locs[ei];
+    }
+    return total;
+}
+
 void init(SharedEnvironment* env) {
     g_env = env;
     Centerline::init(env);
@@ -125,14 +140,7 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
                 prev_m = tm;
             }
             if (exempt) {
-                float total = 0;
-                int prev = a_loc;
-                for (auto& loc : locs) {
-                    int d = unified_dist(prev, loc);
-                    total += 1.0f / (float)(d + 1);
-                    prev = loc;
-                }
-                return total;
+                return compute_task_segment_score(a_loc, locs, 0);
             }
         }
     }
@@ -151,16 +159,8 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
         }
         
         if (is_branch) {
-            // Pure branch task: unified distance
-            float total = 0;
-            int prev = a_loc;
-            for (size_t ei = (size_t)start_idx; ei < locs.size(); ei++) {
-                int loc = locs[ei];
-                int d = unified_dist(prev, loc);
-                total += 1.0f / (float)(d + 1);
-                prev = loc;
-            }
-            return total;
+            // Pure branch task: unified scoring
+            return compute_task_segment_score(a_loc, locs, start_idx);
         }
 
         // === Escape exemption ===
@@ -182,25 +182,23 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
             g_ce_total++;
 
             if (start_idx == 0) {
-                float esc_score = connection_exempt_score(a_loc, locs,
+                if (connection_exempt_check(a_loc, locs,
                     Centerline::g_zone24_density, Centerline::g_zone_is_main,
-                    g_env->map, g_env->cols, nzc);
-                if (esc_score > 0) {
+                    g_env->map, g_env->cols, nzc)) {
                     g_ce_hits++;
                     if (g_ce_f && (g_ce_step % 100 == 0))
                         fprintf(g_ce_f, "%d,%d,%d,%d\n", g_ce_step, g_ce_total, g_ce_hits, g_ce_total - g_ce_hits);
-                    return esc_score;
+                    return compute_task_segment_score(a_loc, locs, 0);
                 }
             } else {
                 std::vector<int> remaining(locs.begin() + start_idx, locs.end());
-                float esc_score = connection_exempt_score(a_loc, remaining,
+                if (connection_exempt_check(a_loc, remaining,
                     Centerline::g_zone24_density, Centerline::g_zone_is_main,
-                    g_env->map, g_env->cols, nzc);
-                if (esc_score > 0) {
+                    g_env->map, g_env->cols, nzc)) {
                     g_ce_hits++;
                     if (g_ce_f && (g_ce_step % 100 == 0))
                         fprintf(g_ce_f, "%d,%d,%d,%d\n", g_ce_step, g_ce_total, g_ce_hits, g_ce_total - g_ce_hits);
-                    return esc_score;
+                    return compute_task_segment_score(a_loc, remaining, 0);
                 }
             }
             g_ce_step++;
@@ -251,9 +249,12 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
             }
         }
 
-        float seg_dist = (float)(std::abs(prev_m - tm) + std::abs(prev_b - tb));
-        // Penalize task1->task2 segment less (agents already committed)
-        float seg_cost = (ei > (size_t)start_idx) ? (seg_dist * 0.3f + 1.0f) : (seg_dist + 1.0f);
+        float seg_dist = (float)unified_dist(
+            (ei == (size_t)start_idx) ? a_loc : locs[ei - 1],
+            locs[ei]);
+        // Unified coefficient scoring (config: COEFF_AGENT_TASK1 / COEFF_TASK1_TASK2)
+        float coeff = (ei > (size_t)start_idx) ? COEFF_TASK1_TASK2 : COEFF_AGENT_TASK1;
+        float seg_cost = seg_dist * coeff + 1.0f;
         float seg_score = 1.0f / seg_cost;
         if (seg_cost > MAX_TASK_SEGMENT_DIST) {
             float penalty = (float)MAX_TASK_SEGMENT_DIST / seg_cost;
