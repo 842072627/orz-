@@ -26,18 +26,18 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define ORZ_EXECUTOR    "default"       // ORZ executor: default
 
 // ========== Future flow direction lock (pure prediction, per-width thresholds) ==========
-#define FUTURE_FLOW_LOCK_TH   1.4f    // baseline threshold for wide corridors
+#define FUTURE_FLOW_LOCK_TH   1.72f    // baseline threshold for wide corridors
 #define FUTURE_FLOW_LOCK_SPREAD 2       // lock radius: 0 = no propagation, each MP independent
 #define FUTURE_FLOW_BRANCH_PENALTY  0.6f
 #define FUTURE_FLOW_BRANCH_OFFSET   14
 
 // ========== Per-width-zone direction lock thresholds ==========
 #define WIDTH_BAND_1          4       // width < 4: very narrow
-#define WIDTH_BAND_2          9       // width 4-8: narrow
-#define WIDTH_BAND_3          16      // width 9-15: moderate
-#define FF_TH_BAND_1          1.42f   // threshold for width < 4 (very narrow)
-#define FF_TH_BAND_2          1.42f   // threshold for width 4-8 (narrow)
-#define FF_TH_BAND_3          3.8f    // threshold for width 9-15 (moderate)
+#define WIDTH_BAND_2          11       // width 4-8: narrow
+#define WIDTH_BAND_3          18      // width 9-15: moderate
+#define FF_TH_BAND_1          1.72f   // threshold for width < 4 (very narrow)
+#define FF_TH_BAND_2          1.72f   // threshold for width 4-8 (narrow)
+#define FF_TH_BAND_3          3.72f    // threshold for width 9-15 (moderate)
 #define FF_TH_BAND_4          6.8f // threshold for width >= 16 (wide, never lock by default)
 
 // ========== Task segment distance limit ==========
@@ -72,7 +72,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 
 // ========== Main zone direction lock hold (prevent lock release/flip when zone is hot) ==========
 #define USE_MAIN_ZONE_LOCK_HOLD  true    // enable main zone density-based lock hold
-#define MAIN_ZONE_HOLD_CAP       15      // zone density >= this → keep lock direction unchanged
+#define MAIN_ZONE_HOLD_CAP       20      // zone density >= this → keep lock direction unchanged
 
 // ========== Task segment scoring coefficients (统一评分系数) ==========
 #define COEFF_AGENT_TASK1   1.0f    // agent→第一errand 距离系数
