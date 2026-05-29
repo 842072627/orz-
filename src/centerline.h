@@ -62,7 +62,7 @@ inline float get_mp_flow_th(int si) {
     if (w < WIDTH_BAND_1) return FF_TH_BAND_1;
     if (w < WIDTH_BAND_2) return FF_TH_BAND_2;
     if (w < WIDTH_BAND_3) return FF_TH_BAND_3;
-    return 9999.0f;  // super wide: never lock
+    return FF_TH_BAND_4;  // super wide: configurable threshold
 }
 
 
@@ -531,16 +531,31 @@ inline void update_mp_direction(const SharedEnvironment* env) {
     }
     
     // 3. Direction lock: future flow based, per-width thresholds
+    // Save previous lock for density-hold mechanism
+    std::vector<int> prev_lock_dir = g_mp_lock_dir;
     std::fill(g_mp_lock_dir.begin(), g_mp_lock_dir.end(), 0);
     for (int si = 0; si < g_mp_count; si++) {
         float ftotal = g_mp_future_right[si] + g_mp_future_left[si];
         float flow_th = get_mp_flow_th(si);
-        if (flow_th >= 9999.0f) continue;  // super wide: never lock
+        if (flow_th >= FF_TH_BAND_4) continue;
         if (ftotal < flow_th) continue;
         int dir = (g_mp_future_right[si] > g_mp_future_left[si]) ? +1 : -1;
         for (int d = -FUTURE_FLOW_LOCK_SPREAD; d <= FUTURE_FLOW_LOCK_SPREAD; d++) {
             int ni = si + d;
             if (ni < 0 || ni >= g_mp_count) continue;
+#if USE_MAIN_ZONE_LOCK_HOLD
+            // Density hold: if zone is hot enough and was previously locked, keep old direction
+            if (prev_lock_dir[ni] != 0) {
+                int mloc = g_mp_loc[ni];
+                if (mloc >= 0) {
+                    int zid = (mloc / g_cols / 24) * g_n24c + (mloc % g_cols / 24);
+                    if (zid >= 0 && zid < (int)g_zone24_density.size() && g_zone24_density[zid] >= MAIN_ZONE_HOLD_CAP) {
+                        g_mp_lock_dir[ni] = prev_lock_dir[ni];
+                        continue;
+                    }
+                }
+            }
+#endif
             g_mp_lock_dir[ni] = dir;
         }
     }

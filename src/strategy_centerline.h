@@ -103,9 +103,14 @@ static inline void add_agent_future_flow(
             if (do_instant_lock) {
                 float ftotal = Centerline::g_mp_future_right[si] + Centerline::g_mp_future_left[si];
                 float flow_th = Centerline::get_mp_flow_th(si);
-                if (flow_th < 9999.0f && ftotal >= flow_th) {
+                if (flow_th < FF_TH_BAND_4 && ftotal >= flow_th) {
                     int ndir = (Centerline::g_mp_future_right[si] > Centerline::g_mp_future_left[si]) ? +1 : -1;
-                    Centerline::g_mp_lock_dir[si] = ndir;
+                    // Apply lock with spread (same as update_mp_direction)
+                    for (int d = -FUTURE_FLOW_LOCK_SPREAD; d <= FUTURE_FLOW_LOCK_SPREAD; d++) {
+                        int ni = si + d;
+                        if (ni < 0 || ni >= Centerline::g_mp_count) continue;
+                        Centerline::g_mp_lock_dir[ni] = ndir;
+                    }
                 }
             }
         }
@@ -168,15 +173,18 @@ static inline float base_score(int a_loc, int tid, SharedEnvironment* env, int s
                 prev_m = tm;
             }
             if (exempt) {
-                float total = 0;
+                float wd = 0;
                 int prev = a_loc;
+                int si = 0;
                 for (auto& loc : locs) {
                     int d = unified_dist(prev, loc);
-                    total += 1.0f / (float)(d + 1);
+                    float coeff = (si == 0) ? COEFF_AGENT_TASK1 : COEFF_TASK_SEGMENT;
+                    wd += (float)d * coeff;
                     prev = loc;
+                    si++;
                 }
                 g_dbg_exempt++;
-                return total;
+                return 1.0f / (wd + 1.0f);
             }
         }
     }
@@ -194,25 +202,30 @@ static inline float base_score(int a_loc, int tid, SharedEnvironment* env, int s
             check_prev = loc;
         }
         if (is_branch) {
-            float total = 0;
+            float wd = 0;
             int prev = a_loc;
             for (size_t ei = (size_t)start_idx; ei < locs.size(); ei++) {
                 int loc = locs[ei];
                 int d = unified_dist(prev, loc);
-                total += 1.0f / (float)(d + 1);
+                float coeff = (ei == (size_t)start_idx) ? COEFF_AGENT_TASK1 : COEFF_TASK_SEGMENT;
+                wd += (float)d * coeff;
                 prev = loc;
             }
             g_dbg_branch++;
-            return total;
+            return 1.0f / (wd + 1.0f);
         }
     }
 
+    // ====== 统一任务评分 ======
+    // 加权距离之和 → 分数
     int a_m, a_b;
     Centerline::project(a_loc, a_m, a_b);
     if (a_m < 0) return 1.0f;
-
-    float total_score = 0;
+    float weighted_dist = 0.0f;
+    int global_d_max = 0;
+    float global_worst_align = 1.0f;
     int prev_m = a_m, prev_b = a_b;
+    int prev_loc = a_loc;
 
     for (size_t ei = (size_t)start_idx; ei < locs.size(); ei++) {
         int tm, tb;
@@ -246,26 +259,34 @@ static inline float base_score(int a_loc, int tid, SharedEnvironment* env, int s
             }
         }
 
-        float seg_dist = (float)(std::abs(prev_m - tm) + std::abs(prev_b - tb));
-        float seg_cost = (ei > (size_t)start_idx) ? (seg_dist * 0.3f + 1.0f) : (seg_dist + 1.0f);
-        float seg_score = 1.0f / seg_cost;
-        if (seg_cost > MAX_TASK_SEGMENT_DIST) {
-            float penalty = (float)MAX_TASK_SEGMENT_DIST / seg_cost;
-            seg_score *= penalty * penalty;
-        }
-        if (d_max_seg > ROUTE_THRESHOLD) {
-            int idx = (d_max_seg > 40) ? 40 : d_max_seg;
-            seg_score /= DIVISOR_TABLE[idx - ROUTE_THRESHOLD];
-        }
-        if (best_align < 0.7f) {
-            float pen = (0.7f - best_align) * 0.5f;
-            if (pen > 0.35f) pen = 0.35f;
-            seg_score *= (1.0f - pen);
-        }
-        total_score += seg_score;
+        // 统一加权距离累加
+        float seg_dist = (float)unified_dist(prev_loc, locs[ei]);
+        float coeff = (ei == (size_t)start_idx) ? COEFF_AGENT_TASK1 : COEFF_TASK_SEGMENT;
+        weighted_dist += seg_dist * coeff;
+
+        if (d_max_seg > global_d_max) global_d_max = d_max_seg;
+        if (best_align < global_worst_align) global_worst_align = best_align;
+
         prev_m = tm; prev_b = tb;
+        prev_loc = locs[ei];
     }
-    return total_score;
+
+    // 统一评分：1 / (加权距离和 + 1)
+    float final_score = 1.0f / (weighted_dist + 1.0f);
+    if (weighted_dist > MAX_TASK_SEGMENT_DIST) {
+        float penalty = (float)MAX_TASK_SEGMENT_DIST / weighted_dist;
+        final_score *= penalty * penalty;
+    }
+    if (global_d_max > ROUTE_THRESHOLD) {
+        int idx = (global_d_max > 40) ? 40 : global_d_max;
+        final_score /= DIVISOR_TABLE[idx - ROUTE_THRESHOLD];
+    }
+    if (global_worst_align < 0.7f) {
+        float pen = (0.7f - global_worst_align) * 0.5f;
+        if (pen > 0.35f) pen = 0.35f;
+        final_score *= (1.0f - pen);
+    }
+    return final_score;
 }
 
 // ====== Pre-tick updates ======

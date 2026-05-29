@@ -35,9 +35,10 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define WIDTH_BAND_1          4       // width < 4: very narrow
 #define WIDTH_BAND_2          9       // width 4-8: narrow
 #define WIDTH_BAND_3          16      // width 9-15: moderate
-#define FF_TH_BAND_1          1.3f   // threshold for width < 4 (very narrow)
-#define FF_TH_BAND_2          1.3f   // threshold for width 4-8 (narrow)
-#define FF_TH_BAND_3          1.3f    // threshold for width 9-15 (moderate)
+#define FF_TH_BAND_1          1.72f   // threshold for width < 4 (very narrow)
+#define FF_TH_BAND_2          1.72f   // threshold for width 4-8 (narrow)
+#define FF_TH_BAND_3          3.8f    // threshold for width 9-15 (moderate)
+#define FF_TH_BAND_4          6.8f // threshold for width >= 16 (wide, never lock by default)
 
 // ========== Task segment distance limit ==========
 #define MAX_TASK_SEGMENT_DIST  99999   // max main+branch distance for a single errand transition
@@ -54,7 +55,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define USE_DENSITY_EXCLUDE_IDLE  false    // 排除无任务/被截停agent的密度贡献
 
 // ========== Wall-hugging in corridors (PIBT tie-breaker + A* guide path) ==========
-#define USE_WALL_HUGGING        false    // master switch for all wall-hugging features
+#define USE_WALL_HUGGING        true    // master switch for all wall-hugging features
 #define USE_WALL_HUGGING_PIBT    true    // PIBT successor tie-breaker wall-hugging
 #define USE_WALL_HUGGING_ASTAR   true    // A* guide path branch-dist bias
 #define WALL_HUG_WIDTH_MAX       20      // max corridor width (cells) for wall-hugging
@@ -68,6 +69,14 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define USE_MP_CENTERLINE   1   // widest path centerline
 #define USE_MP_DENSITY      1   // 1D main point density (heatmap)
 #define USE_MP_WIDTH        1   // P10 corridor width per main point
+
+// ========== Main zone direction lock hold (prevent lock release/flip when zone is hot) ==========
+#define USE_MAIN_ZONE_LOCK_HOLD  true    // enable main zone density-based lock hold
+#define MAIN_ZONE_HOLD_CAP       15      // zone density >= this → keep lock direction unchanged
+
+// ========== Task segment scoring coefficients (统一评分系数) ==========
+#define COEFF_AGENT_TASK1   1.0f    // agent→第一errand 距离系数
+#define COEFF_TASK_SEGMENT  1.02f    // errand间 距离系数（task1→task2, task2→task3...）
 
 // ========== Diagnostic logging ==========
 #define USE_DIAG_LOG    0   // 1 = write CSV logs + console prints; 0 = silent (cloud test)
