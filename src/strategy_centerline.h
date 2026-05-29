@@ -140,7 +140,7 @@ static inline float base_score(int a_loc, int tid, int step, int start_idx = 0) 
                 prev_m = tm;
             }
             if (exempt) {
-                return compute_task_segment_score(a_loc, locs, 0);
+                return compute_task_segment_score(a_loc, locs, start_idx);
             }
         }
     }
