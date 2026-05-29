@@ -18,7 +18,7 @@
 #include "config.h"
 
 // ====== 配置 ======
-constexpr int EX_MAIN_CAP   = 15;  // main zone 阈值
+constexpr int EX_MAIN_CAP   = 5;  // main zone 阈值
 constexpr int EX_NONMAIN_CAP = 80; // 非 main zone 阈值
 
 // ====== 连接豁免检查（纯Bresenham路径验证，不做评分） ======
