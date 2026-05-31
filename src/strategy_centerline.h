@@ -66,6 +66,7 @@ static inline void add_agent_future_flow(
     if (m_curr < 0) return;
 
     int prev_m = m_curr;
+    int prev_loc = agent_loc;
     int cumul = 0;
 
     float adj_branch = (float)(b_curr > FUTURE_FLOW_BRANCH_OFFSET
@@ -76,6 +77,14 @@ static inline void add_agent_future_flow(
         int tm, tb;
         Centerline::project(loc, tm, tb);
         if (tm < 0) continue;
+
+        // Off-main segment: whole path stays in branch → no main line flow
+        if (BFSTable::is_branch_path(prev_loc, loc)) {
+            cumul += std::abs(tm - prev_m);
+            prev_m = tm;
+            prev_loc = loc;
+            continue;
+        }
 
         int lo = std::min(prev_m, tm);
         int hi = std::max(prev_m, tm);
@@ -105,7 +114,6 @@ static inline void add_agent_future_flow(
                 float flow_th = Centerline::get_mp_flow_th(si);
                 if (flow_th < FF_TH_BAND_4 && ftotal >= flow_th) {
                     int ndir = (Centerline::g_mp_future_right[si] > Centerline::g_mp_future_left[si]) ? +1 : -1;
-                    // Apply lock with spread (same as update_mp_direction)
                     for (int d = -FUTURE_FLOW_LOCK_SPREAD; d <= FUTURE_FLOW_LOCK_SPREAD; d++) {
                         int ni = si + d;
                         if (ni < 0 || ni >= Centerline::g_mp_count) continue;
@@ -117,6 +125,7 @@ static inline void add_agent_future_flow(
 
         cumul += seg_len;
         prev_m = tm;
+        prev_loc = loc;
     }
 }
 
@@ -465,8 +474,7 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
                 int m1, b1, m2, b2;
                 Centerline::project(it->second.locations[0], m1, b1);
                 Centerline::project(it->second.locations[1], m2, b2);
-                task_internal_dist[tid] = (m1 >= 0 && m2 >= 0) ?
-                    std::abs(m1 - m2) + std::abs(b1 - b2) : 99999;
+                task_internal_dist[tid] = unified_dist(it->second.locations[0], it->second.locations[1]);
             }
             std::sort(sorted_free.begin(), sorted_free.end(), [&](int a, int b) {
                 return task_internal_dist[a] < task_internal_dist[b];

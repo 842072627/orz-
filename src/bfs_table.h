@@ -148,7 +148,7 @@ inline void build_full(const SharedEnvironment* env) {
     }
 
     auto start_time = std::chrono::steady_clock::now();
-    int time_limit_ms = 25000;
+    int time_limit_ms = 120000;
 
     unsigned int n_threads = std::thread::hardware_concurrency();
     if (n_threads < 1) n_threads = 4;

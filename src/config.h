@@ -25,6 +25,9 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define ORZ_PLANNER     "default"       // ORZ planner: default PIBT
 #define ORZ_EXECUTOR    "default"       // ORZ executor: default
 
+// ========== BFS distance table ==========
+#define USE_BFS_TABLE       1   // 0: off-main only (本地), 1: 全量矩阵 (云端)
+
 // ========== Future flow direction lock (pure prediction, per-width thresholds) ==========
 #define FUTURE_FLOW_LOCK_TH   1.72f    // baseline threshold for wide corridors
 #define FUTURE_FLOW_LOCK_SPREAD 2       // lock radius: 0 = no propagation, each MP independent
@@ -33,12 +36,12 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 
 // ========== Per-width-zone direction lock thresholds ==========
 #define WIDTH_BAND_1          4       // width < 4: very narrow
-#define WIDTH_BAND_2          11       // width 4-8: narrow
+#define WIDTH_BAND_2          12       // width 4-8: narrow
 #define WIDTH_BAND_3          18      // width 9-15: moderate
 #define FF_TH_BAND_1          1.72f   // threshold for width < 4 (very narrow)
 #define FF_TH_BAND_2          1.72f   // threshold for width 4-8 (narrow)
-#define FF_TH_BAND_3          3.72f    // threshold for width 9-15 (moderate)
-#define FF_TH_BAND_4          6.8f // threshold for width >= 16 (wide, never lock by default)
+#define FF_TH_BAND_3          6.72f    // threshold for width 9-15 (moderate)
+#define FF_TH_BAND_4          7.72f // threshold for width >= 16 (wide, never lock by default)
 
 // ========== Task segment distance limit ==========
 #define MAX_TASK_SEGMENT_DIST  99999   // max main+branch distance for a single errand transition
@@ -79,7 +82,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define COEFF_TASK_SEGMENT  1.02f   // errand间 距离系数（task1→task2, task2→task3...）
 
 // ========== Path heat check options ==========
-#define EXCLUDE_AGENT_ZONE   false   // true=检查路径热区时跳过agent所在zone，false=全路径检查
+#define EXCLUDE_AGENT_ZONE   true   // true=检查路径热区时跳过agent所在zone，false=全路径检查
 
 // ========== Diagnostic logging ==========
 #define USE_DIAG_LOG    0   // 1 = write CSV logs + console prints; 0 = silent (cloud test)
