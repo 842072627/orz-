@@ -57,12 +57,25 @@ static std::vector<float> g_mp_future_right;   // [si] = distance-weighted futur
 static std::vector<float> g_mp_future_left;    // [si] = distance-weighted future flow left
 static std::vector<int> g_mp_width_p10;        // [si] = P10 corridor width (cells) per MP
 // Get width-adaptive direction lock threshold for MP si
-inline float get_mp_flow_th(int si) {
+inline float get_mp_flow_th(int si, const SharedEnvironment* env) {
     int w = g_mp_width_p10[si];
-    if (w < WIDTH_BAND_1) return FF_TH_BAND_1;
-    if (w < WIDTH_BAND_2) return FF_TH_BAND_2;
-    if (w < WIDTH_BAND_3) return FF_TH_BAND_3;
-    return FF_TH_BAND_4;  // super wide: configurable threshold
+    float base;
+    if (w < WIDTH_BAND_1) base = FF_TH_BAND_1;
+    else if (w < WIDTH_BAND_2) base = FF_TH_BAND_2;
+    else if (w < WIDTH_BAND_3) base = FF_TH_BAND_3;
+    else base = FF_TH_BAND_4;
+#if USE_ACTIVE_RATIO_RELAX
+    if (env->curr_timestep >= ACTIVE_RELAX_DELAY_TICKS
+        && g_mp_density[si] < ACTIVE_RATIO_DENSITY_MAX
+        && CenterlineAccess::active_ratio < ACTIVE_RATIO_BASELINE) {
+        float active = CenterlineAccess::active_ratio;
+        float factor = (ACTIVE_RATIO_BASELINE - active) / ACTIVE_RATIO_BASELINE;
+        float _base = factor;
+        for (int _e = 1; _e < ACTIVE_RATIO_RELAX_EXP; _e++) factor *= _base;
+        base += factor * (FUTURE_FLOW_TH_MAX - FUTURE_FLOW_LOCK_TH);
+    }
+#endif
+    return base;
 }
 
 
@@ -536,8 +549,7 @@ inline void update_mp_direction(const SharedEnvironment* env) {
     std::fill(g_mp_lock_dir.begin(), g_mp_lock_dir.end(), 0);
     for (int si = 0; si < g_mp_count; si++) {
         float ftotal = g_mp_future_right[si] + g_mp_future_left[si];
-        float flow_th = get_mp_flow_th(si);
-        if (flow_th >= FF_TH_BAND_4) continue;
+        float flow_th = get_mp_flow_th(si, env);
         if (ftotal < flow_th) continue;
         int dir = (g_mp_future_right[si] > g_mp_future_left[si]) ? +1 : -1;
         for (int d = -FUTURE_FLOW_LOCK_SPREAD; d <= FUTURE_FLOW_LOCK_SPREAD; d++) {

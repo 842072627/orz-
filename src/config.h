@@ -38,10 +38,19 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define WIDTH_BAND_1          4       // width < 4: very narrow
 #define WIDTH_BAND_2          12       // width 4-8: narrow
 #define WIDTH_BAND_3          18      // width 9-15: moderate
-#define FF_TH_BAND_1          1.42f   // threshold for width < 4 (very narrow)
-#define FF_TH_BAND_2          1.72f   // threshold for width 4-8 (narrow)
-#define FF_TH_BAND_3          4.72f    // threshold for width 9-15 (moderate)
+#define FF_TH_BAND_1          1.32f   // threshold for width < 4 (very narrow)
+#define FF_TH_BAND_2          1.52f   // threshold for width 4-12 (narrow)
+#define FF_TH_BAND_3          4.72f    // threshold for width 12-18 (moderate)
 #define FF_TH_BAND_4          5.72f // threshold for width >= 16 (wide, never lock by default)
+
+// ========== Active agent ratio lock relaxation ==========
+#define USE_ACTIVE_RATIO_RELAX   true
+#define FUTURE_FLOW_TH_MAX        2.8f
+#define FUTURE_FLOW_RELAX_DELAY_TICKS 100
+#define ACTIVE_RATIO_BASELINE    0.50f
+#define ACTIVE_RATIO_RELAX_EXP  2
+#define ACTIVE_RATIO_DENSITY_MAX 30
+#define ACTIVE_RELAX_DELAY_TICKS 100
 
 // ========== Task segment distance limit ==========
 #define MAX_TASK_SEGMENT_DIST  99999   // max main+branch distance for a single errand transition
