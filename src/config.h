@@ -38,10 +38,10 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define WIDTH_BAND_1          4       // width < 4: very narrow
 #define WIDTH_BAND_2          12       // width 4-8: narrow
 #define WIDTH_BAND_3          18      // width 9-15: moderate
-#define FF_TH_BAND_1          1.72f   // threshold for width < 4 (very narrow)
+#define FF_TH_BAND_1          1.42f   // threshold for width < 4 (very narrow)
 #define FF_TH_BAND_2          1.72f   // threshold for width 4-8 (narrow)
-#define FF_TH_BAND_3          6.72f    // threshold for width 9-15 (moderate)
-#define FF_TH_BAND_4          7.72f // threshold for width >= 16 (wide, never lock by default)
+#define FF_TH_BAND_3          4.72f    // threshold for width 9-15 (moderate)
+#define FF_TH_BAND_4          5.72f // threshold for width >= 16 (wide, never lock by default)
 
 // ========== Task segment distance limit ==========
 #define MAX_TASK_SEGMENT_DIST  99999   // max main+branch distance for a single errand transition
@@ -79,10 +79,10 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 
 // ========== Task segment scoring coefficients (统一评分系数) ==========
 #define COEFF_AGENT_TASK1   1.0f    // agent→第一errand 距离系数
-#define COEFF_TASK_SEGMENT  1.02f   // errand间 距离系数（task1→task2, task2→task3...）
+#define COEFF_TASK_SEGMENT  1.01f   // errand间 距离系数（task1→task2, task2→task3...）
 
 // ========== Path heat check options ==========
-#define EXCLUDE_AGENT_ZONE   true   // true=检查路径热区时跳过agent所在zone，false=全路径检查
+#define EXCLUDE_AGENT_ZONE   false   // true=检查路径热区时跳过agent所在zone，false=全路径检查
 
 // ========== Diagnostic logging ==========
 #define USE_DIAG_LOG    0   // 1 = write CSV logs + console prints; 0 = silent (cloud test)
