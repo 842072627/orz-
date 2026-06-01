@@ -112,7 +112,7 @@ static inline void add_agent_future_flow(
             if (do_instant_lock) {
                 float ftotal = Centerline::g_mp_future_right[si] + Centerline::g_mp_future_left[si];
                 float flow_th = Centerline::get_mp_flow_th(si, env);
-                if (flow_th < FF_TH_BAND_4 && ftotal >= flow_th) {
+                if (ftotal >= flow_th) {
                     int ndir = (Centerline::g_mp_future_right[si] > Centerline::g_mp_future_left[si]) ? +1 : -1;
                     for (int d = -FUTURE_FLOW_LOCK_SPREAD; d <= FUTURE_FLOW_LOCK_SPREAD; d++) {
                         int ni = si + d;
