@@ -38,14 +38,14 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define WIDTH_BAND_1          4       // width < 4: very narrow
 #define WIDTH_BAND_2          12       // width 4-8: narrow
 #define WIDTH_BAND_3          18      // width 9-15: moderate
-#define FF_TH_BAND_1          1.32f   // threshold for width < 4 (very narrow)
-#define FF_TH_BAND_2          1.52f   // threshold for width 4-12 (narrow)
-#define FF_TH_BAND_3          4.72f    // threshold for width 12-18 (moderate)
+#define FF_TH_BAND_1          1.72f   // threshold for width < 4 (very narrow)
+#define FF_TH_BAND_2          1.72f   // threshold for width 4-12 (narrow)
+#define FF_TH_BAND_3          4.52f    // threshold for width 12-18 (moderate)
 #define FF_TH_BAND_4          5.72f // threshold for width >= 16 (wide, never lock by default)
 
 // ========== Active agent ratio lock relaxation ==========
 #define USE_ACTIVE_RATIO_RELAX   true
-#define FUTURE_FLOW_TH_MAX        2.8f
+#define FUTURE_FLOW_TH_MAX        0.5f
 #define FUTURE_FLOW_RELAX_DELAY_TICKS 100
 #define ACTIVE_RATIO_BASELINE    0.50f
 #define ACTIVE_RATIO_RELAX_EXP  2
@@ -84,7 +84,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 
 // ========== Main zone direction lock hold (prevent lock release/flip when zone is hot) ==========
 #define USE_MAIN_ZONE_LOCK_HOLD  true    // enable main zone density-based lock hold
-#define MAIN_ZONE_HOLD_CAP       20      // zone density >= this → keep lock direction unchanged
+#define MAIN_ZONE_HOLD_CAP       16      // zone density >= this → keep lock direction unchanged
 
 // ========== Task segment scoring coefficients (统一评分系数) ==========
 #define COEFF_AGENT_TASK1   1.0f    // agent→第一errand 距离系数

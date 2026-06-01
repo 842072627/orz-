@@ -8,17 +8,17 @@
 #include "pibt_lock.h"
 
 
-// #include "CompetitionSystem.h"
-// #include <boost/program_options.hpp>
+#include "CompetitionSystem.h"
+#include <boost/program_options.hpp>
 
 
 
 
-// namespace po = boost::program_options;
+namespace po = boost::program_options;
 
-// extern po::variables_map vm;
-// extern std::unique_ptr<BaseSystem> system_ptr;
-// extern void sigint_handler(int);
+extern po::variables_map vm;
+extern std::unique_ptr<BaseSystem> system_ptr;
+extern void sigint_handler(int);
 
 namespace PIBT_Lock
 {
@@ -40,14 +40,14 @@ namespace CenterlineAccess {
 
 void TaskScheduler::initialize(int preprocess_time_limit)
 {
-    // if (env == nullptr || env->rows != 656 || env->cols != 1491)
-    // {
-    //     std::cout << "TaskScheduler only supports orz map in this build: rows="
-    //               << (env == nullptr ? -1 : env->rows)
-    //               << ", cols=" << (env == nullptr ? -1 : env->cols) << std::endl;
-    //     sigint_handler(1);
-    //     return;
-    // }
+    if (env == nullptr || env->rows != 656 || env->cols != 1491)
+    {
+        std::cout << "TaskScheduler only supports orz map in this build: rows="
+                  << (env == nullptr ? -1 : env->rows)
+                  << ", cols=" << (env == nullptr ? -1 : env->cols) << std::endl;
+        sigint_handler(1);
+        return;
+    }
     if (!is_ORZ(env))
     {
         int limit = preprocess_time_limit / 2 - DefaultPlanner::SCHEDULER_TIMELIMIT_TOLERANCE;
