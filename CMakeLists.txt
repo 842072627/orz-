@@ -87,6 +87,7 @@ if(BUILD_TESTS)
         tests/python_interface_test.cpp
         ${PY_BRIDGE_SOURCES}
         ${TEST_SOURCES}
+        src/sigint_stub.cpp
     )
     target_link_libraries(python_interface_test PRIVATE pybind11::embed ${Boost_LIBRARIES})
     add_test(NAME python_interface_test COMMAND python_interface_test
