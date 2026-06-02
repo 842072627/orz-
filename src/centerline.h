@@ -570,6 +570,9 @@ inline void update_mp_density(const SharedEnvironment* env) {
             if (env->curr_task_schedule[a] < 0) continue;
             if (a < PIBT_Lock::MAX_AGENTS && PIBT_Lock::g_agent_blocked[a]) continue;
         }
+#if USE_TIDAL_REFUGE
+        if (a < PIBT_Lock::MAX_AGENTS && PIBT_Lock::g_agent_refuge[a]) continue;
+#endif
         int ar = loc / env->cols, ac = loc % env->cols;
         for (int si = 0; si < g_mp_count; si++) {
             int mloc = g_mp_loc[si];

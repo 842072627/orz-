@@ -296,90 +296,34 @@ namespace MyPlanner{
         env->curr_timestep += 1;
     }
 
-    void tidal_refuge_check(SharedEnvironment* env, const TimePoint* deadline) {
+    void tidal_refresh_check(SharedEnvironment* env, const TimePoint* deadline) {
 #if USE_TIDAL_REFUGE
-        // Hardcoded lane-based refuge: use REFUGE_TABLE + LANE_DIRS 
-        // (hand-labeled narrow corridors from lanes (6).json)
-        // A lane with LANE_DIRS != 0 is always under control — counterflow
-        // agents crossing it get rerouted to the lane's own refuge zone.
-        if (!CenterlineAccess::g_main_dist) return;
-        
+        // Planner-side: only run A* for agents already marked as refuge by the scheduler
+        // Detection logic moved to strategy_centerline.h (scheduler side)
         for (int aid = 0; aid < env->num_of_agents; aid++) {
             if (aid >= PIBT_Lock::MAX_AGENTS) break;
-            if (PIBT_Lock::g_agent_refuge[aid]) continue;
-            if (trajLNS.trajs[aid].size() < 2) continue;
-            int agent_loc = env->start_states[aid].location;
-            if (agent_loc < 0) continue;
-            int a_m = (*CenterlineAccess::g_main_dist)[agent_loc];
-            if (a_m < 0) continue;
+            if (!PIBT_Lock::g_agent_refuge[aid]) continue;  // only marked agents
+            int goal = PIBT_Lock::g_agent_refuge_goal[aid];
+            if (goal < 0) continue;
             
-            for (int ti = 0; ti < LANE_COUNT; ti++) {
-                int lock_dir = LANE_DIRS[ti];
-                if (lock_dir == 0) continue;
-                
-                int lo_m = REFUGE_TABLE[ti].lo_m;
-                int hi_m = REFUGE_TABLE[ti].hi_m;
-                if (lo_m > hi_m) { int t = lo_m; lo_m = hi_m; hi_m = t; }
-                
-                bool is_inside = (a_m >= lo_m && a_m <= hi_m);
-                bool counterflow = false;
-                
-                if (is_inside) {
-                    // Agent inside the lane — check if going the wrong way
-                    int task_m = (*CenterlineAccess::g_main_dist)[trajLNS.tasks[aid]];
-                    if (task_m < 0) continue;
-                    counterflow = (lock_dir > 0) ? (task_m < a_m) : (task_m > a_m);
-                    if (!counterflow) continue;
-                } else {
-                    // Agent outside the lane — check direction toward it
-                    int dir = (a_m < lo_m) ? 1 : -1;
-                    if (dir == lock_dir) continue;
-                    
-                    // Fast distance check first (cheap), before slow path iteration
-                    int nearest_boundary = (a_m < lo_m) ? lo_m : hi_m;
-                    int d = (nearest_boundary > a_m) ? (nearest_boundary - a_m) : (a_m - nearest_boundary);
-                    if (d > TIDAL_REFUGE_MAX_DIST) continue;
-                    
-                    // Only now check if guide path crosses this lane (expensive)
-                    bool crosses = false;
-                    for (auto loc : trajLNS.trajs[aid]) {
-                        if (loc < 0) continue;
-                        int m = (*CenterlineAccess::g_main_dist)[loc];
-                        if (m >= lo_m && m <= hi_m) { crosses = true; break; }
-                    }
-                    if (!crosses) continue;
-                }
-                
-                // → counterflow agent (inside or at entrance) → reroute to refuge
-                int rx = (lock_dir > 0) ? REFUGE_TABLE[ti].lo_x : REFUGE_TABLE[ti].hi_x;
-                int ry = (lock_dir > 0) ? REFUGE_TABLE[ti].lo_y : REFUGE_TABLE[ti].hi_y;
-                if (rx < 0 || ry < 0) continue;
-                
-                int target_loc = (ry + 1) * env->cols + (rx + 1);
-                if (target_loc < 0 || target_loc >= (int)env->map.size() || env->map[target_loc] != 0) {
-                    target_loc = ry * env->cols + rx;
-                    if (target_loc < 0 || target_loc >= (int)env->map.size() || env->map[target_loc] != 0)
-                        continue;
-                }
-                
-                // Reroute guide path to refuge (champion planner pattern)
-                auto base_traj = trajLNS.trajs[aid];
-                auto base_gn = trajLNS.goal_nodes[aid];
-                int base_task = trajLNS.tasks[aid];
-                
-                remove_traj(trajLNS, aid);
-                trajLNS.tasks[aid] = target_loc;
-                if (update_traj(trajLNS, aid, deadline)) {
-                    PIBT_Lock::g_agent_refuge[aid] = 1;
-                    break;  // agent handled, move to next
-                } else {
-                    // Restore
-                    trajLNS.tasks[aid] = base_task;
-                    trajLNS.trajs[aid] = std::move(base_traj);
-                    trajLNS.goal_nodes[aid] = base_gn;
-                    add_traj(trajLNS, aid);
-                    update_dist_2_path(trajLNS, aid);
-                }
+            // Already has a refuge path? skip
+            if (!trajLNS.trajs[aid].empty() && trajLNS.trajs[aid].back() == goal)
+                continue;
+            
+            // Run A* once to set guide path to refuge
+            auto base_traj = trajLNS.trajs[aid];
+            auto base_gn = trajLNS.goal_nodes[aid];
+            int base_task = trajLNS.tasks[aid];
+            
+            remove_traj(trajLNS, aid);
+            trajLNS.tasks[aid] = goal;
+            if (!update_traj(trajLNS, aid, deadline)) {
+                // Failed — restore original
+                trajLNS.tasks[aid] = base_task;
+                trajLNS.trajs[aid] = std::move(base_traj);
+                trajLNS.goal_nodes[aid] = base_gn;
+                add_traj(trajLNS, aid);
+                update_dist_2_path(trajLNS, aid);
             }
         }
 #endif
@@ -477,7 +421,7 @@ namespace MyPlanner{
         initialize_dummy_goals_if_needed(env);
         setup_multistep_episode_state(env, flow_end_time, local_priority);
         update_guide_paths_once_for_multistep(env, flow_end_time);
-        tidal_refuge_check(env, &flow_end_time);
+        tidal_refresh_check(env, &flow_end_time);
 
         const auto after_setup = std::chrono::steady_clock::now();
         const auto setup_elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(after_setup - episode_start).count();

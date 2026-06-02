@@ -76,7 +76,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define IDLE_RATIO           0.4f  // 最大活跃 agent 比例 (0~1.0)
 
 // ========== BFS distance table (0=offmain only, 1=full matrix for cloud) ==========
-#define USE_BFS_TABLE       1   // 0: off-main only (本地), 1: 全量矩阵 (云端)
+#define USE_BFS_TABLE       0   // 0: off-main only (本地), 1: 全量矩阵 (云端)
 
 // ========== Migration flags (step-by-step control, can revert individually) ==========
 #define USE_MP_CENTERLINE   1   // Phase 1: A* widest path centerline (matches heatmap analysis)
@@ -96,10 +96,8 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define TIDAL_WIDTH_TH          5   // p10_width <= 此值视为窄瓶颈
 #define TIDAL_SEARCH_MARGIN     3   // 候选格搜索范围 = 瓶颈长度 × 此值
 #define TIDAL_REFUGE_MAX_DIST   5   // agent距硬编码lane入口≤此main_dist时触发避难reroute
-
-// ========== Zone heat refuge control (热度疏导阈值) ==========
-#define ZONE_REFUGE_HEAT_ON     45   // zone density >= 此值且上升 → 启用避难疏导
-#define ZONE_REFUGE_HEAT_OFF    15   // zone density < 此值 → 关闭避难疏导
+#define TIDAL_REFUGE_CLEAR_INTERVAL  50   // 每隔多少tick清一次g_agent_refuge, 0=每个tick清
+#define TIDAL_REFUGE_ZONE_EXPAND     10  // 窄道main_dist范围外扩多少视为控制区
 
 // Runtime strategy name getter (used by TaskScheduler.cpp)
 inline std::string get_orz_strategy() { return ORZ_SCHEDULER; }
