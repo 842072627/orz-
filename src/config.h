@@ -58,9 +58,9 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define USE_HOT_ZONE_EXEMPT  true   // 热区豁免：热区agent不设block，PIBT正常执行
 
 // ========== Wall-hugging in corridors (PIBT tie-breaker + A* guide path) ==========
-#define USE_WALL_HUGGING        true    // master switch for all wall-hugging features
-#define USE_WALL_HUGGING_PIBT    true    // PIBT successor tie-breaker wall-hugging
-#define USE_WALL_HUGGING_ASTAR   true    // A* guide path branch-dist bias
+#define USE_WALL_HUGGING        false    // master switch for all wall-hugging features
+#define USE_WALL_HUGGING_PIBT    false    // PIBT successor tie-breaker wall-hugging
+#define USE_WALL_HUGGING_ASTAR   false    // A* guide path branch-dist bias
 #define WALL_HUG_WIDTH_MAX       20      // max corridor width (cells) for wall-hugging
 #define WALL_HUG_BRANCH_BIAS_MAX 2       // max per-step branch bias for A* (0-5, larger = stronger)
 
@@ -98,6 +98,16 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define TIDAL_REFUGE_MAX_DIST   5   // agent距硬编码lane入口≤此main_dist时触发避难reroute
 #define TIDAL_REFUGE_CLEAR_INTERVAL  50   // 每隔多少tick清一次g_agent_refuge, 0=每个tick清
 #define TIDAL_REFUGE_ZONE_EXPAND     10  // 窄道main_dist范围外扩多少视为控制区
+
+// ========== Debug ==========
+// 设为1时每tick打印避难agent状态（仅lld步数间隔，调大间隔避免刷屏）
+#define TIDAL_REFUGE_DEBUG_INTERVAL 500  // 每多少tick打印一次debug
+#define TIDAL_AGENT_DEBUG_MAX       20   // debug最多显示多少个避难agent
+
+// ========== A* 启发式 ==========
+// 地图格数超过此值时get_h使用曼哈顿距离（省内存），否则用预计算表
+// ORZ(656×1491=978096)>>90000，设为0强制用预计算表（A*更快但吃掉不少内存）
+#define LARGE_MAP_CELL_THRESHOLD    90000
 
 // Runtime strategy name getter (used by TaskScheduler.cpp)
 inline std::string get_orz_strategy() { return ORZ_SCHEDULER; }

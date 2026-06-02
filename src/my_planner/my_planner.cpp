@@ -135,8 +135,15 @@ namespace MyPlanner{
 
             // detect guide-path mismatch (goal changed or no guide path)
             require_guide_path[i] = false;
-            if (trajLNS.trajs[i].empty() || trajLNS.trajs[i].back() != trajLNS.tasks[i])
+            if (trajLNS.trajs[i].empty() || trajLNS.trajs[i].back() != trajLNS.tasks[i]) {
+#if USE_TIDAL_REFUGE
+                // Don't regenerate path for refuge agents — they need to go to the refuge goal
+                if (i < PIBT_Lock::MAX_AGENTS && PIBT_Lock::g_agent_refuge[i]) {
+                    require_guide_path[i] = false;
+                } else
+#endif
                 require_guide_path[i] = true;
+            }
 
             // update per-agent transient planning state
             assert(env->start_states[i].location >=0);

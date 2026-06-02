@@ -187,8 +187,8 @@ void detect_refuge(SharedEnvironment* env, const std::vector<int>& proposed_sche
             if (lock_dir == intent) continue;
             
             // Counterflow → 标记难民 + 绑定lane
-            int rx = (lock_dir > 0) ? REFUGE_TABLE[ti].lo_x : REFUGE_TABLE[ti].hi_x;
-            int ry = (lock_dir > 0) ? REFUGE_TABLE[ti].lo_y : REFUGE_TABLE[ti].hi_y;
+            int rx = (lock_dir > 0) ? REFUGE_TABLE[ti].hi_x : REFUGE_TABLE[ti].lo_x;
+            int ry = (lock_dir > 0) ? REFUGE_TABLE[ti].hi_y : REFUGE_TABLE[ti].lo_y;
             if (rx < 0 || ry < 0) continue;
             int target_loc = (ry + 1) * cols + (rx + 1);
             if (target_loc < 0 || target_loc >= (int)env->map.size() || env->map[target_loc] != 0) {

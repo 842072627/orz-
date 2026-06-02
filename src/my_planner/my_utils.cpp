@@ -2,6 +2,7 @@
 
 
 #include "my_utils.h"
+#include "../config.h"
 
 namespace MyPlanner{
 int get_d(int diff, const SharedEnvironment* env)  {
@@ -120,7 +121,11 @@ void getNeighborLocs(const Neighbors* ns, int neighbors[], int location) {
 
 bool is_large_map(const SharedEnvironment* env)
 {
+#ifdef LARGE_MAP_CELL_THRESHOLD
+    return env->rows * env->cols > LARGE_MAP_CELL_THRESHOLD;
+#else
     return env->rows * env->cols > 90000;
+#endif
 }
 }
 
