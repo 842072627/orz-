@@ -541,6 +541,9 @@ inline void update_zone24_density(const SharedEnvironment* env) {
     for (int a = 0; a < env->num_of_agents; a++) {
         int loc = env->curr_states[a].location;
         if (loc < 0) continue;
+#if USE_TIDAL_REFUGE
+        if (a < PIBT_Lock::MAX_AGENTS && PIBT_Lock::g_agent_refuge[a]) continue;
+#endif
         if (USE_DENSITY_EXCLUDE_IDLE) {
             if (env->curr_task_schedule[a] < 0) continue;
             if (a < PIBT_Lock::MAX_AGENTS && PIBT_Lock::g_agent_blocked[a]) continue;

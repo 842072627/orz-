@@ -91,6 +91,15 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define TH_GRAD_3           5.72f
 #define TH_GRAD_4           5.72f   // 宽走廊不锁
 
+// ========== Tidal Refuge: 逆流贴边避难 ==========
+#define USE_TIDAL_REFUGE        1   // 0=off, 1=on
+#define TIDAL_WIDTH_TH          5   // p10_width <= 此值视为窄瓶颈
+#define TIDAL_SEARCH_MARGIN     3   // 候选格搜索范围 = 瓶颈长度 × 此值
+
+// ========== Zone heat refuge control (热度疏导阈值) ==========
+#define ZONE_REFUGE_HEAT_ON     45   // zone density >= 此值且上升 → 启用避难疏导
+#define ZONE_REFUGE_HEAT_OFF    15   // zone density < 此值 → 关闭避难疏导
+
 // Runtime strategy name getter (used by TaskScheduler.cpp)
 inline std::string get_orz_strategy() { return ORZ_SCHEDULER; }
 

@@ -24,6 +24,7 @@ namespace PIBT_Lock
 {
     int g_agent_blocked[PIBT_Lock::MAX_AGENTS] = {0};
     int g_parked_task[PIBT_Lock::MAX_AGENTS];
+    int g_agent_refuge[PIBT_Lock::MAX_AGENTS] = {0};
 }
 
 namespace CenterlineAccess {
@@ -32,6 +33,9 @@ namespace CenterlineAccess {
     const std::vector<int>* g_zone_is_main = nullptr;
     const std::vector<int>* g_mp_loc = nullptr;
     const std::vector<int>* g_mp_main_dist = nullptr;
+    const std::vector<int>* g_mp_width_p10 = nullptr;
+    const std::vector<int>* g_mp_lock_dir = nullptr;
+    const std::vector<int>* g_zone24_density = nullptr;
     int g_mp_count = 0;
     int g_n24c = 0;
     int g_n24r = 0;

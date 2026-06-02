@@ -271,6 +271,9 @@ void pre_tick_updates(SharedEnvironment* env) {
     for (int a = 0; a < env->num_of_agents; a++) {
         int tid = env->curr_task_schedule[a];
         if (tid < 0) continue;
+#if USE_TIDAL_REFUGE
+        if (a < PIBT_Lock::MAX_AGENTS && PIBT_Lock::g_agent_refuge[a]) continue;
+#endif
         auto it = env->task_pool.find(tid);
         if (it == env->task_pool.end() || it->second.locations.empty()) continue;
         int a_loc = env->curr_states[a].location;
@@ -305,6 +308,9 @@ void pre_tick_updates(SharedEnvironment* env) {
     for (int a = 0; a < env->num_of_agents; a++) {
         int tid = env->curr_task_schedule[a];
         if (tid >= 0) continue;  // skip agents with tasks (already handled above)
+#if USE_TIDAL_REFUGE
+        if (a < PIBT_Lock::MAX_AGENTS && PIBT_Lock::g_agent_refuge[a]) continue;
+#endif
         int a_loc = env->curr_states[a].location;
         if (a_loc < 0) continue;
         int spawn_loc = env->start_states.at(a).location;
@@ -342,6 +348,9 @@ void pre_tick_updates(SharedEnvironment* env) {
     CenterlineAccess::g_zone_is_main = &Centerline::g_zone_is_main;
     CenterlineAccess::g_mp_loc = &Centerline::g_mp_loc;
     CenterlineAccess::g_mp_main_dist = &Centerline::g_mp_main_dist;
+    CenterlineAccess::g_mp_width_p10 = &Centerline::g_mp_width_p10;
+    CenterlineAccess::g_mp_lock_dir = &Centerline::g_mp_lock_dir;
+    CenterlineAccess::g_zone24_density = &Centerline::g_zone24_density;
     CenterlineAccess::g_mp_count = Centerline::g_mp_count;
     CenterlineAccess::g_n24c = Centerline::g_n24c;
     CenterlineAccess::g_n24r = Centerline::g_n24r;
@@ -363,6 +372,10 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
     // Reset PIBT block flags
     for (int a = 0; a < env->num_of_agents && a < PIBT_Lock::MAX_AGENTS; a++)
         PIBT_Lock::g_agent_blocked[a] = 0;
+#if USE_TIDAL_REFUGE
+    for (int a = 0; a < env->num_of_agents && a < PIBT_Lock::MAX_AGENTS; a++)
+        PIBT_Lock::g_agent_refuge[a] = 0;
+#endif
 
     TimePoint endtime = t0 + std::chrono::milliseconds(limit);
     int cols = env->cols;

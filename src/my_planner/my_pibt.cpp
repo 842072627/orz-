@@ -3,6 +3,7 @@
 
 #include "my_pibt.h"
 #include "../pibt_lock.h"
+#include "../config.h"
 #include <cstdint>
 
 namespace MyPlanner{
@@ -103,9 +104,33 @@ bool causalMY_PIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
 	getNeighborLocs(&(lns.neighbors),neighbors,prev_loc);
 	for (auto& neighbor: neighbors){
 
-		assert(validateMove(prev_loc, neighbor, lns.env));
+	assert(validateMove(prev_loc, neighbor, lns.env));
 
-		int min_heuristic = get_gp_h(lns, curr_id, neighbor);
+	#if USE_TIDAL_REFUGE
+	// Forbids_move: refuge agent must not enter narrow bottleneck cells
+	if (curr_id < PIBT_Lock::MAX_AGENTS && PIBT_Lock::g_agent_refuge[curr_id] &&
+	CenterlineAccess::g_main_dist && CenterlineAccess::g_mp_width_p10 &&
+	CenterlineAccess::g_mp_main_dist && CenterlineAccess::g_mp_count > 0) {
+	int nb_m = (*CenterlineAccess::g_main_dist)[neighbor];
+	if (nb_m >= 0) {
+	bool blocked = false;
+	for (int si = 0; si < CenterlineAccess::g_mp_count; si++) {
+	int w = (*CenterlineAccess::g_mp_width_p10)[si];
+	if (w <= 0 || w > TIDAL_WIDTH_TH) continue;
+	int lo = (*CenterlineAccess::g_mp_main_dist)[si];
+	int hi = lo;
+	while (si+1 < CenterlineAccess::g_mp_count && (*CenterlineAccess::g_mp_width_p10)[si+1] <= TIDAL_WIDTH_TH) {
+	si++; hi = (*CenterlineAccess::g_mp_main_dist)[si];
+	}
+	if (lo > hi) { int t=lo; lo=hi; hi=t; }
+	if (nb_m >= lo && nb_m <= hi) { blocked = true; break; }
+	}
+	if (blocked) continue;  // skip this neighbor
+	}
+	}
+	#endif
+
+	int min_heuristic = get_gp_h(lns, curr_id, neighbor);
 
 		successors.emplace_back(neighbor,min_heuristic,-1,rand());
 	}

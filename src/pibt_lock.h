@@ -9,6 +9,7 @@ namespace PIBT_Lock {
 
     extern int g_agent_blocked[MAX_AGENTS];    // 1 = PIBT should wait, 0 = normal
     extern int g_parked_task[MAX_AGENTS];      // pending second errand task id, -1 = none
+    extern int g_agent_refuge[MAX_AGENTS];     // 1 = agent in refuge (excluded from density/flow stats)
 }
 
 // Centerline data shared with PIBT for wall-hugging (set by scheduler after init)
@@ -18,6 +19,9 @@ namespace CenterlineAccess {
     extern const std::vector<int>* g_zone_is_main;    // [zone_id]
     extern const std::vector<int>* g_mp_loc;          // [si] = main point map location
     extern const std::vector<int>* g_mp_main_dist;    // [si] = main_dist at main point
+    extern const std::vector<int>* g_mp_width_p10;    // [si] = P10 corridor width
+    extern const std::vector<int>* g_mp_lock_dir;     // [si] = direction lock (+1/-1/0)
+    extern const std::vector<int>* g_zone24_density;  // [zid] = live agent count per 24x24 zone
     extern int g_mp_count;
     extern int g_n24c;
     extern int g_n24r;
