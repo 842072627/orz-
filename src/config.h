@@ -41,7 +41,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define FF_TH_BAND_1          1.48f   // threshold for width < 4 (very narrow)
 #define FF_TH_BAND_2          1.48f   // threshold for width 4-12 (narrow)
 #define FF_TH_BAND_3          3.52f    // threshold for width 12-18 (moderate)
-#define FF_TH_BAND_4          9.72f // threshold for width >= 16 (wide, never lock by default)
+#define FF_TH_BAND_4          5.72f // threshold for width >= 16 (wide, never lock by default)
 
 // ========== Active agent ratio lock relaxation ==========
 #define USE_ACTIVE_RATIO_RELAX   true
