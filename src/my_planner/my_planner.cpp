@@ -124,24 +124,26 @@ namespace MyPlanner{
                 }
             }
 
-            // set goals/tasks
-            if (env->goal_locations[i].empty()){
-                trajLNS.tasks[i] = dummy_goals.at(i);
-                local_priority[i] = p_copy[i];
-            }
-            else{
-                trajLNS.tasks[i] = env->goal_locations[i].front().first;
+            // set goals/tasks — refuge agents keep their refuge goal
+#if USE_TIDAL_REFUGE
+            if (i < PIBT_Lock::MAX_AGENTS && PIBT_Lock::g_agent_refuge[i]) {
+                // Refuge agent: goal = refuge zone (scheduler-set), let normal guide path handle it
+                trajLNS.tasks[i] = PIBT_Lock::g_agent_refuge_goal[i];
+            } else
+#endif
+            {
+                if (env->goal_locations[i].empty()){
+                    trajLNS.tasks[i] = dummy_goals.at(i);
+                    local_priority[i] = p_copy[i];
+                }
+                else{
+                    trajLNS.tasks[i] = env->goal_locations[i].front().first;
+                }
             }
 
             // detect guide-path mismatch (goal changed or no guide path)
             require_guide_path[i] = false;
             if (trajLNS.trajs[i].empty() || trajLNS.trajs[i].back() != trajLNS.tasks[i]) {
-#if USE_TIDAL_REFUGE
-                // Don't regenerate path for refuge agents — they need to go to the refuge goal
-                if (i < PIBT_Lock::MAX_AGENTS && PIBT_Lock::g_agent_refuge[i]) {
-                    require_guide_path[i] = false;
-                } else
-#endif
                 require_guide_path[i] = true;
             }
 
@@ -206,6 +208,11 @@ namespace MyPlanner{
         prev_decision.resize(env->map.size(), -1);
         for(int i=0; i<env->num_of_agents; i++)
         {
+#if USE_TIDAL_REFUGE
+            // Refuge agent: keep tasks as refuge goal, don't overwrite
+            if (i < PIBT_Lock::MAX_AGENTS && PIBT_Lock::g_agent_refuge[i]) {
+            } else
+#endif
             if (env->goal_locations[i].empty()){
                 trajLNS.tasks[i] = dummy_goals.at(i);
                 local_priority[i] = p_copy[i];
@@ -304,36 +311,8 @@ namespace MyPlanner{
     }
 
     void tidal_refresh_check(SharedEnvironment* env, const TimePoint* deadline) {
-#if USE_TIDAL_REFUGE
-        // Planner-side: only run A* for agents already marked as refuge by the scheduler
-        // Detection logic moved to strategy_centerline.h (scheduler side)
-        for (int aid = 0; aid < env->num_of_agents; aid++) {
-            if (aid >= PIBT_Lock::MAX_AGENTS) break;
-            if (!PIBT_Lock::g_agent_refuge[aid]) continue;  // only marked agents
-            int goal = PIBT_Lock::g_agent_refuge_goal[aid];
-            if (goal < 0) continue;
-            
-            // Already has a refuge path? skip
-            if (!trajLNS.trajs[aid].empty() && trajLNS.trajs[aid].back() == goal)
-                continue;
-            
-            // Run A* once to set guide path to refuge
-            auto base_traj = trajLNS.trajs[aid];
-            auto base_gn = trajLNS.goal_nodes[aid];
-            int base_task = trajLNS.tasks[aid];
-            
-            remove_traj(trajLNS, aid);
-            trajLNS.tasks[aid] = goal;
-            if (!update_traj(trajLNS, aid, deadline)) {
-                // Failed — restore original
-                trajLNS.tasks[aid] = base_task;
-                trajLNS.trajs[aid] = std::move(base_traj);
-                trajLNS.goal_nodes[aid] = base_gn;
-                add_traj(trajLNS, aid);
-                update_dist_2_path(trajLNS, aid);
-            }
-        }
-#endif
+        // No-op: refuge agent guide path handled by normal update_guide_paths once flow
+        (void)env; (void)deadline;
     }
 
     /**
@@ -428,7 +407,6 @@ namespace MyPlanner{
         initialize_dummy_goals_if_needed(env);
         setup_multistep_episode_state(env, flow_end_time, local_priority);
         update_guide_paths_once_for_multistep(env, flow_end_time);
-        tidal_refresh_check(env, &flow_end_time);
 
         const auto after_setup = std::chrono::steady_clock::now();
         const auto setup_elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(after_setup - episode_start).count();
