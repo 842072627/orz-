@@ -15,6 +15,7 @@ include_directories("src/my_planner")
 
 file(GLOB SOURCES "src/*.cpp" "default_planner/*.cpp" "src/my_planner/*.cpp")
 list(REMOVE_ITEM SOURCES "${CMAKE_SOURCE_DIR}/src/driver_nopython.cpp")
+list(REMOVE_ITEM SOURCES "${CMAKE_SOURCE_DIR}/src/sigint_stub.cpp")
 file(GLOB DEFAULT_PLANNER_SOURCES "default_planner/*.cpp")
 
 
@@ -86,6 +87,7 @@ if(BUILD_TESTS)
         tests/python_interface_test.cpp
         ${PY_BRIDGE_SOURCES}
         ${TEST_SOURCES}
+        src/sigint_stub.cpp
     )
     target_link_libraries(python_interface_test PRIVATE pybind11::embed ${Boost_LIBRARIES})
     add_test(NAME python_interface_test COMMAND python_interface_test
