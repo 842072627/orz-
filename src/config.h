@@ -95,6 +95,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define USE_TIDAL_REFUGE        1   // 0=off, 1=on
 #define TIDAL_WIDTH_TH          5   // p10_width <= 此值视为窄瓶颈
 #define TIDAL_SEARCH_MARGIN     3   // 候选格搜索范围 = 瓶颈长度 × 此值
+#define TIDAL_REFUGE_MAX_DIST   5   // agent距硬编码lane入口≤此main_dist时触发避难reroute
 
 // ========== Zone heat refuge control (热度疏导阈值) ==========
 #define ZONE_REFUGE_HEAT_ON     45   // zone density >= 此值且上升 → 启用避难疏导

@@ -23,6 +23,7 @@
 #include "../pibt_lock.h"
 #include "../config.h"
 #include "../refuge_table.h"
+#include "../lane_dirs.h"
 #include <chrono>
 #include <iostream>
 #include <cmath>
@@ -234,7 +235,7 @@ namespace MyPlanner{
                 double pa = local_priority.at(a);
                 double pb = local_priority.at(b);
 #if USE_TIDAL_REFUGE
-                // Tidal priority: against-flow agents get -delta, like champion planner
+                // Tidal priority: with-flow +1000, counterflow -1000 (champion planner pattern)
                 if (a < PIBT_Lock::MAX_AGENTS && PIBT_Lock::g_agent_refuge[a]) pa -= 1000.0;
                 if (b < PIBT_Lock::MAX_AGENTS && PIBT_Lock::g_agent_refuge[b]) pb -= 1000.0;
 #endif
@@ -297,41 +298,11 @@ namespace MyPlanner{
 
     void tidal_refuge_check(SharedEnvironment* env, const TimePoint* deadline) {
 #if USE_TIDAL_REFUGE
-        // ——— Per-zone refuge heat tracking ———
-        static std::vector<int> s_zone_prev_density;
-        static std::vector<char> s_zone_refuge_active;
-        int n_zones = CenterlineAccess::g_n24r * CenterlineAccess::g_n24c;
-        if ((int)s_zone_prev_density.size() != n_zones) {
-            s_zone_prev_density.assign(n_zones, 0);
-            s_zone_refuge_active.assign(n_zones, 0);
-        }
-        // Update zone refuge status from density
-        if (CenterlineAccess::g_zone24_density && (int)CenterlineAccess::g_zone24_density->size() >= n_zones) {
-            for (int zi = 0; zi < n_zones; zi++) {
-                int d = (*CenterlineAccess::g_zone24_density)[zi];
-                if (d >= ZONE_REFUGE_HEAT_ON && d > s_zone_prev_density[zi])
-                    s_zone_refuge_active[zi] = 1;
-                else if (d < ZONE_REFUGE_HEAT_OFF)
-                    s_zone_refuge_active[zi] = 0;
-                s_zone_prev_density[zi] = d;
-            }
-        }
-
-        // Log active zones every 100 steps
-        if (env->curr_timestep % 100 == 0) {
-            for (int zi = 0; zi < n_zones; zi++) {
-                if (s_zone_refuge_active[zi])
-                    std::cout << "[REFUGE] step=" << env->curr_timestep
-                              << " zone=" << zi
-                              << " density=" << (*CenterlineAccess::g_zone24_density)[zi]
-                              << " prev=" << s_zone_prev_density[zi]
-                              << std::endl;
-            }
-        }
-
-        if (!CenterlineAccess::g_mp_width_p10 || !CenterlineAccess::g_mp_lock_dir ||
-            !CenterlineAccess::g_main_dist || !CenterlineAccess::g_mp_main_dist ||
-            CenterlineAccess::g_mp_count <= 0 || CenterlineAccess::g_n24c <= 0) return;
+        // Hardcoded lane-based refuge: use REFUGE_TABLE + LANE_DIRS 
+        // (hand-labeled narrow corridors from lanes (6).json)
+        // A lane with LANE_DIRS != 0 is always under control — counterflow
+        // agents crossing it get rerouted to the lane's own refuge zone.
+        if (!CenterlineAccess::g_main_dist) return;
         
         for (int aid = 0; aid < env->num_of_agents; aid++) {
             if (aid >= PIBT_Lock::MAX_AGENTS) break;
@@ -342,92 +313,73 @@ namespace MyPlanner{
             int a_m = (*CenterlineAccess::g_main_dist)[agent_loc];
             if (a_m < 0) continue;
             
-            for (int si = 0; si < CenterlineAccess::g_mp_count; si++) {
-                int w = (*CenterlineAccess::g_mp_width_p10)[si];
-                if (w <= 0 || w > TIDAL_WIDTH_TH) continue;
+            for (int ti = 0; ti < LANE_COUNT; ti++) {
+                int lock_dir = LANE_DIRS[ti];
+                if (lock_dir == 0) continue;
                 
-                int seg_end = si;
-                while (seg_end+1 < CenterlineAccess::g_mp_count && 
-                       (*CenterlineAccess::g_mp_width_p10)[seg_end+1] <= TIDAL_WIDTH_TH) seg_end++;
-                int lo_m = (*CenterlineAccess::g_mp_main_dist)[si];
-                int hi_m = (*CenterlineAccess::g_mp_main_dist)[seg_end];
-                if (lo_m > hi_m) { int t=lo_m; lo_m=hi_m; hi_m=t; }
+                int lo_m = REFUGE_TABLE[ti].lo_m;
+                int hi_m = REFUGE_TABLE[ti].hi_m;
+                if (lo_m > hi_m) { int t = lo_m; lo_m = hi_m; hi_m = t; }
                 
-                int lock_dir = (*CenterlineAccess::g_mp_lock_dir)[si];
-                if (lock_dir == 0) { si = seg_end; continue; }
-                if (a_m >= lo_m && a_m <= hi_m) { si = seg_end; continue; }
+                bool is_inside = (a_m >= lo_m && a_m <= hi_m);
+                bool counterflow = false;
                 
-                int dir = (a_m < lo_m) ? 1 : -1;
-                if (dir == lock_dir) { si = seg_end; continue; }
-                
-                // Guide path crosses bottleneck?
-                bool crosses = false;
-                for (auto loc : trajLNS.trajs[aid]) {
-                    if (loc < 0) continue;
-                    int m = (*CenterlineAccess::g_main_dist)[loc];
-                    if (m >= lo_m && m <= hi_m) { crosses = true; break; }
-                }
-                if (!crosses) { si = seg_end; continue; }
-                
-                // ——— Zone heat gate: only apply refuge if the bottleneck's zone is hot and rising ———
-                int mp_loc = (*CenterlineAccess::g_mp_loc)[si];
-                if (mp_loc >= 0) {
-                    int mp_row = mp_loc / env->cols;
-                    int mp_col = mp_loc % env->cols;
-                    int zone_id = (mp_row / 24) * CenterlineAccess::g_n24c + (mp_col / 24);
-                    if (zone_id >= 0 && zone_id < n_zones && !s_zone_refuge_active[zone_id]) {
-                        si = seg_end;  // this bottleneck's zone isn't congested — skip
-                        continue;
+                if (is_inside) {
+                    // Agent inside the lane — check if going the wrong way
+                    int task_m = (*CenterlineAccess::g_main_dist)[trajLNS.tasks[aid]];
+                    if (task_m < 0) continue;
+                    counterflow = (lock_dir > 0) ? (task_m < a_m) : (task_m > a_m);
+                    if (!counterflow) continue;
+                } else {
+                    // Agent outside the lane — check direction toward it
+                    int dir = (a_m < lo_m) ? 1 : -1;
+                    if (dir == lock_dir) continue;
+                    
+                    // Fast distance check first (cheap), before slow path iteration
+                    int nearest_boundary = (a_m < lo_m) ? lo_m : hi_m;
+                    int d = (nearest_boundary > a_m) ? (nearest_boundary - a_m) : (a_m - nearest_boundary);
+                    if (d > TIDAL_REFUGE_MAX_DIST) continue;
+                    
+                    // Only now check if guide path crosses this lane (expensive)
+                    bool crosses = false;
+                    for (auto loc : trajLNS.trajs[aid]) {
+                        if (loc < 0) continue;
+                        int m = (*CenterlineAccess::g_main_dist)[loc];
+                        if (m >= lo_m && m <= hi_m) { crosses = true; break; }
                     }
+                    if (!crosses) continue;
                 }
                 
-                // Find refuge entry closest to agent along main axis, in lock direction
-                int best_ti = -1; int best_d = 999999;
-                for (int ti = 0; ti < REFUGE_TABLE_SIZE; ti++) {
-                    int entry_mid = (REFUGE_TABLE[ti].lo_m + REFUGE_TABLE[ti].hi_m) / 2;
-                    int entry_dir = (a_m < entry_mid) ? 1 : -1;
-                    if (entry_dir != lock_dir) continue;
-                    if (a_m >= REFUGE_TABLE[ti].lo_m && a_m <= REFUGE_TABLE[ti].hi_m) continue;
-                    int boundary = (lock_dir > 0) ? REFUGE_TABLE[ti].lo_m : REFUGE_TABLE[ti].hi_m;
-                    int d = (lock_dir > 0) ? (boundary - a_m) : (a_m - boundary);
-                    if (d < 20) continue;
-                    if (d < best_d) { best_d = d; best_ti = ti; }
-                }
-                if (best_ti < 0) { si = seg_end; continue; }
-                
-                // Get refuge coordinates
-                int rx = (lock_dir > 0) ? REFUGE_TABLE[best_ti].lo_x : REFUGE_TABLE[best_ti].hi_x;
-                int ry = (lock_dir > 0) ? REFUGE_TABLE[best_ti].lo_y : REFUGE_TABLE[best_ti].hi_y;
-                if (rx < 0 || ry < 0) { si = seg_end; continue; }
+                // → counterflow agent (inside or at entrance) → reroute to refuge
+                int rx = (lock_dir > 0) ? REFUGE_TABLE[ti].lo_x : REFUGE_TABLE[ti].hi_x;
+                int ry = (lock_dir > 0) ? REFUGE_TABLE[ti].lo_y : REFUGE_TABLE[ti].hi_y;
+                if (rx < 0 || ry < 0) continue;
                 
                 int target_loc = (ry + 1) * env->cols + (rx + 1);
                 if (target_loc < 0 || target_loc >= (int)env->map.size() || env->map[target_loc] != 0) {
                     target_loc = ry * env->cols + rx;
                     if (target_loc < 0 || target_loc >= (int)env->map.size() || env->map[target_loc] != 0)
-                        { si = seg_end; continue; }
+                        continue;
                 }
                 
-                // === REROUTE GUIDE PATH TO REFUGE (champion planner pattern) ===
-                // Save old guide path
+                // Reroute guide path to refuge (champion planner pattern)
                 auto base_traj = trajLNS.trajs[aid];
                 auto base_gn = trajLNS.goal_nodes[aid];
                 int base_task = trajLNS.tasks[aid];
                 
-                // Remove old path, set refuge as task, compute new path
                 remove_traj(trajLNS, aid);
                 trajLNS.tasks[aid] = target_loc;
                 if (update_traj(trajLNS, aid, deadline)) {
-                    // Refuge path computed successfully — set flag for priority + forbids_move
                     PIBT_Lock::g_agent_refuge[aid] = 1;
+                    break;  // agent handled, move to next
                 } else {
-                    // Restore original guide path
+                    // Restore
                     trajLNS.tasks[aid] = base_task;
                     trajLNS.trajs[aid] = std::move(base_traj);
                     trajLNS.goal_nodes[aid] = base_gn;
                     add_traj(trajLNS, aid);
                     update_dist_2_path(trajLNS, aid);
                 }
-                break;
             }
         }
 #endif
