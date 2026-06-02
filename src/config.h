@@ -89,7 +89,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define TH_GRAD_1           1.72f
 #define TH_GRAD_2           3.72f
 #define TH_GRAD_3           5.72f
-#define TH_GRAD_4           5.72f   // 宽走廊不锁
+#define TH_GRAD_4           100.72f   // 宽走廊不锁
 
 // ========== Tidal Refuge: 逆流贴边避难 ==========
 #define USE_TIDAL_REFUGE        1   // 0=off, 1=on
