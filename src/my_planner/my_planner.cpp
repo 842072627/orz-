@@ -121,22 +121,21 @@ namespace MyPlanner{
                 }
             }
 
-            // set goals/tasks — refuge agents keep their refuge goal
-#if USE_TIDAL_REFUGE
-            if (i < PIBT_Lock::MAX_AGENTS && PIBT_Lock::g_agent_refuge[i]) {
-                // Refuge agent: goal = refuge zone, no guide path update needed
-                trajLNS.tasks[i] = PIBT_Lock::g_agent_refuge_goal[i];
-            } else
-#endif
-            {
-                if (env->goal_locations[i].empty()){
-                    trajLNS.tasks[i] = dummy_goals.at(i);
-                    local_priority[i] = p_copy[i];
-                }
-                else{
-                    trajLNS.tasks[i] = env->goal_locations[i].front().first;
-                }
+            // set goals/tasks — per-tick refuge goal if counterflow
+            if (env->goal_locations[i].empty()){
+                trajLNS.tasks[i] = dummy_goals.at(i);
+                local_priority[i] = p_copy[i];
             }
+            else{
+                trajLNS.tasks[i] = env->goal_locations[i].front().first;
+            }
+#if USE_TIDAL_REFUGE
+            // Persistent refuge override: keep until lock flips
+            if (i < PIBT_Lock::MAX_AGENTS && PIBT_Lock::g_agent_refuge_goal[i] >= 0) {
+                trajLNS.tasks[i] = PIBT_Lock::g_agent_refuge_goal[i];
+                local_priority[i] = REFUGE_PIBT_PENALTY;
+            }
+#endif
 
             // detect guide-path mismatch (goal changed or no guide path)
             require_guide_path[i] = false;
@@ -183,41 +182,12 @@ namespace MyPlanner{
                 std::vector<int> old_traj = trajLNS.trajs[i];
                 if (!trajLNS.trajs[i].empty())
                     remove_traj(trajLNS, i);
-                bool is_refuge = (i < PIBT_Lock::MAX_AGENTS && PIBT_Lock::g_agent_refuge[i]);
                 if (!update_traj(trajLNS, i, &flow_end_time)){
-                    if (is_refuge) {
-                        static FILE* g_refuge_astar_fd = nullptr;
-                        if (!g_refuge_astar_fd) {
-                            g_refuge_astar_fd = fopen("C:/Users/Administrator/.openclaw/workspace/refuge_astar.csv", "w");
-                            if (g_refuge_astar_fd)
-                                fprintf(g_refuge_astar_fd, "tick,aid,start,goal,result\n");
-                        }
-                        if (g_refuge_astar_fd) {
-                            fprintf(g_refuge_astar_fd, "%d,%d,%d,%d,FAIL\n",
-                                    env->curr_timestep, i,
-                                    env->start_states[i].location, trajLNS.tasks[i]);
-                            fflush(g_refuge_astar_fd);
-                        }
-                    }
                     trajLNS.trajs[i] = old_traj;
                     if (!old_traj.empty()){
                         add_traj(trajLNS, i);
                     }
                     break;
-                }
-                if (is_refuge) {
-                    static FILE* g_refuge_astar_fd = nullptr;
-                    if (!g_refuge_astar_fd) {
-                        g_refuge_astar_fd = fopen("C:/Users/Administrator/.openclaw/workspace/refuge_astar.csv", "w");
-                        if (g_refuge_astar_fd)
-                            fprintf(g_refuge_astar_fd, "tick,aid,start,goal,result\n");
-                    }
-                    if (g_refuge_astar_fd) {
-                        fprintf(g_refuge_astar_fd, "%d,%d,%d,%d,OK\n",
-                                env->curr_timestep, i,
-                                env->start_states[i].location, trajLNS.tasks[i]);
-                        fflush(g_refuge_astar_fd);
-                    }
                 }
             }
         }
@@ -233,11 +203,6 @@ namespace MyPlanner{
         prev_decision.resize(env->map.size(), -1);
         for(int i=0; i<env->num_of_agents; i++)
         {
-#if USE_TIDAL_REFUGE
-            // Refuge agent: keep tasks as refuge goal, don't overwrite
-            if (i < PIBT_Lock::MAX_AGENTS && PIBT_Lock::g_agent_refuge[i]) {
-            } else
-#endif
             if (env->goal_locations[i].empty()){
                 trajLNS.tasks[i] = dummy_goals.at(i);
                 local_priority[i] = p_copy[i];
@@ -246,6 +211,13 @@ namespace MyPlanner{
                 trajLNS.tasks[i] = env->goal_locations[i].front().first;
                 local_priority[i] = local_priority[i] + 1;
             }
+#if USE_TIDAL_REFUGE
+            // Persistent refuge override (same as setup)
+            if (i < PIBT_Lock::MAX_AGENTS && PIBT_Lock::g_agent_refuge_goal[i] >= 0) {
+                trajLNS.tasks[i] = PIBT_Lock::g_agent_refuge_goal[i];
+                local_priority[i] = REFUGE_PIBT_PENALTY;
+            }
+#endif
 
             assert(env->start_states[i].location >=0);
             prev_states[i] = env->start_states[i];
@@ -273,11 +245,6 @@ namespace MyPlanner{
         std::sort(ids.begin(), ids.end(), [&](int a, int b) {
                 double pa = local_priority.at(a);
                 double pb = local_priority.at(b);
-#if USE_TIDAL_REFUGE
-                // Tidal priority: refuge agent priority penalty (configurable)
-                if (a < PIBT_Lock::MAX_AGENTS && PIBT_Lock::g_agent_refuge[a]) pa += REFUGE_PIBT_PENALTY;
-                if (b < PIBT_Lock::MAX_AGENTS && PIBT_Lock::g_agent_refuge[b]) pb += REFUGE_PIBT_PENALTY;
-#endif
                 return pa > pb;
             }
         );

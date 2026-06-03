@@ -105,6 +105,24 @@ bool causalMY_PIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
 
 		assert(validateMove(prev_loc, neighbor, lns.env));
 
+#if USE_TIDAL_REFUGE
+		// forbids_move: refuge agent outside corridor cannot enter
+		if (curr_id < PIBT_Lock::MAX_AGENTS && PIBT_Lock::g_agent_refuge_goal[curr_id] >= 0) {
+			int lo = PIBT_Lock::g_agent_refuge_lo_m[curr_id];
+			int hi = PIBT_Lock::g_agent_refuge_hi_m[curr_id];
+			if (lo >= 0 && hi >= 0 && CenterlineAccess::g_main_dist) {
+				int a_m = (*CenterlineAccess::g_main_dist)[prev_loc];
+				int n_m = (*CenterlineAccess::g_main_dist)[neighbor];
+				if (a_m >= 0 && n_m >= 0) {
+					bool outside = (a_m < lo || a_m > hi);
+					bool entering = (n_m >= lo && n_m <= hi);
+					if (outside && entering)
+						continue;  // skip: forbidden entry into corridor
+				}
+			}
+		}
+#endif
+
 		int min_heuristic = get_gp_h(lns, curr_id, neighbor);
 
 		successors.emplace_back(neighbor,min_heuristic,-1,rand());

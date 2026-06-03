@@ -30,7 +30,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 
 // ========== Future flow direction lock (pure prediction, per-width thresholds) ==========
 #define FUTURE_FLOW_LOCK_TH   1.72f    // baseline threshold for wide corridors
-#define FUTURE_FLOW_LOCK_SPREAD 0       // lock radius: 0 = no propagation, each MP independent
+#define FUTURE_FLOW_LOCK_SPREAD 2       // lock radius: 0 = no propagation, each MP independent
 #define FUTURE_FLOW_BRANCH_PENALTY  0.6f
 #define FUTURE_FLOW_BRANCH_OFFSET   14
 
@@ -38,8 +38,8 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define WIDTH_BAND_1          4       // width < 4: very narrow
 #define WIDTH_BAND_2          12       // width 4-8: narrow
 #define WIDTH_BAND_3          18      // width 9-15: moderate
-#define FF_TH_BAND_1          1.42f   // threshold for width < 4 (very narrow)
-#define FF_TH_BAND_2          1.42f   // threshold for width 4-12 (narrow)
+#define FF_TH_BAND_1          1.62f   // threshold for width < 4 (very narrow)
+#define FF_TH_BAND_2          1.62f   // threshold for width 4-12 (narrow)
 #define FF_TH_BAND_3          3.52f    // threshold for width 12-18 (moderate)
 #define FF_TH_BAND_4          5.72f // threshold for width >= 16 (wide, never lock by default)
 
@@ -77,9 +77,10 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define USE_TIDAL_REFUGE        1   // 0=off, 1=on
 #define TIDAL_REFUGE_MAX_DIST   5   // agent距硬编码lane入口≤此main_dist时触发避难reroute
 #define TIDAL_REFUGE_ZONE_EXPAND     10  // 窄道main_dist范围外扩多少视为控制区
+#define TIDAL_REFUGE_FORBIDS_DIST 10  // 禁区外扩距离：入口外此距离内的细胞禁止逆流进入
 #define MICRO_VOTE_PERIOD       80  // 微观锁投票周期（tick）
 #define MICRO_HYSTERESIS        2.0f // 微观锁翻转阈值倍数
-#define REFUGE_PIBT_PENALTY     0   // refuge agent PIBT减权(0=关闭, -1000=冠军planner模式)
+#define REFUGE_PIBT_PENALTY     -1000   // PIBT优先级惩罚值（持久避难agent）
 
 // ========== Debug ==========
 #define TIDAL_REFUGE_DEBUG_INTERVAL 500  // 每多少tick打印一次debug

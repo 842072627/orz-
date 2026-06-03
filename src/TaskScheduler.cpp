@@ -24,10 +24,24 @@ namespace PIBT_Lock
 {
     int g_agent_blocked[PIBT_Lock::MAX_AGENTS] = {0};
     int g_parked_task[PIBT_Lock::MAX_AGENTS];
-    int g_agent_refuge[PIBT_Lock::MAX_AGENTS] = {0};
+    
     int g_agent_refuge_goal[PIBT_Lock::MAX_AGENTS];
     int g_agent_refuge_lane[PIBT_Lock::MAX_AGENTS];
     int g_agent_refuge_lock_dir[PIBT_Lock::MAX_AGENTS];
+    int g_agent_refuge_lo_m[PIBT_Lock::MAX_AGENTS];
+    int g_agent_refuge_hi_m[PIBT_Lock::MAX_AGENTS];
+    
+    // Static init: all refuge arrays default to -1/0
+    static bool _refuge_init = []() {
+        for (int i = 0; i < PIBT_Lock::MAX_AGENTS; i++) {
+            g_agent_refuge_goal[i] = -1;
+            g_agent_refuge_lane[i] = -1;
+            g_agent_refuge_lock_dir[i] = 0;
+            g_agent_refuge_lo_m[i] = -1;
+            g_agent_refuge_hi_m[i] = -1;
+        }
+        return true;
+    }();
 }
 
 namespace CenterlineAccess {

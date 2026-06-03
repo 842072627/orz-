@@ -9,10 +9,13 @@ namespace PIBT_Lock {
 
     extern int g_agent_blocked[MAX_AGENTS];    // 1 = PIBT should wait, 0 = normal
     extern int g_parked_task[MAX_AGENTS];      // pending second errand task id, -1 = none
-    extern int g_agent_refuge[MAX_AGENTS];     // 1 = agent in refuge (excluded from density/flow stats)
-    extern int g_agent_refuge_goal[MAX_AGENTS]; // refuge target grid cell, -1 = none
-    extern int g_agent_refuge_lane[MAX_AGENTS]; // which lane agent is bound to, -1 = none
-    extern int g_agent_refuge_lock_dir[MAX_AGENTS]; // lock_dir at binding time, 0 = none
+    
+    // Persistent refuge state (set by scheduler, cleared only when lock flips)
+    extern int g_agent_refuge_goal[MAX_AGENTS];      // refuge cell location, -1 = none
+    extern int g_agent_refuge_lane[MAX_AGENTS];      // bound lane index, -1 = none
+    extern int g_agent_refuge_lock_dir[MAX_AGENTS];  // lock direction at assignment, 0 = none
+    extern int g_agent_refuge_lo_m[MAX_AGENTS];      // forbidden main_dist lo (lane corridor)
+    extern int g_agent_refuge_hi_m[MAX_AGENTS];      // forbidden main_dist hi (lane corridor)
 }
 
 // Centerline data shared with PIBT for wall-hugging (set by scheduler after init)

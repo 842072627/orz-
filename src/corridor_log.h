@@ -106,7 +106,7 @@ inline void log_tick(SharedEnvironment* env) {
     // Refuge stats
     int n_refuge = 0;
     for (int a = 0; a < n_agents && a < PIBT_Lock::MAX_AGENTS; a++) {
-        if (PIBT_Lock::g_agent_refuge[a]) n_refuge++;
+        if (PIBT_Lock::g_agent_refuge_goal[a] >= 0) n_refuge++;
     }
     
     fprintf(g_fd, "%d,%d,%d,%.1f,%d,%.0f,%.1f,%d,%d,%d\n",
