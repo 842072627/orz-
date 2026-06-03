@@ -98,8 +98,8 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define TIDAL_REFUGE_MAX_DIST   5   // agent距硬编码lane入口≤此main_dist时触发避难reroute
 
 // ========== Zone heat refuge control (热度疏导阈值) ==========
-#define ZONE_REFUGE_HEAT_ON     45   // zone density >= 此值且上升 → 启用避难疏导
-#define ZONE_REFUGE_HEAT_OFF    15   // zone density < 此值 → 关闭避难疏导
+#define ZONE_REFUGE_HEAT_ON     40   // zone density >= 此值且上升 → 启用避难疏导
+#define ZONE_REFUGE_HEAT_OFF    25   // zone density < 此值 → 关闭避难疏导
 
 // Runtime strategy name getter (used by TaskScheduler.cpp)
 inline std::string get_orz_strategy() { return ORZ_SCHEDULER; }
