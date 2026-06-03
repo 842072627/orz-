@@ -36,12 +36,22 @@ static std::vector<int> g_parked_task;
 // Check if a task chain (agent_loc → task_locations) crosses a lane
 // Returns: 1 = crossing ↑ through lane, -1 = crossing ↓, 0 = no crossing
 static inline int task_chain_crosses_lane(int a_loc, const std::vector<int>& locs,
-    int lane_lo, int lane_hi, int cols) {
+    int lane_lo, int lane_hi, int cols, int start_idx = 0) {
     int prev_m, prev_b;
     Centerline::project(a_loc, prev_m, prev_b);
-    if (prev_m < 0) return 0;
     
-    for (auto& loc : locs) {
+    // If agent is off-main (branch), scan forward for first task location on main line
+    if (prev_m < 0) {
+        for (size_t ei = (size_t)start_idx; ei < locs.size(); ei++) {
+            int tm, tb;
+            Centerline::project(locs[ei], tm, tb);
+            if (tm >= 0) { prev_m = tm; break; }
+        }
+        if (prev_m < 0) return 0;  // nothing on main line, can't cross lane
+    }
+    
+    for (size_t ei = (size_t)start_idx; ei < locs.size(); ei++) {
+        int loc = locs[ei];
         int tm, tb;
         Centerline::project(loc, tm, tb);
         if (tm < 0) continue;
@@ -72,11 +82,13 @@ static int g_lane_assign_down[REFUGE_TABLE_SIZE] = {0};
 // Current tick's proposals (updated in real-time during assignment)
 static int g_lane_proposal_up[REFUGE_TABLE_SIZE] = {0};
 static int g_lane_proposal_down[REFUGE_TABLE_SIZE] = {0};
+// Lane guard expansion: agents within this main_dist of lane entrance are guarded
+static constexpr int LANE_GUARD_EXPAND = 24;
 
 // Update lane proposal counters after assigning a task to an agent (real-time, prevents same-tick conflict)
 static inline void update_lane_proposals(int a_loc, const std::vector<int>& locs, int cols) {
     for (int ti = 0; ti < REFUGE_TABLE_SIZE; ti++) {
-        int lo = REFUGE_TABLE[ti].lo_m, hi = REFUGE_TABLE[ti].hi_m;
+        int lo = REFUGE_TABLE[ti].lo_m - LANE_GUARD_EXPAND, hi = REFUGE_TABLE[ti].hi_m + LANE_GUARD_EXPAND;
         if (lo > hi) std::swap(lo, hi);
         int dir = task_chain_crosses_lane(a_loc, locs, lo, hi, cols);
         if (dir > 0) g_lane_proposal_up[ti]++;
@@ -208,24 +220,28 @@ static inline float base_score(int a_loc, int tid, SharedEnvironment* env, int s
     if (start_idx == 0) {
         int a_m_check, a_b_check;
         Centerline::project(a_loc, a_m_check, a_b_check);
-        if (a_m_check >= 0) {
-            for (int ti = 0; ti < REFUGE_TABLE_SIZE; ti++) {
-                int lane_dir = g_lane_assign_dir[ti];
-                if (lane_dir == 0) continue;
-                int lo = REFUGE_TABLE[ti].lo_m, hi = REFUGE_TABLE[ti].hi_m;
+        // Check using available main_dist data (agents in branches still need checking)
+        for (int ti = 0; ti < REFUGE_TABLE_SIZE; ti++) {
+                int lo = REFUGE_TABLE[ti].lo_m - LANE_GUARD_EXPAND, hi = REFUGE_TABLE[ti].hi_m + LANE_GUARD_EXPAND;
                 if (lo > hi) std::swap(lo, hi);
                 int cross_dir = task_chain_crosses_lane(a_loc, locs, lo, hi, env->cols);
                 if (cross_dir != 0) {
-                    // Combined: existing + proposals + this potential assignment
+                    // Combined: existing assignments + this tick's proposals
+                    // Check unconditionally — proposals prevent same-tick reverse assignment
+                    // even when lane_dir == 0 (first tick or collision recovery)
                     int total_up = g_lane_assign_up[ti] + g_lane_proposal_up[ti];
                     int total_down = g_lane_assign_down[ti] + g_lane_proposal_down[ti];
+                    // Block if ANY assignment/proposal exists in the opposite direction
+                    // (including proposals from earlier agents in THIS tick's phase 2 loop)
                     if (cross_dir > 0 && total_down > 0) return -1e9f;
                     if (cross_dir < 0 && total_up > 0) return -1e9f;
+                    // Also block if BOTH directions already have proposals (means locked lane is saturated)
+                    if (total_up > 0 && total_down > 0) return -1e9f;
                 }
             }
         }
-    }
 
+#if 0
     // Future flow exemption
     {
         int a_m, a_b;
@@ -279,6 +295,7 @@ static inline float base_score(int a_loc, int tid, SharedEnvironment* env, int s
             }
         }
     }
+#endif
 
     // Branch task check
     {
@@ -308,70 +325,17 @@ static inline float base_score(int a_loc, int tid, SharedEnvironment* env, int s
     }
 
     // ====== 统一任务评分 ======
-    // 加权距离之和 → 分数
+    // 纯BFS距离分配（lane锁+垃圾排除以外无任何惩罚）
     int a_m, a_b;
     Centerline::project(a_loc, a_m, a_b);
     if (a_m < 0) return 1.0f;
     float weighted_dist = 0.0f;
-    int global_d_max = 0;
-    float global_worst_align = 1.0f;
-    int prev_m = a_m, prev_b = a_b;
     int prev_loc = a_loc;
-    int a_zone = -1;
-#if EXCLUDE_AGENT_ZONE
-    a_zone = (a_loc / g_env->cols / 24) * Centerline::g_n24c + (a_loc % g_env->cols / 24);
-#endif
 
     for (size_t ei = (size_t)start_idx; ei < locs.size(); ei++) {
-        int tm, tb;
-        Centerline::project(locs[ei], tm, tb);
-        if (tm < 0) continue;
-
-        int lo = std::min(prev_m, tm);
-        int hi = std::max(prev_m, tm);
-        int intent = (tm > prev_m) ? +1 : -1;
-
-        int d_max_seg = 0;
-        float best_align = 1.0f;
-        auto lo_it = std::lower_bound(Centerline::g_mp_main_dist.begin(), Centerline::g_mp_main_dist.end(), lo);
-        auto hi_it = std::upper_bound(Centerline::g_mp_main_dist.begin(), Centerline::g_mp_main_dist.end(), hi);
-        for (int si = (int)(lo_it - Centerline::g_mp_main_dist.begin());
-             si < (int)(hi_it - Centerline::g_mp_main_dist.begin()); si++) {
-#if EXCLUDE_AGENT_ZONE
-            if (a_zone >= 0) {
-                int mloc = Centerline::g_mp_loc[si];
-                if (mloc >= 0) {
-                    int mp_z = (mloc / g_env->cols / 24) * Centerline::g_n24c + (mloc % g_env->cols / 24);
-                    if (mp_z == a_zone) continue;
-                }
-            }
-#endif
-            int d = Centerline::g_mp_density[si];
-            if (Centerline::g_mp_lock_dir[si] != 0 && Centerline::g_mp_lock_dir[si] != intent) {
-                g_dbg_dirlock++;
-                return -1e9f;
-            }
-            if (USE_DENSITY_HARD_CAP && d >= DENSITY_HARD_CAP)
-                return -1e9f;
-            if (d > d_max_seg) d_max_seg = d;
-            float fr = Centerline::g_mp_future_right[si];
-            float fl = Centerline::g_mp_future_left[si];
-            float ftotal = fr + fl;
-            if (ftotal >= 2.0f) {
-                float align = (intent > 0) ? (fr / ftotal) : (fl / ftotal);
-                if (align < best_align) best_align = align;
-            }
-        }
-
-        // 统一加权距离累加
         float seg_dist = (float)unified_dist(prev_loc, locs[ei]);
         float coeff = (ei == (size_t)start_idx) ? COEFF_AGENT_TASK1 : COEFF_TASK_SEGMENT;
         weighted_dist += seg_dist * coeff;
-
-        if (d_max_seg > global_d_max) global_d_max = d_max_seg;
-        if (best_align < global_worst_align) global_worst_align = best_align;
-
-        prev_m = tm; prev_b = tb;
         prev_loc = locs[ei];
     }
 
@@ -380,15 +344,6 @@ static inline float base_score(int a_loc, int tid, SharedEnvironment* env, int s
     if (weighted_dist > MAX_TASK_SEGMENT_DIST) {
         float penalty = (float)MAX_TASK_SEGMENT_DIST / weighted_dist;
         final_score *= penalty * penalty;
-    }
-    if (global_d_max > ROUTE_THRESHOLD) {
-        int idx = (global_d_max > 40) ? 40 : global_d_max;
-        final_score /= DIVISOR_TABLE[idx - ROUTE_THRESHOLD];
-    }
-    if (global_worst_align < 0.7f) {
-        float pen = (0.7f - global_worst_align) * 0.5f;
-        if (pen > 0.35f) pen = 0.35f;
-        final_score *= (1.0f - pen);
     }
     return final_score;
 }
@@ -405,6 +360,7 @@ void pre_tick_updates(SharedEnvironment* env) {
         CenterlineAccess::active_ratio = (float)active / (float)env->num_of_agents;
     }
 
+#if 0
     std::fill(Centerline::g_mp_future_right.begin(), Centerline::g_mp_future_right.end(), 0.0f);
     std::fill(Centerline::g_mp_future_left.begin(),  Centerline::g_mp_future_left.end(),  0.0f);
 
@@ -430,6 +386,7 @@ void pre_tick_updates(SharedEnvironment* env) {
     }
 
     Centerline::update_mp_direction(env);
+#endif
 
     CenterlineAccess::g_branch_dist   = &Centerline::g_branch_dist;
     CenterlineAccess::g_main_dist     = &Centerline::g_main_dist;
@@ -478,9 +435,10 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
         int a_loc = env->curr_states[a].location;
         if (a_loc < 0) continue;
         for (int ti = 0; ti < REFUGE_TABLE_SIZE; ti++) {
-            int lo = REFUGE_TABLE[ti].lo_m, hi = REFUGE_TABLE[ti].hi_m;
+            int lo = REFUGE_TABLE[ti].lo_m - LANE_GUARD_EXPAND;
+            int hi = REFUGE_TABLE[ti].hi_m + LANE_GUARD_EXPAND;
             if (lo > hi) std::swap(lo, hi);
-            int dir = task_chain_crosses_lane(a_loc, it->second.locations, lo, hi, cols);
+            int dir = task_chain_crosses_lane(a_loc, it->second.locations, lo, hi, cols, it->second.idx_next_loc);
             if (dir > 0) g_lane_assign_up[ti]++;
             else if (dir < 0) g_lane_assign_down[ti]++;
         }
@@ -653,6 +611,7 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
                         update_lane_proposals(a_loc, tsk->second.locations, cols);
                     }
                 }
+#if 0
                 // Per-assignment future flow update + instant lock
                 {
                     auto tsk = env->task_pool.find(best_tid);
@@ -660,6 +619,7 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
                         add_agent_future_flow(a_loc, tsk->second.locations, env, true);
                     }
                 }
+#endif
 
                 auto tit = env->task_pool.find(best_tid);
                 if (tit != env->task_pool.end())
