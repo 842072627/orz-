@@ -25,6 +25,12 @@ namespace strategy_centerline {
 static int g_lane_mp_first[REFUGE_TABLE_SIZE];
 static int g_lane_mp_last[REFUGE_TABLE_SIZE];
 
+// Per-lane micro direction lock (independent of macro g_mp_lock_dir)
+static int g_micro_lock_dir[REFUGE_TABLE_SIZE] = {0};
+static int g_micro_vote_down[REFUGE_TABLE_SIZE] = {0};
+static int g_micro_vote_up[REFUGE_TABLE_SIZE] = {0};
+static int g_micro_phase_start_tick[REFUGE_TABLE_SIZE] = {0};
+
 static constexpr int ROUTE_THRESHOLD = 20;
 static constexpr float DIVISOR_TABLE[21] = {
     1.0f, 1.1f, 1.2f, 1.3f, 1.4f,
@@ -171,11 +177,80 @@ void init(SharedEnvironment* env) {
 #endif
 }
 
+// ——— Per-lane micro direction vote (independent of macro lock) ———
+static void update_micro_vote(SharedEnvironment* env, const std::vector<int>& proposed_schedule) {
+#if USE_TIDAL_REFUGE
+    int ts = env->curr_timestep;
+    int period = MICRO_VOTE_PERIOD;
+    int phase_start = (ts / period) * period;
+    
+    // 1. Decision at period boundary
+    for (int ti = 0; ti < REFUGE_TABLE_SIZE; ti++) {
+        if (g_micro_phase_start_tick[ti] == phase_start) continue;
+        int down = g_micro_vote_down[ti];
+        int up = g_micro_vote_up[ti];
+        int cur = g_micro_lock_dir[ti];
+        
+        if (cur == 0) {
+            if (down > up) g_micro_lock_dir[ti] = 1;
+            else if (up > down) g_micro_lock_dir[ti] = -1;
+            else g_micro_lock_dir[ti] = (rand() % 2) ? 1 : -1;
+        } else if (cur > 0) {
+            if (up > (int)(MICRO_HYSTERESIS * down))
+                g_micro_lock_dir[ti] = -1;
+        } else {
+            if (down > (int)(MICRO_HYSTERESIS * up))
+                g_micro_lock_dir[ti] = 1;
+        }
+        
+        g_micro_phase_start_tick[ti] = phase_start;
+        g_micro_vote_down[ti] = 0;
+        g_micro_vote_up[ti] = 0;
+    }
+    
+    // 2. Count votes from agents near each lane
+    for (int a = 0; a < env->num_of_agents; a++) {
+        int a_loc = env->curr_states[a].location;
+        if (a_loc < 0) continue;
+        int a_m, a_b;
+        Centerline::project(a_loc, a_m, a_b);
+        if (a_m < 0 || std::abs(a_b) > 20) continue;
+        
+        int tid = proposed_schedule[a];
+        if (tid < 0) tid = env->curr_task_schedule[a];
+        if (tid < 0) continue;
+        auto it = env->task_pool.find(tid);
+        if (it == env->task_pool.end() || it->second.locations.empty()) continue;
+        if (it->second.idx_next_loc >= (int)it->second.locations.size()) continue;
+        
+        int g_m, g_b;
+        Centerline::project(it->second.locations[it->second.idx_next_loc], g_m, g_b);
+        if (g_m < 0) continue;
+        
+        for (int ti = 0; ti < REFUGE_TABLE_SIZE; ti++) {
+            int lo_m = REFUGE_TABLE[ti].lo_m;
+            int hi_m = REFUGE_TABLE[ti].hi_m;
+            if (lo_m > hi_m) { int t = lo_m; lo_m = hi_m; hi_m = t; }
+            int expand = TIDAL_REFUGE_ZONE_EXPAND;
+            if (a_m < lo_m - expand || a_m > hi_m + expand) continue;
+            
+            int lo = std::min(a_m, g_m);
+            int hi = std::max(a_m, g_m);
+            if (hi < lo_m || lo > hi_m) continue;
+            
+            int intent = (g_m > a_m) ? 1 : -1;
+            if (intent > 0) g_micro_vote_down[ti]++;
+            else g_micro_vote_up[ti]++;
+            break;  // one agent votes for at most one lane
+        }
+    }
+#endif
+}
+
 // ——— Tidal refuge detection ———
 // Agent物理在窄道zone+expand内 → agent→current goal 1D路径穿过窄道 → 方向锁反向 → 标记难民
 // Ref: agent is bound to a lane; released when lock_dir changes or becomes 0
 void detect_refuge(SharedEnvironment* env, const std::vector<int>& proposed_schedule) {
-#if USE_TIDAL_REFUGE
     int cols = env->cols;
     int n_agents = env->num_of_agents;
     if (n_agents > PIBT_Lock::MAX_AGENTS) n_agents = PIBT_Lock::MAX_AGENTS;
@@ -187,16 +262,8 @@ void detect_refuge(SharedEnvironment* env, const std::vector<int>& proposed_sche
         if (ti < 0 || ti >= REFUGE_TABLE_SIZE) { PIBT_Lock::g_agent_refuge[a] = 0; continue; }
         int saved_dir = PIBT_Lock::g_agent_refuge_lock_dir[a];
         
-        // Scan bound lane's current lock_dir
-        int cur_lock = 0;
-        if (g_lane_mp_first[ti] >= 0) {
-            for (int si = g_lane_mp_first[ti]; si <= g_lane_mp_last[ti]; si++) {
-                if (Centerline::g_mp_lock_dir[si] != 0) {
-                    cur_lock = Centerline::g_mp_lock_dir[si];
-                    break;
-                }
-            }
-        }
+        // Check micro lock for this lane
+        int cur_lock = g_micro_lock_dir[ti];
         // Release if: lock gone (cur_lock==0) OR direction changed (cur_lock != saved_dir)
         if (cur_lock == 0 || cur_lock != saved_dir) {
             PIBT_Lock::g_agent_refuge[a] = 0;
@@ -240,16 +307,8 @@ void detect_refuge(SharedEnvironment* env, const std::vector<int>& proposed_sche
             int expand = TIDAL_REFUGE_ZONE_EXPAND;
             if (a_m < lo_m - expand || a_m > hi_m + expand) continue;
             
-            // 动态方向锁（预计算mp范围）
-            int lock_dir = 0;
-            if (g_lane_mp_first[ti] >= 0) {
-                for (int si = g_lane_mp_first[ti]; si <= g_lane_mp_last[ti]; si++) {
-                    if (Centerline::g_mp_lock_dir[si] != 0) {
-                        lock_dir = Centerline::g_mp_lock_dir[si];
-                        break;
-                    }
-                }
-            }
+            // 微观方向锁
+            int lock_dir = g_micro_lock_dir[ti];
             if (lock_dir == 0) continue;
             
             // Agent→current goal 1D路径穿过窄道？
@@ -261,16 +320,31 @@ void detect_refuge(SharedEnvironment* env, const std::vector<int>& proposed_sche
             int intent = (g_m > a_m) ? 1 : -1;
             if (lock_dir == intent) continue;
             
-            // Counterflow → 标记难民 + 绑定lane
-            int rx = (lock_dir > 0) ? REFUGE_TABLE[ti].hi_x : REFUGE_TABLE[ti].lo_x;
-            int ry = (lock_dir > 0) ? REFUGE_TABLE[ti].hi_y : REFUGE_TABLE[ti].lo_y;
-            if (rx < 0 || ry < 0) continue;
-            int target_loc = (ry + 1) * cols + (rx + 1);
-            if (target_loc < 0 || target_loc >= (int)env->map.size() || env->map[target_loc] != 0) {
-                target_loc = ry * cols + rx;
-                if (target_loc < 0 || target_loc >= (int)env->map.size() || env->map[target_loc] != 0)
-                    continue;
+            // 顺着锁方向找最近的一块避难区（在整个矩形区域内搜索）
+            int target_loc = -1;
+            int best_dist = 999999;
+            int x_lo = REFUGE_TABLE[ti].lo_x, y_lo = REFUGE_TABLE[ti].lo_y;
+            int x_hi = REFUGE_TABLE[ti].hi_x, y_hi = REFUGE_TABLE[ti].hi_y;
+            if (x_lo < 0 || y_lo < 0) { x_lo = x_hi; y_lo = y_hi; }
+            if (x_hi < 0 || y_hi < 0) { x_hi = x_lo; y_hi = y_lo; }
+            if (x_lo > x_hi) std::swap(x_lo, x_hi);
+            if (y_lo > y_hi) std::swap(y_lo, y_hi);
+            for (int rx = x_lo; rx <= x_hi; rx++) {
+                for (int ry = y_lo; ry <= y_hi; ry++) {
+                    int cloc = ry * cols + rx;
+                    if (cloc < 0 || cloc >= (int)env->map.size() || env->map[cloc] != 0)
+                        continue;
+                    int cm, cb;
+                    Centerline::project(cloc, cm, cb);
+                    if (cm < 0) continue;
+                    int diff = (lock_dir > 0) ? (cm - a_m) : (a_m - cm);
+                    if (diff >= 0 && diff < best_dist) {
+                        best_dist = diff;
+                        target_loc = cloc;
+                    }
+                }
             }
+            if (target_loc < 0) continue;
             PIBT_Lock::g_agent_refuge[a] = 1;
             PIBT_Lock::g_agent_refuge_goal[a] = target_loc;
             PIBT_Lock::g_agent_refuge_lane[a] = ti;
@@ -278,7 +352,6 @@ void detect_refuge(SharedEnvironment* env, const std::vector<int>& proposed_sche
             break;
         }
     }
-#endif
 }
 
 // ====== base_score ======
@@ -475,9 +548,6 @@ void pre_tick_updates(SharedEnvironment* env) {
     for (int a = 0; a < env->num_of_agents; a++) {
         int tid = env->curr_task_schedule[a];
         if (tid < 0) continue;
-#if USE_TIDAL_REFUGE
-        if (a < PIBT_Lock::MAX_AGENTS && PIBT_Lock::g_agent_refuge[a]) continue;
-#endif
         auto it = env->task_pool.find(tid);
         if (it == env->task_pool.end() || it->second.locations.empty()) continue;
         int a_loc = env->curr_states[a].location;
@@ -676,9 +746,6 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
             if (best_tid >= 0) {
                 proposed_schedule[a] = best_tid;
                 // Per-assignment future flow update + instant lock
-#if USE_TIDAL_REFUGE
-                if (!(a < PIBT_Lock::MAX_AGENTS && PIBT_Lock::g_agent_refuge[a]))
-#endif
                 {
                     auto tsk = env->task_pool.find(best_tid);
                     if (tsk != env->task_pool.end() && !tsk->second.locations.empty()) {
@@ -757,6 +824,7 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
 #endif
 
 #if USE_TIDAL_REFUGE
+    update_micro_vote(env, proposed_schedule);
     detect_refuge(env, proposed_schedule);
 #endif
 }

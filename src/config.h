@@ -77,6 +77,9 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define USE_TIDAL_REFUGE        1   // 0=off, 1=on
 #define TIDAL_REFUGE_MAX_DIST   5   // agent距硬编码lane入口≤此main_dist时触发避难reroute
 #define TIDAL_REFUGE_ZONE_EXPAND     10  // 窄道main_dist范围外扩多少视为控制区
+#define MICRO_VOTE_PERIOD       80  // 微观锁投票周期（tick）
+#define MICRO_HYSTERESIS        2.0f // 微观锁翻转阈值倍数
+#define TIDAL_REFUGE_CLEAR_TRAJ_DIST 1  // refuge agent清空旧traj_dist让启发式指向避难格
 
 // ========== Debug ==========
 #define TIDAL_REFUGE_DEBUG_INTERVAL 500  // 每多少tick打印一次debug

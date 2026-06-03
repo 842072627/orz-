@@ -124,7 +124,7 @@ namespace MyPlanner{
             // set goals/tasks — refuge agents keep their refuge goal
 #if USE_TIDAL_REFUGE
             if (i < PIBT_Lock::MAX_AGENTS && PIBT_Lock::g_agent_refuge[i]) {
-                // Refuge agent: goal = refuge zone (scheduler-set), let normal guide path handle it
+                // Refuge agent: goal = refuge zone, no guide path update needed
                 trajLNS.tasks[i] = PIBT_Lock::g_agent_refuge_goal[i];
             } else
 #endif
@@ -140,8 +140,19 @@ namespace MyPlanner{
 
             // detect guide-path mismatch (goal changed or no guide path)
             require_guide_path[i] = false;
-            if (trajLNS.trajs[i].empty() || trajLNS.trajs[i].back() != trajLNS.tasks[i])
+            if (trajLNS.trajs[i].empty() || trajLNS.trajs[i].back() != trajLNS.tasks[i]) {
+#if USE_TIDAL_REFUGE
+                // Refuge agent: don't waste budget on guide path A* to refuge zone
+                if (i < PIBT_Lock::MAX_AGENTS && PIBT_Lock::g_agent_refuge[i]) {
+                    require_guide_path[i] = false;
+#if TIDAL_REFUGE_CLEAR_TRAJ_DIST
+                    // Clear old traj_dist so PIBT heuristic uses refuge_goal, not the old path
+                    trajLNS.traj_dists[i].clear();
+#endif
+                } else
+#endif
                 require_guide_path[i] = true;
+            }
 
             // update per-agent transient planning state
             assert(env->start_states[i].location >=0);
