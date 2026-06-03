@@ -8,6 +8,7 @@
 #include "pibt_lock.h"
 #include "idle_cap.h"
 #include "corridor_log.h"
+#include "refuge_table.h"
 #include <unordered_set>
 #include <unordered_map>
 #include <algorithm>
@@ -29,13 +30,59 @@ static constexpr float DIVISOR_TABLE[21] = {
     3.0f
 };
 
-static SharedEnvironment* g_env = nullptr;
+static SharedEnvironment* g_env = NULL;
 static std::vector<int> g_parked_task;
+
+// Check if a task chain (agent_loc → task_locations) crosses a lane
+// Returns: 1 = crossing ↑ through lane, -1 = crossing ↓, 0 = no crossing
+static inline int task_chain_crosses_lane(int a_loc, const std::vector<int>& locs,
+    int lane_lo, int lane_hi, int cols) {
+    int prev_m, prev_b;
+    Centerline::project(a_loc, prev_m, prev_b);
+    if (prev_m < 0) return 0;
+    
+    for (auto& loc : locs) {
+        int tm, tb;
+        Centerline::project(loc, tm, tb);
+        if (tm < 0) continue;
+        
+        int lo = std::min(prev_m, tm);
+        int hi = std::max(prev_m, tm);
+        if (hi < lane_lo || lo > lane_hi) {
+            prev_m = tm;
+            continue;
+        }
+        
+        int dir = (tm > prev_m) ? 1 : -1;
+        return dir;
+    }
+    return 0;
+}
 
 static int g_dbg_exempt = 0;
 static int g_dbg_branch = 0;
 static int g_dbg_dirlock = 0;
 static int g_dbg_accepted = 0;
+
+// Per-lane assignment direction lock: 0=unlocked, 1=locked for ↑, -1=locked for ↓
+static int g_lane_assign_dir[REFUGE_TABLE_SIZE] = {0};
+// Count of assignments going ↑/↓ through each lane (agents assigned, still in play)
+static int g_lane_assign_up[REFUGE_TABLE_SIZE] = {0};
+static int g_lane_assign_down[REFUGE_TABLE_SIZE] = {0};
+// Current tick's proposals (updated in real-time during assignment)
+static int g_lane_proposal_up[REFUGE_TABLE_SIZE] = {0};
+static int g_lane_proposal_down[REFUGE_TABLE_SIZE] = {0};
+
+// Update lane proposal counters after assigning a task to an agent (real-time, prevents same-tick conflict)
+static inline void update_lane_proposals(int a_loc, const std::vector<int>& locs, int cols) {
+    for (int ti = 0; ti < REFUGE_TABLE_SIZE; ti++) {
+        int lo = REFUGE_TABLE[ti].lo_m, hi = REFUGE_TABLE[ti].hi_m;
+        if (lo > hi) std::swap(lo, hi);
+        int dir = task_chain_crosses_lane(a_loc, locs, lo, hi, cols);
+        if (dir > 0) g_lane_proposal_up[ti]++;
+        else if (dir < 0) g_lane_proposal_down[ti]++;
+    }
+}
 
 static inline int zid(int loc, int cols) { return (loc/cols/100)*100 + (loc%cols/100); }
 static inline int zh_dist(int z1, int z2) {
@@ -156,6 +203,28 @@ static inline float base_score(int a_loc, int tid, SharedEnvironment* env, int s
         return -1e9f;
     if (!Centerline::g_ready) return 1.0f;
     auto& locs = it->second.locations;
+
+    // Lane direction lock: if this task crosses a locked lane counterflow → block
+    if (start_idx == 0) {
+        int a_m_check, a_b_check;
+        Centerline::project(a_loc, a_m_check, a_b_check);
+        if (a_m_check >= 0) {
+            for (int ti = 0; ti < REFUGE_TABLE_SIZE; ti++) {
+                int lane_dir = g_lane_assign_dir[ti];
+                if (lane_dir == 0) continue;
+                int lo = REFUGE_TABLE[ti].lo_m, hi = REFUGE_TABLE[ti].hi_m;
+                if (lo > hi) std::swap(lo, hi);
+                int cross_dir = task_chain_crosses_lane(a_loc, locs, lo, hi, env->cols);
+                if (cross_dir != 0) {
+                    // Combined: existing + proposals + this potential assignment
+                    int total_up = g_lane_assign_up[ti] + g_lane_proposal_up[ti];
+                    int total_down = g_lane_assign_down[ti] + g_lane_proposal_down[ti];
+                    if (cross_dir > 0 && total_down > 0) return -1e9f;
+                    if (cross_dir < 0 && total_up > 0) return -1e9f;
+                }
+            }
+        }
+    }
 
     // Future flow exemption
     {
@@ -389,8 +458,45 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
     for (int a = 0; a < env->num_of_agents && a < PIBT_Lock::MAX_AGENTS; a++)
         PIBT_Lock::g_agent_blocked[a] = 0;
 
-    TimePoint endtime = t0 + std::chrono::milliseconds(limit);
+    // Reset tick proposals
+    for (int ti = 0; ti < REFUGE_TABLE_SIZE; ti++) {
+        g_lane_proposal_up[ti] = 0;
+        g_lane_proposal_down[ti] = 0;
+    }
+
+    // Recount lane assignments from current running tasks
     int cols = env->cols;
+    for (int ti = 0; ti < REFUGE_TABLE_SIZE; ti++) {
+        g_lane_assign_up[ti] = 0;
+        g_lane_assign_down[ti] = 0;
+    }
+    for (int a = 0; a < env->num_of_agents; a++) {
+        int tid = env->curr_task_schedule[a];
+        if (tid < 0) continue;
+        auto it = env->task_pool.find(tid);
+        if (it == env->task_pool.end() || it->second.locations.empty()) continue;
+        int a_loc = env->curr_states[a].location;
+        if (a_loc < 0) continue;
+        for (int ti = 0; ti < REFUGE_TABLE_SIZE; ti++) {
+            int lo = REFUGE_TABLE[ti].lo_m, hi = REFUGE_TABLE[ti].hi_m;
+            if (lo > hi) std::swap(lo, hi);
+            int dir = task_chain_crosses_lane(a_loc, it->second.locations, lo, hi, cols);
+            if (dir > 0) g_lane_assign_up[ti]++;
+            else if (dir < 0) g_lane_assign_down[ti]++;
+        }
+    }
+    // Set lane direction lock: locked if any assignments exist
+    for (int ti = 0; ti < REFUGE_TABLE_SIZE; ti++) {
+        if (g_lane_assign_up[ti] > 0 && g_lane_assign_down[ti] == 0)
+            g_lane_assign_dir[ti] = 1;
+        else if (g_lane_assign_down[ti] > 0 && g_lane_assign_up[ti] == 0)
+            g_lane_assign_dir[ti] = -1;
+        else if (g_lane_assign_up[ti] == 0 && g_lane_assign_down[ti] == 0)
+            g_lane_assign_dir[ti] = 0;
+        // else both > 0: zero-fault failed, keep previous dir
+    }
+
+    TimePoint endtime = t0 + std::chrono::milliseconds(limit);
     static int s_step = 0;
     int step = s_step++;
 
@@ -540,6 +646,13 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
 
             if (best_tid >= 0) {
                 proposed_schedule[a] = best_tid;
+                // Update lane proposals to prevent same-tick reverse assignments
+                {
+                    auto tsk = env->task_pool.find(best_tid);
+                    if (tsk != env->task_pool.end() && !tsk->second.locations.empty()) {
+                        update_lane_proposals(a_loc, tsk->second.locations, cols);
+                    }
+                }
                 // Per-assignment future flow update + instant lock
                 {
                     auto tsk = env->task_pool.find(best_tid);
