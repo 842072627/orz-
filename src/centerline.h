@@ -509,6 +509,15 @@ inline void update_mp_direction(const SharedEnvironment* env) {
     for (int a = 0; a < env->num_of_agents; a++) {
         int loc = env->curr_states[a].location;
         if (loc < 0) continue;
+#if USE_TIDAL_REFUGE
+        if (a < PIBT_Lock::MAX_AGENTS && PIBT_Lock::g_agent_refuge[a]) {
+            // Update position tracking but don't count into flow
+            int m_r, b_r;
+            project(loc, m_r, b_r);
+            g_mp_agent_last_main[a] = m_r;
+            continue;
+        }
+#endif
         int m = -1, b;
         project(loc, m, b);
         int prev_m = g_mp_agent_last_main[a];

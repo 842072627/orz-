@@ -30,7 +30,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 
 // ========== Future flow direction lock (pure prediction, per-width thresholds) ==========
 #define FUTURE_FLOW_LOCK_TH   1.72f    // baseline threshold for wide corridors
-#define FUTURE_FLOW_LOCK_SPREAD 2       // lock radius: 0 = no propagation, each MP independent
+#define FUTURE_FLOW_LOCK_SPREAD 0       // lock radius: 0 = no propagation, each MP independent
 #define FUTURE_FLOW_BRANCH_PENALTY  0.6f
 #define FUTURE_FLOW_BRANCH_OFFSET   14
 
@@ -38,8 +38,8 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define WIDTH_BAND_1          4       // width < 4: very narrow
 #define WIDTH_BAND_2          12       // width 4-8: narrow
 #define WIDTH_BAND_3          18      // width 9-15: moderate
-#define FF_TH_BAND_1          1.48f   // threshold for width < 4 (very narrow)
-#define FF_TH_BAND_2          1.48f   // threshold for width 4-12 (narrow)
+#define FF_TH_BAND_1          1.42f   // threshold for width < 4 (very narrow)
+#define FF_TH_BAND_2          1.42f   // threshold for width 4-12 (narrow)
 #define FF_TH_BAND_3          3.52f    // threshold for width 12-18 (moderate)
 #define FF_TH_BAND_4          5.72f // threshold for width >= 16 (wide, never lock by default)
 
@@ -95,7 +95,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define USE_MP_WIDTH        1   // P10 corridor width per main point
 
 // ========== Main zone direction lock hold (prevent lock release/flip when zone is hot) ==========
-#define USE_MAIN_ZONE_LOCK_HOLD  true    // enable main zone density-based lock hold
+#define USE_MAIN_ZONE_LOCK_HOLD  false    // enable main zone density-based lock hold
 #define MAIN_ZONE_HOLD_CAP       16      // zone density >= this → keep lock direction unchanged
 
 // ========== Task segment scoring coefficients (统一评分系数) ==========

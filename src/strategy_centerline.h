@@ -200,6 +200,7 @@ void detect_refuge(SharedEnvironment* env, const std::vector<int>& proposed_sche
         // Release if: lock gone (cur_lock==0) OR direction changed (cur_lock != saved_dir)
         if (cur_lock == 0 || cur_lock != saved_dir) {
             PIBT_Lock::g_agent_refuge[a] = 0;
+            PIBT_Lock::g_agent_refuge_goal[a] = -1;
             PIBT_Lock::g_agent_refuge_lane[a] = -1;
             PIBT_Lock::g_agent_refuge_lock_dir[a] = 0;
         }
