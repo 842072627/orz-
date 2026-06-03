@@ -24,6 +24,10 @@ namespace PIBT_Lock
 {
     int g_agent_blocked[PIBT_Lock::MAX_AGENTS] = {0};
     int g_parked_task[PIBT_Lock::MAX_AGENTS];
+    int g_agent_refuge[PIBT_Lock::MAX_AGENTS] = {0};
+    int g_agent_refuge_goal[PIBT_Lock::MAX_AGENTS];
+    int g_agent_refuge_lane[PIBT_Lock::MAX_AGENTS];
+    int g_agent_refuge_lock_dir[PIBT_Lock::MAX_AGENTS];
 }
 
 namespace CenterlineAccess {

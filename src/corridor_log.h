@@ -3,6 +3,7 @@
 #pragma once
 #include "SharedEnv.h"
 #include "centerline.h"
+#include "pibt_lock.h"
 #include <cstdio>
 #include <algorithm>
 #include <vector>
@@ -22,7 +23,7 @@ inline void init() {
     if (g_fd) {
         fprintf(g_fd, "tick,on_mainline,free_agents,avg_dens,"
                       "max_dens,p90_dens,overload15_pct,"
-                      "n_mp_active,n_locked,n_hot_dens,n_flow_unlock,n_proactive\n");
+                      "n_mp_active,n_locked,n_refuge\n");
         fflush(g_fd);
     }
     g_agent_fd = fopen("C:/Users/Administrator/.openclaw/workspace/agent_log.csv", "w");
@@ -96,11 +97,16 @@ inline void log_tick(SharedEnvironment* env) {
         if (Centerline::g_mp_lock_dir[si] != 0) n_locked++;
     }
     
-    fprintf(g_fd, "%d,%d,%d,%.1f,%d,%.0f,%.1f,%d,%d,%d,%d,%d\n",
+    // Refuge stats
+    int n_refuge = 0;
+    for (int a = 0; a < n_agents && a < PIBT_Lock::MAX_AGENTS; a++) {
+        if (PIBT_Lock::g_agent_refuge[a]) n_refuge++;
+    }
+    
+    fprintf(g_fd, "%d,%d,%d,%.1f,%d,%.0f,%.1f,%d,%d,%d\n",
             approx_tick, on_main, free_ag, avg, max_dens,
             p90, overload_pct, (int)dens_vals.size(),
-            n_locked);
-    // Columns: tick,mainline,free,avg,max,p90,overload%,n_active,n_locked,n_hot_dens,n_flow_unlock,n_proactive
+            n_locked, n_refuge);
     fflush(g_fd);
     
     // Per-agent log (sampled: every 3rd tick, only agents with tasks)

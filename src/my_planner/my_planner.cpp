@@ -20,6 +20,8 @@
 #include "my_pibt.h"
 #include "my_flow.h"
 #include "my_const.h"
+#include "../pibt_lock.h"
+#include "../config.h"
 #include <chrono>
 #include <iostream>
 
@@ -119,13 +121,21 @@ namespace MyPlanner{
                 }
             }
 
-            // set goals/tasks
-            if (env->goal_locations[i].empty()){
-                trajLNS.tasks[i] = dummy_goals.at(i);
-                local_priority[i] = p_copy[i];
-            }
-            else{
-                trajLNS.tasks[i] = env->goal_locations[i].front().first;
+            // set goals/tasks — refuge agents keep their refuge goal
+#if USE_TIDAL_REFUGE
+            if (i < PIBT_Lock::MAX_AGENTS && PIBT_Lock::g_agent_refuge[i]) {
+                // Refuge agent: goal = refuge zone (scheduler-set), let normal guide path handle it
+                trajLNS.tasks[i] = PIBT_Lock::g_agent_refuge_goal[i];
+            } else
+#endif
+            {
+                if (env->goal_locations[i].empty()){
+                    trajLNS.tasks[i] = dummy_goals.at(i);
+                    local_priority[i] = p_copy[i];
+                }
+                else{
+                    trajLNS.tasks[i] = env->goal_locations[i].front().first;
+                }
             }
 
             // detect guide-path mismatch (goal changed or no guide path)
@@ -194,6 +204,11 @@ namespace MyPlanner{
         prev_decision.resize(env->map.size(), -1);
         for(int i=0; i<env->num_of_agents; i++)
         {
+#if USE_TIDAL_REFUGE
+            // Refuge agent: keep tasks as refuge goal, don't overwrite
+            if (i < PIBT_Lock::MAX_AGENTS && PIBT_Lock::g_agent_refuge[i]) {
+            } else
+#endif
             if (env->goal_locations[i].empty()){
                 trajLNS.tasks[i] = dummy_goals.at(i);
                 local_priority[i] = p_copy[i];
@@ -227,7 +242,14 @@ namespace MyPlanner{
     {
         const auto start_time = std::chrono::steady_clock::now();
         std::sort(ids.begin(), ids.end(), [&](int a, int b) {
-                return local_priority.at(a) > local_priority.at(b);
+                double pa = local_priority.at(a);
+                double pb = local_priority.at(b);
+#if USE_TIDAL_REFUGE
+                // Tidal priority: refuge agent -1000 (champion planner pattern)
+                if (a < PIBT_Lock::MAX_AGENTS && PIBT_Lock::g_agent_refuge[a]) pa -= 1000.0;
+                if (b < PIBT_Lock::MAX_AGENTS && PIBT_Lock::g_agent_refuge[b]) pb -= 1000.0;
+#endif
+                return pa > pb;
             }
         );
         //clear reset occupied

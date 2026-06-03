@@ -67,11 +67,23 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define USE_DENSITY_EXCLUDE_IDLE  false    // 排除无任务/被截停agent的密度贡献
 
 // ========== Wall-hugging in corridors (PIBT tie-breaker + A* guide path) ==========
-#define USE_WALL_HUGGING        true    // master switch for all wall-hugging features
-#define USE_WALL_HUGGING_PIBT    true    // PIBT successor tie-breaker wall-hugging
-#define USE_WALL_HUGGING_ASTAR   true    // A* guide path branch-dist bias
+#define USE_WALL_HUGGING        false   // master switch for all wall-hugging features
+#define USE_WALL_HUGGING_PIBT    false   // PIBT successor tie-breaker wall-hugging
+#define USE_WALL_HUGGING_ASTAR   false   // A* guide path branch-dist bias
 #define WALL_HUG_WIDTH_MAX       20      // max corridor width (cells) for wall-hugging
 #define WALL_HUG_BRANCH_BIAS_MAX 2       // max per-step branch bias for A* (0-5, larger = stronger)
+
+// ========== Tidal Refuge: 逆流贴边避难 ==========
+#define USE_TIDAL_REFUGE        1   // 0=off, 1=on
+#define TIDAL_REFUGE_MAX_DIST   5   // agent距硬编码lane入口≤此main_dist时触发避难reroute
+#define TIDAL_REFUGE_ZONE_EXPAND     10  // 窄道main_dist范围外扩多少视为控制区
+
+// ========== Debug ==========
+#define TIDAL_REFUGE_DEBUG_INTERVAL 500  // 每多少tick打印一次debug
+#define TIDAL_AGENT_DEBUG_MAX       20   // debug最多显示多少个避难agent
+
+// ========== A* 启发式 ==========
+#define LARGE_MAP_CELL_THRESHOLD    90000
 
 // ========== Idle capacity control ==========
 #define USE_IDLE_CAP         false   // 空载容量控制开关
