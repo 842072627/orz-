@@ -95,6 +95,8 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define USE_TIDAL_REFUGE        1   // 0=off, 1=on
 #define USE_LANE_NARROW_BOTTLENECK 1 // 1=用lane zone识别窄瓶颈, 0=用p10_width<=TIDAL_WIDTH_TH
 #define TIDAL_WIDTH_TH          5   // p10_width <= 此值视为窄瓶颈 (USE_LANE_NARROW_BOTTLENECK=0时生效)
+#define LANE_ZONE_FLOW_TH      1.62f // lane zone future flow阈值
+#define MAIN_ZONE_FLOW_TH      999.72f // 非lane main zone future flow阈值
 #define TIDAL_SEARCH_MARGIN     3   // 候选格搜索范围 = 瓶颈长度 × 此值
 #define TIDAL_REFUGE_MAX_DIST   10   // agent距硬编码lane入口≤此main_dist时触发避难reroute
 

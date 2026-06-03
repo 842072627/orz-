@@ -518,9 +518,9 @@ void init(const SharedEnvironment* env) {
                 if (md >= lo && md <= hi) { in_lane = true; break; }
             }
             if (in_lane)
-                g_mp_width_bonus[si] = TH_GRAD_1;  // 窄瓶颈
+                g_mp_width_bonus[si] = LANE_ZONE_FLOW_TH;  // 窄瓶颈
             else
-                g_mp_width_bonus[si] = TH_GRAD_3;  // 宽
+                g_mp_width_bonus[si] = MAIN_ZONE_FLOW_TH;  // 宽
 #else
             // Original perp_width-based detection
             int w = perp_width_at(env, g_mp_loc[si], cl_tdx[idx], cl_tdy[idx]);
