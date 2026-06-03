@@ -96,7 +96,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define USE_LANE_NARROW_BOTTLENECK 1 // 1=用lane zone识别窄瓶颈, 0=用p10_width<=TIDAL_WIDTH_TH
 #define TIDAL_WIDTH_TH          5   // p10_width <= 此值视为窄瓶颈 (USE_LANE_NARROW_BOTTLENECK=0时生效)
 #define TIDAL_SEARCH_MARGIN     3   // 候选格搜索范围 = 瓶颈长度 × 此值
-#define TIDAL_REFUGE_MAX_DIST   5   // agent距硬编码lane入口≤此main_dist时触发避难reroute
+#define TIDAL_REFUGE_MAX_DIST   10   // agent距硬编码lane入口≤此main_dist时触发避难reroute
 
 // ========== Zone heat refuge control (热度疏导阈值) ==========
 #define ZONE_REFUGE_HEAT_ON     40   // zone density >= 此值且上升 → 启用避难疏导
