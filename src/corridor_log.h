@@ -14,6 +14,7 @@ static FILE* g_fd = nullptr;
 static FILE* g_agent_fd = nullptr;
 static FILE* g_mp_fd = nullptr;
 static FILE* g_assign_fd = nullptr;
+static FILE* g_refuge_fd = nullptr;
 static int g_call_count = 0;
 static SharedEnvironment* g_env_ptr = nullptr;
 
@@ -40,6 +41,11 @@ inline void init() {
     if (g_assign_fd) {
         fprintf(g_assign_fd, "tick,exempt,branch,dirlock,cap,accepted\n");
         fflush(g_assign_fd);
+    }
+    g_refuge_fd = fopen("C:/Users/Administrator/.openclaw/workspace/refuge_lane43.csv", "w");
+    if (g_refuge_fd) {
+        fprintf(g_refuge_fd, "tick,micro_lock,vote_down,vote_up,n_refuge_lane43,n_refuge_rel_lane43\n");
+        fflush(g_refuge_fd);
     }
 #endif
 }

@@ -180,7 +180,7 @@ void init(SharedEnvironment* env) {
 // ——— Per-lane micro direction vote (independent of macro lock) ———
 static void update_micro_vote(SharedEnvironment* env, const std::vector<int>& proposed_schedule) {
 #if USE_TIDAL_REFUGE
-    int ts = env->curr_timestep;
+    int ts = env->system_timestep >= 0 ? env->system_timestep : env->curr_timestep;
     int period = MICRO_VOTE_PERIOD;
     int phase_start = (ts / period) * period;
     
@@ -231,8 +231,15 @@ static void update_micro_vote(SharedEnvironment* env, const std::vector<int>& pr
             int lo_m = REFUGE_TABLE[ti].lo_m;
             int hi_m = REFUGE_TABLE[ti].hi_m;
             if (lo_m > hi_m) { int t = lo_m; lo_m = hi_m; hi_m = t; }
-            int expand = TIDAL_REFUGE_ZONE_EXPAND;
-            if (a_m < lo_m - expand || a_m > hi_m + expand) continue;
+            
+            // Refuge agent: only vote on bound lane, skip range check
+            bool is_refuge = (a < PIBT_Lock::MAX_AGENTS && PIBT_Lock::g_agent_refuge[a]);
+            if (is_refuge) {
+                if (PIBT_Lock::g_agent_refuge_lane[a] != ti) continue;
+            } else {
+                int expand = TIDAL_REFUGE_ZONE_EXPAND;
+                if (a_m < lo_m - expand || a_m > hi_m + expand) continue;
+            }
             
             int lo = std::min(a_m, g_m);
             int hi = std::max(a_m, g_m);
@@ -255,6 +262,15 @@ void detect_refuge(SharedEnvironment* env, const std::vector<int>& proposed_sche
     int n_agents = env->num_of_agents;
     if (n_agents > PIBT_Lock::MAX_AGENTS) n_agents = PIBT_Lock::MAX_AGENTS;
     
+    // Per-tick lane 43 micro lock log
+    static FILE* g_lane43_fd = nullptr;
+    if (!g_lane43_fd) {
+        g_lane43_fd = fopen("C:/Users/Administrator/.openclaw/workspace/lane43_log.csv", "w");
+        if (g_lane43_fd) {
+            fprintf(g_lane43_fd, "tick,phase_start,lock_dir,vote_down,vote_up,refuge_cnt,release_cnt,agent43_cnt\n");
+        }
+    }
+    
     // Phase 1: Release check for already-marked agents
     for (int a = 0; a < n_agents; a++) {
         if (!PIBT_Lock::g_agent_refuge[a]) continue;
@@ -270,6 +286,11 @@ void detect_refuge(SharedEnvironment* env, const std::vector<int>& proposed_sche
             PIBT_Lock::g_agent_refuge_goal[a] = -1;
             PIBT_Lock::g_agent_refuge_lane[a] = -1;
             PIBT_Lock::g_agent_refuge_lock_dir[a] = 0;
+            if (ti == 43 && g_lane43_fd) {
+                fprintf(g_lane43_fd, "#RELEASE tick=%d agent=%d saved_dir=%d cur_lock=%d\n",
+                        env->curr_timestep, a, saved_dir, cur_lock);
+                fflush(g_lane43_fd);
+            }
         }
     }
     
@@ -320,27 +341,30 @@ void detect_refuge(SharedEnvironment* env, const std::vector<int>& proposed_sche
             int intent = (g_m > a_m) ? 1 : -1;
             if (lock_dir == intent) continue;
             
-            // 顺着锁方向找最近的一块避难区（在整个矩形区域内搜索）
+            // 顺着锁方向找最近的避难所（搜所有避难区矩形范围）
             int target_loc = -1;
             int best_dist = 999999;
-            int x_lo = REFUGE_TABLE[ti].lo_x, y_lo = REFUGE_TABLE[ti].lo_y;
-            int x_hi = REFUGE_TABLE[ti].hi_x, y_hi = REFUGE_TABLE[ti].hi_y;
-            if (x_lo < 0 || y_lo < 0) { x_lo = x_hi; y_lo = y_hi; }
-            if (x_hi < 0 || y_hi < 0) { x_hi = x_lo; y_hi = y_lo; }
-            if (x_lo > x_hi) std::swap(x_lo, x_hi);
-            if (y_lo > y_hi) std::swap(y_lo, y_hi);
-            for (int rx = x_lo; rx <= x_hi; rx++) {
-                for (int ry = y_lo; ry <= y_hi; ry++) {
-                    int cloc = ry * cols + rx;
-                    if (cloc < 0 || cloc >= (int)env->map.size() || env->map[cloc] != 0)
-                        continue;
-                    int cm, cb;
-                    Centerline::project(cloc, cm, cb);
-                    if (cm < 0) continue;
-                    int diff = (lock_dir > 0) ? (cm - a_m) : (a_m - cm);
-                    if (diff >= 0 && diff < best_dist) {
-                        best_dist = diff;
-                        target_loc = cloc;
+            for (int rti = 0; rti < REFUGE_TABLE_SIZE; rti++) {
+                int x_lo = REFUGE_TABLE[rti].lo_x, y_lo = REFUGE_TABLE[rti].lo_y;
+                int x_hi = REFUGE_TABLE[rti].hi_x, y_hi = REFUGE_TABLE[rti].hi_y;
+                if (x_lo < 0 || y_lo < 0) { x_lo = x_hi; y_lo = y_hi; }
+                if (x_hi < 0 || y_hi < 0) { x_hi = x_lo; y_hi = y_lo; }
+                if (x_lo > x_hi) std::swap(x_lo, x_hi);
+                if (y_lo > y_hi) std::swap(y_lo, y_hi);
+                for (int rx = x_lo; rx <= x_hi; rx++) {
+                    for (int ry = y_lo; ry <= y_hi; ry++) {
+                        int cloc = ry * cols + rx;
+                        if (cloc < 0 || cloc >= (int)env->map.size() || env->map[cloc] != 0)
+                            continue;
+                        if (cloc == a_loc) continue;
+                        int cm, cb;
+                        Centerline::project(cloc, cm, cb);
+                        if (cm < 0) continue;
+                        int diff = (lock_dir > 0) ? (cm - a_m) : (a_m - cm);
+                        if (diff >= 0 && diff < best_dist) {
+                            best_dist = diff;
+                            target_loc = cloc;
+                        }
                     }
                 }
             }
@@ -349,8 +373,37 @@ void detect_refuge(SharedEnvironment* env, const std::vector<int>& proposed_sche
             PIBT_Lock::g_agent_refuge_goal[a] = target_loc;
             PIBT_Lock::g_agent_refuge_lane[a] = ti;
             PIBT_Lock::g_agent_refuge_lock_dir[a] = lock_dir;
+            if (ti == 43 && g_lane43_fd) {
+                int ax = a_loc % cols, ay = a_loc / cols;
+                int gx = target_loc % cols, gy = target_loc / cols;
+                fprintf(g_lane43_fd, "#DETECT tick=%d agent=%d loc=(%d,%d) a_m=%d goal=(%d,%d) refuge=(%d,%d) lock=%d\n",
+                        env->curr_timestep, a, ax, ay, a_m, 
+                        goal_loc % cols, goal_loc / cols,
+                        gx, gy, lock_dir);
+                fflush(g_lane43_fd);
+            }
             break;
         }
+    }
+
+    // Per-tick lane 43 CSV log
+    if (g_lane43_fd) {
+        int n_refuge43 = 0, n_release43 = 0, n_near43 = 0;
+        for (int a = 0; a < n_agents; a++) {
+            if (PIBT_Lock::g_agent_refuge[a] && PIBT_Lock::g_agent_refuge_lane[a] == 43) n_refuge43++;
+            int a_loc = env->curr_states[a].location;
+            if (a_loc < 0) continue;
+            int a_m, a_b;
+            Centerline::project(a_loc, a_m, a_b);
+            if (a_m >= 901-10 && a_m <= 918+10) n_near43++;
+        }
+        fprintf(g_lane43_fd, "%d,%d,%d,%d,%d,%d,%d,%d\n",
+                env->curr_timestep,
+                g_micro_phase_start_tick[43],
+                g_micro_lock_dir[43],
+                g_micro_vote_down[43], g_micro_vote_up[43],
+                n_refuge43, 0, n_near43);
+        fflush(g_lane43_fd);
     }
 }
 

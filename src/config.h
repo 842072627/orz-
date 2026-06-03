@@ -79,7 +79,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define TIDAL_REFUGE_ZONE_EXPAND     10  // 窄道main_dist范围外扩多少视为控制区
 #define MICRO_VOTE_PERIOD       80  // 微观锁投票周期（tick）
 #define MICRO_HYSTERESIS        2.0f // 微观锁翻转阈值倍数
-#define TIDAL_REFUGE_CLEAR_TRAJ_DIST 1  // refuge agent清空旧traj_dist让启发式指向避难格
+#define REFUGE_PIBT_PENALTY     0   // refuge agent PIBT减权(0=关闭, -1000=冠军planner模式)
 
 // ========== Debug ==========
 #define TIDAL_REFUGE_DEBUG_INTERVAL 500  // 每多少tick打印一次debug

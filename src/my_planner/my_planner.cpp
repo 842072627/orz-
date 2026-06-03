@@ -140,19 +140,8 @@ namespace MyPlanner{
 
             // detect guide-path mismatch (goal changed or no guide path)
             require_guide_path[i] = false;
-            if (trajLNS.trajs[i].empty() || trajLNS.trajs[i].back() != trajLNS.tasks[i]) {
-#if USE_TIDAL_REFUGE
-                // Refuge agent: don't waste budget on guide path A* to refuge zone
-                if (i < PIBT_Lock::MAX_AGENTS && PIBT_Lock::g_agent_refuge[i]) {
-                    require_guide_path[i] = false;
-#if TIDAL_REFUGE_CLEAR_TRAJ_DIST
-                    // Clear old traj_dist so PIBT heuristic uses refuge_goal, not the old path
-                    trajLNS.traj_dists[i].clear();
-#endif
-                } else
-#endif
+            if (trajLNS.trajs[i].empty() || trajLNS.trajs[i].back() != trajLNS.tasks[i])
                 require_guide_path[i] = true;
-            }
 
             // update per-agent transient planning state
             assert(env->start_states[i].location >=0);
@@ -194,12 +183,41 @@ namespace MyPlanner{
                 std::vector<int> old_traj = trajLNS.trajs[i];
                 if (!trajLNS.trajs[i].empty())
                     remove_traj(trajLNS, i);
+                bool is_refuge = (i < PIBT_Lock::MAX_AGENTS && PIBT_Lock::g_agent_refuge[i]);
                 if (!update_traj(trajLNS, i, &flow_end_time)){
+                    if (is_refuge) {
+                        static FILE* g_refuge_astar_fd = nullptr;
+                        if (!g_refuge_astar_fd) {
+                            g_refuge_astar_fd = fopen("C:/Users/Administrator/.openclaw/workspace/refuge_astar.csv", "w");
+                            if (g_refuge_astar_fd)
+                                fprintf(g_refuge_astar_fd, "tick,aid,start,goal,result\n");
+                        }
+                        if (g_refuge_astar_fd) {
+                            fprintf(g_refuge_astar_fd, "%d,%d,%d,%d,FAIL\n",
+                                    env->curr_timestep, i,
+                                    env->start_states[i].location, trajLNS.tasks[i]);
+                            fflush(g_refuge_astar_fd);
+                        }
+                    }
                     trajLNS.trajs[i] = old_traj;
                     if (!old_traj.empty()){
                         add_traj(trajLNS, i);
                     }
                     break;
+                }
+                if (is_refuge) {
+                    static FILE* g_refuge_astar_fd = nullptr;
+                    if (!g_refuge_astar_fd) {
+                        g_refuge_astar_fd = fopen("C:/Users/Administrator/.openclaw/workspace/refuge_astar.csv", "w");
+                        if (g_refuge_astar_fd)
+                            fprintf(g_refuge_astar_fd, "tick,aid,start,goal,result\n");
+                    }
+                    if (g_refuge_astar_fd) {
+                        fprintf(g_refuge_astar_fd, "%d,%d,%d,%d,OK\n",
+                                env->curr_timestep, i,
+                                env->start_states[i].location, trajLNS.tasks[i]);
+                        fflush(g_refuge_astar_fd);
+                    }
                 }
             }
         }
@@ -256,9 +274,9 @@ namespace MyPlanner{
                 double pa = local_priority.at(a);
                 double pb = local_priority.at(b);
 #if USE_TIDAL_REFUGE
-                // Tidal priority: refuge agent -1000 (champion planner pattern)
-                if (a < PIBT_Lock::MAX_AGENTS && PIBT_Lock::g_agent_refuge[a]) pa -= 1000.0;
-                if (b < PIBT_Lock::MAX_AGENTS && PIBT_Lock::g_agent_refuge[b]) pb -= 1000.0;
+                // Tidal priority: refuge agent priority penalty (configurable)
+                if (a < PIBT_Lock::MAX_AGENTS && PIBT_Lock::g_agent_refuge[a]) pa += REFUGE_PIBT_PENALTY;
+                if (b < PIBT_Lock::MAX_AGENTS && PIBT_Lock::g_agent_refuge[b]) pb += REFUGE_PIBT_PENALTY;
 #endif
                 return pa > pb;
             }
