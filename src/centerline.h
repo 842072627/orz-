@@ -15,6 +15,7 @@
 #include <map>
 #include "pibt_lock.h"
 #include "bfs_table.h"
+#include "refuge_table.h"
 
 namespace Centerline {
 
@@ -507,10 +508,26 @@ void init(const SharedEnvironment* env) {
         // Threshold stays at ZONE_HARD_CAP (15) for all main points
 #if USE_MP_WIDTH
         if (g_mp_main_dist[si] >= 0) {
+#if USE_LANE_NARROW_BOTTLENECK
+            // Lane zone based narrow bottleneck detection
+            bool in_lane = false;
+            int md = g_mp_main_dist[si];
+            for (int ti = 0; ti < REFUGE_TABLE_SIZE; ti++) {
+                int lo = REFUGE_TABLE[ti].lo_m, hi = REFUGE_TABLE[ti].hi_m;
+                if (lo > hi) { int t = lo; lo = hi; hi = t; }
+                if (md >= lo && md <= hi) { in_lane = true; break; }
+            }
+            if (in_lane)
+                g_mp_width_bonus[si] = TH_GRAD_1;  // 窄瓶颈
+            else
+                g_mp_width_bonus[si] = TH_GRAD_3;  // 宽
+#else
+            // Original perp_width-based detection
             int w = perp_width_at(env, g_mp_loc[si], cl_tdx[idx], cl_tdy[idx]);
             if (w > WIDTH_GRAD_2)      g_mp_width_bonus[si] = TH_GRAD_3;
             else if (w > WIDTH_GRAD_1) g_mp_width_bonus[si] = TH_GRAD_2;
             else                        g_mp_width_bonus[si] = TH_GRAD_1;
+#endif
         }
 #endif
     }

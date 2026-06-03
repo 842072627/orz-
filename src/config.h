@@ -86,19 +86,20 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define WIDTH_GRAD_2        18   // width < this → TH_GRAD_2 (窄, baseline)
 #define WIDTH_GRAD_3        999  // width < this → TH_GRAD_3 (中)
 // width >= WIDTH_GRAD_3 → TH_GRAD_4 (宽不锁)
-#define TH_GRAD_1           1.72f
+#define TH_GRAD_1           1.52f
 #define TH_GRAD_2           3.72f
 #define TH_GRAD_3           5.72f
 #define TH_GRAD_4           100.72f   // 宽走廊不锁
 
 // ========== Tidal Refuge: 逆流贴边避难 ==========
 #define USE_TIDAL_REFUGE        1   // 0=off, 1=on
-#define TIDAL_WIDTH_TH          5   // p10_width <= 此值视为窄瓶颈
+#define USE_LANE_NARROW_BOTTLENECK 1 // 1=用lane zone识别窄瓶颈, 0=用p10_width<=TIDAL_WIDTH_TH
+#define TIDAL_WIDTH_TH          5   // p10_width <= 此值视为窄瓶颈 (USE_LANE_NARROW_BOTTLENECK=0时生效)
 #define TIDAL_SEARCH_MARGIN     3   // 候选格搜索范围 = 瓶颈长度 × 此值
 #define TIDAL_REFUGE_MAX_DIST   5   // agent距硬编码lane入口≤此main_dist时触发避难reroute
 
 // ========== Zone heat refuge control (热度疏导阈值) ==========
-#define ZONE_REFUGE_HEAT_ON     40   // zone density >= 此值且上升 → 启用避难疏导
+#define ZONE_REFUGE_HEAT_ON     35   // zone density >= 此值且上升 → 启用避难疏导
 #define ZONE_REFUGE_HEAT_OFF    25   // zone density < 此值 → 关闭避难疏导
 
 // Runtime strategy name getter (used by TaskScheduler.cpp)
