@@ -68,6 +68,10 @@ int LaneFlow::g_lane_lock_dir[20] = {0};
 int LaneFlow::g_lane_next_vote_tick = 0;
 int* LaneFlow::g_lane_exit_target = nullptr;
 bool LaneFlow::g_lane_exit_target_initialized = false;
+int LaneFlow::g_lane_blocked_plus[20] = {0};
+int LaneFlow::g_lane_blocked_minus[20] = {0};
+int LaneFlow::g_lane_passed_plus[20] = {0};
+int LaneFlow::g_lane_passed_minus[20] = {0};
 #endif
 
 namespace MyPlanner{
@@ -146,13 +150,16 @@ namespace MyPlanner{
 
         // Check each lane's core zone for occupancy (only agents with real tasks)
         bool core_occupied[20] = {false};
+        int core_count[20] = {0};  // number of agents in core
         for (int i = 0; i < env->num_of_agents; i++) {
             if (env->curr_task_schedule[i] < 0) continue;  // no real task
             int loc = env->start_states[i].location;
             if (loc < 0) continue;
             int cl = get_cell_core_fast(loc);
-            if (cl >= 0 && cl < 20)
+            if (cl >= 0 && cl < 20) {
                 core_occupied[cl] = true;
+                core_count[cl]++;
+            }
         }
 
         int cnt0[20] = {0}, cnt1[20] = {0};
@@ -167,40 +174,52 @@ namespace MyPlanner{
             else if (dir < 0) cnt1[li]++;
         }
 
+        int prev_lock[20];
         for (int li = 0; li < 20; li++) {
-            if (core_occupied[li]) {
-                if (LaneFlow::g_lane_lock_dir[li] == 0) {
-                    // Lock not initialized but core occupied → init from guide path
-                    int dir = 0;
-                    for (int i = 0; i < env->num_of_agents && dir == 0; i++) {
-                        if (env->curr_task_schedule[i] < 0) continue;
-                        int loc = env->start_states[i].location;
-                        if (loc < 0) continue;
-                        if (get_cell_core_fast(loc) != li) continue;
-                        dir = path_dir_in_lane(trajLNS.trajs[i], li, LANE_DIR_LOOKAHEAD);
-                    }
-                    if (dir != 0)
-                        LaneFlow::g_lane_lock_dir[li] = dir;
-                }
-                // else core occupied + lock already set → freeze (keep current)
-            } else if (cnt0[li] == 0 && cnt1[li] == 0) {
-                LaneFlow::g_lane_lock_dir[li] = 0;
-            } else if (cnt1[li] == 0) {
-                LaneFlow::g_lane_lock_dir[li] = 1;
-            } else if (cnt0[li] == 0) {
-                LaneFlow::g_lane_lock_dir[li] = -1;
-            } else {
-                // Both directions, no core occupancy → flip
-                LaneFlow::g_lane_lock_dir[li] = -(LaneFlow::g_lane_lock_dir[li]);
+            prev_lock[li] = LaneFlow::g_lane_lock_dir[li];
+        }
+        for (int li = 0; li < 20; li++) {
+#if USE_LANE_FLOW_STATS
+            bool flow_exceeded = false;
+            if (prev_lock[li] != 0) {
+                int blocked = (prev_lock[li] > 0)
+                    ? LaneFlow::g_lane_blocked_minus[li]
+                    : LaneFlow::g_lane_blocked_plus[li];
+                int passed = (prev_lock[li] > 0)
+                    ? LaneFlow::g_lane_passed_plus[li]
+                    : LaneFlow::g_lane_passed_minus[li];
+                if (blocked > passed * LANE_FLOW_RATIO_FLIP)
+                    flow_exceeded = true;
+            }
+#endif
+            if (core_occupied[li] && core_count[li] > LANE_CORE_CLEAR_THRESH) {
+                // 核心区 > 4人 → 冻锁
+                LaneFlow::g_lane_lock_dir[li] = prev_lock[li];
+            } else if (flow_exceeded) {
+                // 核心区 <= 4人 + 流比异常 → 强制翻锁
+                LaneFlow::g_lane_lock_dir[li] = -prev_lock[li];
                 if (LaneFlow::g_lane_lock_dir[li] == 0)
                     LaneFlow::g_lane_lock_dir[li] = 1;
+            } else {
+                // 核心区 <= 4人 + 流比正常 → cnt0/cnt1 投票
+                if (cnt0[li] == 0 && cnt1[li] == 0) {
+                    LaneFlow::g_lane_lock_dir[li] = 0;
+                } else if (cnt1[li] == 0) {
+                    LaneFlow::g_lane_lock_dir[li] = 1;
+                } else if (cnt0[li] == 0) {
+                    LaneFlow::g_lane_lock_dir[li] = -1;
+                } else {
+                    LaneFlow::g_lane_lock_dir[li] = -(prev_lock[li]);
+                    if (LaneFlow::g_lane_lock_dir[li] == 0)
+                        LaneFlow::g_lane_lock_dir[li] = 1;
+                }
             }
         }
-        // CSV debug: log per-lane lock state every 400 ticks
+        // CSV debug: log per-lane lock state and flow stats
         static FILE* lf = nullptr;
         if (!lf) {
             lf = fopen("lane_gate_debug.csv", "w");
-            if (lf) fprintf(lf, "tick,li,lock,cnt0,cnt1,core_occ,workers_in_lane,workers_in_core\n");
+            if (lf) fprintf(lf, "tick,li,lock,cnt0,cnt1,core_occ,workers_in_lane,workers_in_core,blk_p,blk_m,pass_p,pass_m\n");
         }
         if (lf && (ts % 400 == 0 || ts <= 2000)) {
             for (int li = 0; li < 20; li++) {
@@ -212,13 +231,26 @@ namespace MyPlanner{
                     if (get_cell_lane_fast(loc) == li) workers_in_lane++;
                     if (get_cell_core_fast(loc) == li) workers_in_core++;
                 }
-                fprintf(lf, "%d,%d,%d,%d,%d,%d,%d,%d\n",
+                fprintf(lf, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n",
                     ts, li, LaneFlow::g_lane_lock_dir[li],
                     cnt0[li], cnt1[li], core_occupied[li]?1:0,
-                    workers_in_lane, workers_in_core);
+                    workers_in_lane, workers_in_core,
+                    LaneFlow::g_lane_blocked_plus[li],
+                    LaneFlow::g_lane_blocked_minus[li],
+                    LaneFlow::g_lane_passed_plus[li],
+                    LaneFlow::g_lane_passed_minus[li]);
             }
             fflush(lf);
         }
+#if USE_LANE_FLOW_STATS
+        // Reset per-period counters
+        for (int li = 0; li < 20; li++) {
+            LaneFlow::g_lane_blocked_plus[li] = 0;
+            LaneFlow::g_lane_blocked_minus[li] = 0;
+            LaneFlow::g_lane_passed_plus[li] = 0;
+            LaneFlow::g_lane_passed_minus[li] = 0;
+        }
+#endif
     }
 
     // Apply lane priority delta from main line direction
@@ -302,6 +334,7 @@ namespace MyPlanner{
     static void initialize_dummy_goals_if_needed(SharedEnvironment* env)
     {
 #if USE_DUMMY_GOAL_STAY
+#if USE_DUMMY_EXIT_TARGET
         // Dummy goal = nearest non-lane exit target → idle agent exits lane and stays put
         init_lane_exit_targets(env);
         dummy_goals.resize(env->num_of_agents);
@@ -311,6 +344,12 @@ namespace MyPlanner{
                 ? LaneFlow::g_lane_exit_target[loc] : -1;
             dummy_goals.at(i) = (target >= 0) ? target : loc;
         }
+#else
+        // Dummy goal = agent's current position → idle agent stays exactly where it is
+        dummy_goals.resize(env->num_of_agents);
+        for(int i=0; i<env->num_of_agents; i++)
+            dummy_goals.at(i) = env->start_states.at(i).location;
+#endif
 #else
         // Original: only at tick 0, dummy goal = spawn position → idle agent walks home
         int ts = env->system_timestep >= 0 ? env->system_timestep : env->curr_timestep;

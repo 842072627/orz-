@@ -90,6 +90,12 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 
 // ========== Dummy goal behavior for idle agents ==========
 #define USE_DUMMY_GOAL_STAY     1   // 1=dummy goal = 当前位置(不动), 0=dummy goal = 出生点(走回家)
+#define USE_DUMMY_EXIT_TARGET   1   // 1=没任务agent走到最近lane出口, 0=原地不动
+
+// ========== Lane flow statistics ==========
+#define USE_LANE_FLOW_STATS     1   // 1=统计forbids_move拦/放次数, 80tick输出CSV
+#define LANE_CORE_CLEAR_THRESH  4   // 核心区人数<=此值视为清空,允许翻转
+#define LANE_FLOW_RATIO_FLIP    3   // 拦/放流比>=此值强制翻转锁(无视core_occupied)
 
 // ========== BFS distance table (0=offmain only, 1=full matrix for cloud) ==========
 #define USE_BFS_TABLE       0   // 0: off-main only (本地), 1: 全量矩阵 (云端)

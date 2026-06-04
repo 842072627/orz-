@@ -137,8 +137,21 @@ bool causalMY_PIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
 						}
 						if (first_m >= 0 && last_m >= 0)
 							dir = (last_m > first_m) ? 1 : -1;
+#if USE_LANE_FLOW_STATS
+						if (dir != 0) {
+							if (dir != lock) {
+								if (dir > 0) LaneFlow::g_lane_blocked_plus[n_lane]++;
+								else LaneFlow::g_lane_blocked_minus[n_lane]++;
+								continue;  // counterflow → FORBID
+							} else {
+								if (dir > 0) LaneFlow::g_lane_passed_plus[n_lane]++;
+								else LaneFlow::g_lane_passed_minus[n_lane]++;
+							}
+						}
+#else
 						if (dir != 0 && dir != lock)
 							continue;  // counterflow → FORBID
+#endif
 					}
 				}
 			}
