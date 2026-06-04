@@ -69,11 +69,18 @@ int LaneFlow::g_lane_next_vote_tick = 0;
 
 namespace MyPlanner{
 
-    // Scan first N steps of guide path for lane entry
-    // Returns direction: +1=end0→end1, -1=end1→end0, 0=no entry within lookahead
-    // Sets out_lane to the lane entered, -1 if none
+    // Agent direction from main line: +1=increasing main_dist, -1=decreasing, 0=unknown
+    static inline int agent_main_dir(int curr_loc, int goal_loc) {
+        if (!CenterlineAccess::g_main_dist) return 0;
+        int cm = (*CenterlineAccess::g_main_dist)[curr_loc];
+        int gm = (*CenterlineAccess::g_main_dist)[goal_loc];
+        if (cm < 0 || gm < 0) return 0;
+        return (gm > cm) ? 1 : -1;
+    }
+
+    // Scan first N steps of guide path for lane entry, returns direction from main line
 #if USE_PLANNER_LANE_FLOW
-    static int lane_entry_dir_short(const std::vector<int>& path, int cols, int& out_lane) {
+    static int lane_entry_dir_short(const std::vector<int>& path, int cols, int goal_loc, int& out_lane) {
         out_lane = -1;
         if (path.size() < 2) return 0;
         int limit = std::min((int)path.size(), LANE_VOTE_LOOKAHEAD + 1);
@@ -83,56 +90,63 @@ namespace MyPlanner{
             if (curr < 0) continue;
             if (get_cell_lane_fast(prev) < 0 && get_cell_lane_fast(curr) >= 0) {
                 out_lane = get_cell_lane_fast(curr);
-                return lane_entry_side(curr, out_lane);  // +1 or -1
+                return agent_main_dir(prev, goal_loc);  // +1 or -1 from main line
             }
             prev = curr;
         }
         return 0;
     }
 
-    // Periodic vote: scan agents' guide paths (first N steps), tally lane crossing directions, set lock
+    // Traffic light vote: freeze lock if core zone occupied
     static void lane_vote(SharedEnvironment* env) {
-        // 冠军用 system_timestep（被 sync 正确更新），不用 curr_timestep（永远是 0）
         int ts = env->system_timestep >= 0 ? env->system_timestep : env->curr_timestep;
         if (ts < LaneFlow::g_lane_next_vote_tick) return;
         LaneFlow::g_lane_next_vote_tick = ts + LANE_VOTE_PERIOD;
 
-        int up[20] = {0}, down[20] = {0};
-        int cols = env->cols;
+        // Check each lane's core zone for occupancy
+        bool core_occupied[20] = {false};
         for (int i = 0; i < env->num_of_agents; i++) {
-            int li = -1;
-            int dir = lane_entry_dir_short(trajLNS.trajs[i], cols, li);
-            if (dir == 0 || li < 0 || li >= 20) continue;
-            if (dir > 0) down[li]++;
-            else up[li]++;
+            int loc = env->start_states[i].location;
+            if (loc < 0) continue;
+            int cl = get_cell_core_fast(loc);
+            if (cl >= 0 && cl < 20)
+                core_occupied[cl] = true;
         }
 
-        // 2:1 flip rule (champion-style)
+        int cnt0[20] = {0}, cnt1[20] = {0};
+        for (int i = 0; i < env->num_of_agents; i++) {
+            int loc = env->start_states[i].location;
+            if (loc < 0) continue;
+            int li = get_cell_lane_fast(loc);
+            if (li < 0 || li >= 20) continue;
+            int goal = trajLNS.tasks[i];
+            int dir = agent_main_dir(loc, goal);
+            if (dir > 0) cnt0[li]++;
+            else if (dir < 0) cnt1[li]++;
+        }
+
         for (int li = 0; li < 20; li++) {
-            int cur = LaneFlow::g_lane_lock_dir[li];
-            // 两边都空 → 锁归零，让第一个到的 agent 重新设方向
-            if (up[li] == 0 && down[li] == 0) {
+            if (core_occupied[li]) continue;  // core区有人 → 不动锁
+
+            if (cnt0[li] == 0 && cnt1[li] == 0) {
                 LaneFlow::g_lane_lock_dir[li] = 0;
-                continue;
-            }
-            if (cur == 0) {
-                if (down[li] > up[li]) LaneFlow::g_lane_lock_dir[li] = 1;
-                else if (up[li] > down[li]) LaneFlow::g_lane_lock_dir[li] = -1;
-            } else if (cur > 0) {
-                if (up[li] > LANE_VOTE_RATIO * down[li])
-                    LaneFlow::g_lane_lock_dir[li] = -1;
+            } else if (cnt1[li] == 0) {
+                LaneFlow::g_lane_lock_dir[li] = 1;
+            } else if (cnt0[li] == 0) {
+                LaneFlow::g_lane_lock_dir[li] = -1;
             } else {
-                if (down[li] > LANE_VOTE_RATIO * up[li])
+                LaneFlow::g_lane_lock_dir[li] = -(LaneFlow::g_lane_lock_dir[li]);
+                if (LaneFlow::g_lane_lock_dir[li] == 0)
                     LaneFlow::g_lane_lock_dir[li] = 1;
             }
         }
     }
 
-    // Apply lane priority delta (modifies a COPY of priority, not the original)
+    // Apply lane priority delta from main line direction
     static void apply_lane_priority(std::vector<double>& priority, SharedEnvironment* env) {
         for (int i = 0; i < env->num_of_agents; i++) {
             int li = -1;
-            int dir = lane_entry_dir_short(trajLNS.trajs[i], env->cols, li);
+            int dir = lane_entry_dir_short(trajLNS.trajs[i], env->cols, trajLNS.tasks[i], li);
             if (dir == 0 || li < 0) continue;
             int lock = LaneFlow::g_lane_lock_dir[li];
             if (lock == 0) continue;

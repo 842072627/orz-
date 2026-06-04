@@ -107,17 +107,21 @@ bool causalMY_PIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
 		assert(validateMove(prev_loc, neighbor, lns.env));
 
 #if USE_PLANNER_LANE_FLOW
-		// Forbids_move: block counterflow entry into a locked lane
+		// Forbids_move: block counterflow entry based on move direction on main line
 		{
 			int c_lane = get_cell_lane_fast(prev_loc);
 			if (c_lane < 0) {
 				int n_lane = get_cell_lane_fast(neighbor);
 				if (n_lane >= 0 && n_lane < 20) {
 					int lock = LaneFlow::g_lane_lock_dir[n_lane];
-					if (lock != 0) {
-						int entry = lane_entry_side(neighbor, n_lane);  // +1=end0, -1=end1
-						if ((lock > 0 && entry == -1) || (lock < 0 && entry == 1))
-							continue;  // counterflow entry → FORBID
+					if (lock != 0 && CenterlineAccess::g_main_dist) {
+						int pm = (*CenterlineAccess::g_main_dist)[prev_loc];
+						int nm = (*CenterlineAccess::g_main_dist)[neighbor];
+						if (pm >= 0 && nm >= 0) {
+							int move_dir = (nm > pm) ? 1 : -1;  // 这个move的main line方向
+							if (move_dir != lock)
+								continue;  // counterflow entry → FORBID
+						}
 					}
 				}
 			}
