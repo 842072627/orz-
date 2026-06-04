@@ -15,6 +15,8 @@ namespace PIBT_Lock {
 namespace LaneFlow {
     extern int g_lane_lock_dir[20];             // 每条lane的锁方向: +1=end0→end1, -1=end1→end0, 0=无锁
     extern int g_lane_next_vote_tick;          // 当前会话中下一次投票的tick
+    extern int* g_lane_exit_target;            // [loc] = 每个lane格最近的出口(非lane格)，-1=未初始化
+    extern bool g_lane_exit_target_initialized;
 }
 
 // Centerline data shared with PIBT for wall-hugging (set by scheduler after init)

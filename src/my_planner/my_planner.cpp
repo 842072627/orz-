@@ -24,6 +24,7 @@
 #include "../pibt_lock.h"
 #include <chrono>
 #include <iostream>
+#include <queue>
 #include <unordered_map>
 #include <cmath>
 #include <algorithm>
@@ -65,6 +66,8 @@ namespace MyPlanner{
 #if USE_PLANNER_LANE_FLOW
 int LaneFlow::g_lane_lock_dir[20] = {0};
 int LaneFlow::g_lane_next_vote_tick = 0;
+int* LaneFlow::g_lane_exit_target = nullptr;
+bool LaneFlow::g_lane_exit_target_initialized = false;
 #endif
 
 namespace MyPlanner{
@@ -78,21 +81,59 @@ namespace MyPlanner{
         return (gm > cm) ? 1 : -1;
     }
 
-    // Scan first N steps of guide path for lane entry, returns direction from main line
+    // Scan path[0..lookahead] for first→last main_dist in given lane, return direction
+    static int path_dir_in_lane(const std::vector<int>& path, int li, int lookahead) {
+        if (!CenterlineAccess::g_main_dist) return 0;
+        int first_m = -1, last_m = -1;
+        int limit = std::min((int)path.size(), lookahead);
+        for (int pi = 0; pi < limit; pi++) {
+            int loc = path[pi];
+            if (loc < 0) continue;
+            if (get_cell_lane_fast(loc) != li) {
+                if (first_m >= 0) break;  // exited lane, stop
+                continue;
+            }
+            int m = (*CenterlineAccess::g_main_dist)[loc];
+            if (m >= 0) {
+                if (first_m < 0) first_m = m;
+                last_m = m;
+            }
+        }
+        if (first_m >= 0 && last_m >= 0)
+            return (last_m > first_m) ? 1 : -1;
+        return 0;
+    }
+
+    // Scan guide path for lane entry (prev outside, curr inside), returns direction
 #if USE_PLANNER_LANE_FLOW
     static int lane_entry_dir_short(const std::vector<int>& path, int cols, int goal_loc, int& out_lane) {
         out_lane = -1;
         if (path.size() < 2) return 0;
-        int limit = std::min((int)path.size(), LANE_VOTE_LOOKAHEAD + 1);
-        int prev = path[0];
+        int limit = std::min((int)path.size(), LANE_DIR_LOOKAHEAD + 1);
         for (int pi = 1; pi < limit; pi++) {
             int curr = path[pi];
             if (curr < 0) continue;
-            if (get_cell_lane_fast(prev) < 0 && get_cell_lane_fast(curr) >= 0) {
-                out_lane = get_cell_lane_fast(curr);
-                return agent_main_dir(prev, goal_loc);  // +1 or -1 from main line
+            int cl = get_cell_lane_fast(curr);
+            if (cl >= 0 && get_cell_lane_fast(path[pi-1]) < 0) {
+                out_lane = cl;
+                // Found entry at curr. Continue for exit from this lane.
+                int exit_loc = curr;
+                int ext_limit = std::min((int)path.size(), LANE_DIR_LOOKAHEAD + 1);
+                for (int pj = pi + 1; pj < ext_limit; pj++) {
+                    int c2 = path[pj];
+                    if (c2 < 0) continue;
+                    if (get_cell_lane_fast(c2) != cl) break;
+                    exit_loc = c2;
+                }
+                // Direction = sign(main_dist[exit] - main_dist[entry])
+                if (CenterlineAccess::g_main_dist) {
+                    int em = (*CenterlineAccess::g_main_dist)[curr];
+                    int xm = (*CenterlineAccess::g_main_dist)[exit_loc];
+                    if (em >= 0 && xm >= 0)
+                        return (xm > em) ? 1 : -1;
+                }
+                return agent_main_dir(curr, goal_loc);
             }
-            prev = curr;
         }
         return 0;
     }
@@ -103,9 +144,10 @@ namespace MyPlanner{
         if (ts < LaneFlow::g_lane_next_vote_tick) return;
         LaneFlow::g_lane_next_vote_tick = ts + LANE_VOTE_PERIOD;
 
-        // Check each lane's core zone for occupancy
+        // Check each lane's core zone for occupancy (only agents with real tasks)
         bool core_occupied[20] = {false};
         for (int i = 0; i < env->num_of_agents; i++) {
+            if (env->curr_task_schedule[i] < 0) continue;  // no real task
             int loc = env->start_states[i].location;
             if (loc < 0) continue;
             int cl = get_cell_core_fast(loc);
@@ -115,30 +157,67 @@ namespace MyPlanner{
 
         int cnt0[20] = {0}, cnt1[20] = {0};
         for (int i = 0; i < env->num_of_agents; i++) {
+            if (env->curr_task_schedule[i] < 0) continue;  // no real task
             int loc = env->start_states[i].location;
             if (loc < 0) continue;
             int li = get_cell_lane_fast(loc);
             if (li < 0 || li >= 20) continue;
-            int goal = trajLNS.tasks[i];
-            int dir = agent_main_dir(loc, goal);
+            int dir = path_dir_in_lane(trajLNS.trajs[i], li, LANE_DIR_LOOKAHEAD);
             if (dir > 0) cnt0[li]++;
             else if (dir < 0) cnt1[li]++;
         }
 
         for (int li = 0; li < 20; li++) {
-            if (core_occupied[li]) continue;  // core区有人 → 不动锁
-
-            if (cnt0[li] == 0 && cnt1[li] == 0) {
+            if (core_occupied[li]) {
+                if (LaneFlow::g_lane_lock_dir[li] == 0) {
+                    // Lock not initialized but core occupied → init from guide path
+                    int dir = 0;
+                    for (int i = 0; i < env->num_of_agents && dir == 0; i++) {
+                        if (env->curr_task_schedule[i] < 0) continue;
+                        int loc = env->start_states[i].location;
+                        if (loc < 0) continue;
+                        if (get_cell_core_fast(loc) != li) continue;
+                        dir = path_dir_in_lane(trajLNS.trajs[i], li, LANE_DIR_LOOKAHEAD);
+                    }
+                    if (dir != 0)
+                        LaneFlow::g_lane_lock_dir[li] = dir;
+                }
+                // else core occupied + lock already set → freeze (keep current)
+            } else if (cnt0[li] == 0 && cnt1[li] == 0) {
                 LaneFlow::g_lane_lock_dir[li] = 0;
             } else if (cnt1[li] == 0) {
                 LaneFlow::g_lane_lock_dir[li] = 1;
             } else if (cnt0[li] == 0) {
                 LaneFlow::g_lane_lock_dir[li] = -1;
             } else {
+                // Both directions, no core occupancy → flip
                 LaneFlow::g_lane_lock_dir[li] = -(LaneFlow::g_lane_lock_dir[li]);
                 if (LaneFlow::g_lane_lock_dir[li] == 0)
                     LaneFlow::g_lane_lock_dir[li] = 1;
             }
+        }
+        // CSV debug: log per-lane lock state every 400 ticks
+        static FILE* lf = nullptr;
+        if (!lf) {
+            lf = fopen("lane_gate_debug.csv", "w");
+            if (lf) fprintf(lf, "tick,li,lock,cnt0,cnt1,core_occ,workers_in_lane,workers_in_core\n");
+        }
+        if (lf && (ts % 400 == 0 || ts <= 2000)) {
+            for (int li = 0; li < 20; li++) {
+                int workers_in_lane = 0, workers_in_core = 0;
+                for (int i = 0; i < env->num_of_agents; i++) {
+                    if (env->curr_task_schedule[i] < 0) continue;
+                    int loc = env->start_states[i].location;
+                    if (loc < 0) continue;
+                    if (get_cell_lane_fast(loc) == li) workers_in_lane++;
+                    if (get_cell_core_fast(loc) == li) workers_in_core++;
+                }
+                fprintf(lf, "%d,%d,%d,%d,%d,%d,%d,%d\n",
+                    ts, li, LaneFlow::g_lane_lock_dir[li],
+                    cnt0[li], cnt1[li], core_occupied[li]?1:0,
+                    workers_in_lane, workers_in_core);
+            }
+            fflush(lf);
         }
     }
 
@@ -190,15 +269,57 @@ namespace MyPlanner{
         return next;
     }
 
+    // BFS: compute nearest non-lane exit target for every lane cell
+    static void init_lane_exit_targets(SharedEnvironment* env) {
+        if (LaneFlow::g_lane_exit_target_initialized) return;
+        int N = env->map.size();
+        if (!LaneFlow::g_lane_exit_target)
+            LaneFlow::g_lane_exit_target = new int[N];
+        std::fill(LaneFlow::g_lane_exit_target, LaneFlow::g_lane_exit_target + N, -1);
+        std::queue<int> q;
+        for (int loc = 0; loc < N; loc++) {
+            if (get_cell_lane_fast(loc) < 0 && env->map[loc] == 0) {
+                LaneFlow::g_lane_exit_target[loc] = loc;
+                q.push(loc);
+            }
+        }
+        const int d4[4] = {1, -1, env->cols, -env->cols};
+        while (!q.empty()) {
+            int cur = q.front(); q.pop();
+            int cur_t = LaneFlow::g_lane_exit_target[cur];
+            for (int di = 0; di < 4; di++) {
+                int nxt = cur + d4[di];
+                if (nxt < 0 || nxt >= N) continue;
+                if (env->map[nxt] != 0) continue;  // wall
+                if (LaneFlow::g_lane_exit_target[nxt] >= 0) continue;  // already set
+                LaneFlow::g_lane_exit_target[nxt] = cur_t;
+                q.push(nxt);
+            }
+        }
+        LaneFlow::g_lane_exit_target_initialized = true;
+    }
+
     static void initialize_dummy_goals_if_needed(SharedEnvironment* env)
     {
-        if (env->curr_timestep != 0)
+#if USE_DUMMY_GOAL_STAY
+        // Dummy goal = nearest non-lane exit target → idle agent exits lane and stays put
+        init_lane_exit_targets(env);
+        dummy_goals.resize(env->num_of_agents);
+        for(int i=0; i<env->num_of_agents; i++) {
+            int loc = env->start_states[i].location;
+            int target = (loc >= 0 && loc < env->map.size())
+                ? LaneFlow::g_lane_exit_target[loc] : -1;
+            dummy_goals.at(i) = (target >= 0) ? target : loc;
+        }
+#else
+        // Original: only at tick 0, dummy goal = spawn position → idle agent walks home
+        int ts = env->system_timestep >= 0 ? env->system_timestep : env->curr_timestep;
+        if (ts != 0)
             return;
         dummy_goals.resize(env->num_of_agents);
         for(int i=0; i<env->num_of_agents; i++)
-        {
             dummy_goals.at(i) = env->start_states.at(i).location;
-        }
+#endif
     }
 
     static void setup_multistep_episode_state(SharedEnvironment* env, TimePoint flow_end_time,
