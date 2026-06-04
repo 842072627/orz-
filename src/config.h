@@ -81,6 +81,13 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define USE_IDLE_CAP         false   // 空载容量控制开关
 #define IDLE_RATIO           0.4f  // 最大活跃 agent 比例 (0~1.0)
 
+// ========== Planner-layer lane flow gate (champion-style, 2026-06-05) ==========
+#define USE_PLANNER_LANE_FLOW   1   // 1=启用planner层lane方向门控(投票+优先级+forbids_move)
+#define LANE_VOTE_PERIOD        80   // 每N tick重新投票翻转方向锁
+#define LANE_VOTE_RATIO         2   // 翻转阈值: 需 2:1 才翻转锁
+#define LANE_PRIORITY_DELTA   1000  // 顺流agent优先级增加量
+#define LANE_VOTE_LOOKAHEAD     15  // 只看guide path前N步内进入lane的agent投票
+
 // ========== BFS distance table (0=offmain only, 1=full matrix for cloud) ==========
 #define USE_BFS_TABLE       1   // 0: off-main only (本地), 1: 全量矩阵 (云端)
 

@@ -3,6 +3,7 @@
 
 #include "my_pibt.h"
 #include "../pibt_lock.h"
+#include "../lane_cells.h"
 #include <cstdint>
 
 namespace MyPlanner{
@@ -104,6 +105,24 @@ bool causalMY_PIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
 	for (auto& neighbor: neighbors){
 
 		assert(validateMove(prev_loc, neighbor, lns.env));
+
+#if USE_PLANNER_LANE_FLOW
+		// Forbids_move: block counterflow entry into a locked lane
+		{
+			int c_lane = get_cell_lane_fast(prev_loc);
+			if (c_lane < 0) {
+				int n_lane = get_cell_lane_fast(neighbor);
+				if (n_lane >= 0 && n_lane < 20) {
+					int lock = LaneFlow::g_lane_lock_dir[n_lane];
+					if (lock != 0) {
+						int entry = lane_entry_side(neighbor, n_lane);  // +1=end0, -1=end1
+						if ((lock > 0 && entry == -1) || (lock < 0 && entry == 1))
+							continue;  // counterflow entry → FORBID
+					}
+				}
+			}
+		}
+#endif
 
 		int min_heuristic = get_gp_h(lns, curr_id, neighbor);
 

@@ -20,6 +20,8 @@
 #include "my_pibt.h"
 #include "my_flow.h"
 #include "my_const.h"
+#include "../lane_cells.h"
+#include "../pibt_lock.h"
 #include <chrono>
 #include <iostream>
 #include <unordered_map>
@@ -57,6 +59,88 @@ namespace MyPlanner{
     std::vector<int> dummy_goals;
     TrajLNS trajLNS;
     std::mt19937 mt1;
+}
+
+// Lane flow gate state (outside MyPlanner namespace)
+#if USE_PLANNER_LANE_FLOW
+int LaneFlow::g_lane_lock_dir[20] = {0};
+int LaneFlow::g_lane_next_vote_tick = 0;
+#endif
+
+namespace MyPlanner{
+
+    // Scan first N steps of guide path for lane entry
+    // Returns direction: +1=end0→end1, -1=end1→end0, 0=no entry within lookahead
+    // Sets out_lane to the lane entered, -1 if none
+#if USE_PLANNER_LANE_FLOW
+    static int lane_entry_dir_short(const std::vector<int>& path, int cols, int& out_lane) {
+        out_lane = -1;
+        if (path.size() < 2) return 0;
+        int limit = std::min((int)path.size(), LANE_VOTE_LOOKAHEAD + 1);
+        int prev = path[0];
+        for (int pi = 1; pi < limit; pi++) {
+            int curr = path[pi];
+            if (curr < 0) continue;
+            if (get_cell_lane_fast(prev) < 0 && get_cell_lane_fast(curr) >= 0) {
+                out_lane = get_cell_lane_fast(curr);
+                return lane_entry_side(curr, out_lane);  // +1 or -1
+            }
+            prev = curr;
+        }
+        return 0;
+    }
+
+    // Periodic vote: scan agents' guide paths (first N steps), tally lane crossing directions, set lock
+    static void lane_vote(SharedEnvironment* env) {
+        // 冠军用 system_timestep（被 sync 正确更新），不用 curr_timestep（永远是 0）
+        int ts = env->system_timestep >= 0 ? env->system_timestep : env->curr_timestep;
+        if (ts < LaneFlow::g_lane_next_vote_tick) return;
+        LaneFlow::g_lane_next_vote_tick = ts + LANE_VOTE_PERIOD;
+
+        int up[20] = {0}, down[20] = {0};
+        int cols = env->cols;
+        for (int i = 0; i < env->num_of_agents; i++) {
+            int li = -1;
+            int dir = lane_entry_dir_short(trajLNS.trajs[i], cols, li);
+            if (dir == 0 || li < 0 || li >= 20) continue;
+            if (dir > 0) down[li]++;
+            else up[li]++;
+        }
+
+        // 2:1 flip rule (champion-style)
+        for (int li = 0; li < 20; li++) {
+            int cur = LaneFlow::g_lane_lock_dir[li];
+            // 两边都空 → 锁归零，让第一个到的 agent 重新设方向
+            if (up[li] == 0 && down[li] == 0) {
+                LaneFlow::g_lane_lock_dir[li] = 0;
+                continue;
+            }
+            if (cur == 0) {
+                if (down[li] > up[li]) LaneFlow::g_lane_lock_dir[li] = 1;
+                else if (up[li] > down[li]) LaneFlow::g_lane_lock_dir[li] = -1;
+            } else if (cur > 0) {
+                if (up[li] > LANE_VOTE_RATIO * down[li])
+                    LaneFlow::g_lane_lock_dir[li] = -1;
+            } else {
+                if (down[li] > LANE_VOTE_RATIO * up[li])
+                    LaneFlow::g_lane_lock_dir[li] = 1;
+            }
+        }
+    }
+
+    // Apply lane priority delta (modifies a COPY of priority, not the original)
+    static void apply_lane_priority(std::vector<double>& priority, SharedEnvironment* env) {
+        for (int i = 0; i < env->num_of_agents; i++) {
+            int li = -1;
+            int dir = lane_entry_dir_short(trajLNS.trajs[i], env->cols, li);
+            if (dir == 0 || li < 0) continue;
+            int lock = LaneFlow::g_lane_lock_dir[li];
+            if (lock == 0) continue;
+            if (dir == lock) priority[i] += LANE_PRIORITY_DELTA;
+            else priority[i] -= LANE_PRIORITY_DELTA;
+        }
+    }
+#endif
 
     static State rollout_next_state(const State& state, Action action, const SharedEnvironment* env)
     {
@@ -303,8 +387,12 @@ namespace MyPlanner{
                                         std::vector<Action>& one_step_actions)
     {
         const auto start_time = std::chrono::steady_clock::now();
+        std::vector<double> pibt_priority = local_priority;  // copy for lane adjustments
+#if USE_PLANNER_LANE_FLOW
+        apply_lane_priority(pibt_priority, env);  // modify copy only
+#endif
         std::sort(ids.begin(), ids.end(), [&](int a, int b) {
-                return local_priority.at(a) > local_priority.at(b);
+                return pibt_priority.at(a) > pibt_priority.at(b);
             }
         );
         //clear reset occupied
@@ -553,6 +641,11 @@ namespace MyPlanner{
         const auto setup_elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(after_setup - episode_start).count();
         // commit only cross-episode priority update (internal rollout keeps using local_priority only)
         p = local_priority;
+
+#if USE_PLANNER_LANE_FLOW
+        // Periodic lane direction vote
+        lane_vote(env);
+#endif
 
         for (int step = 0; step < num_steps; step++){
             if (std::chrono::steady_clock::now() >= episode_deadline){
