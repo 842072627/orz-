@@ -38,8 +38,8 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define WIDTH_BAND_1          4       // width < 4: very narrow
 #define WIDTH_BAND_2          12       // width 4-8: narrow
 #define WIDTH_BAND_3          18      // width 9-15: moderate
-#define FF_TH_BAND_1          1.48f   // threshold for width < 4 (very narrow)
-#define FF_TH_BAND_2          1.48f   // threshold for width 4-12 (narrow)
+#define FF_TH_BAND_1          1.58f   // threshold for width < 4 (very narrow)
+#define FF_TH_BAND_2          1.58f   // threshold for width 4-12 (narrow)
 #define FF_TH_BAND_3          3.52f    // threshold for width 12-18 (moderate)
 #define FF_TH_BAND_4          5.72f // threshold for width >= 16 (wide, never lock by default)
 
@@ -76,7 +76,6 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 // ========== Planner-layer lane flow gate (红绿灯) ==========
 #define USE_PLANNER_LANE_FLOW   1   // 1=启用planner层lane方向门控
 #define LANE_VOTE_PERIOD        80   // 每N tick投票翻转方向锁
-#define LANE_VOTE_RATIO         2   // 翻转阈值: 需 2:1 才翻转锁
 #define LANE_PRIORITY_DELTA   1000  // 顺流agent优先级增加量
 #define LANE_DIR_LOOKAHEAD      20  // 扫guide path前N步内的lane格求方向
 
@@ -101,7 +100,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 
 // ========== Main zone direction lock hold (prevent lock release/flip when zone is hot) ==========
 #define USE_MAIN_ZONE_LOCK_HOLD  true    // enable main zone density-based lock hold
-#define MAIN_ZONE_HOLD_CAP       16      // zone density >= this → keep lock direction unchanged
+#define MAIN_ZONE_HOLD_CAP       15      // zone density >= this → keep lock direction unchanged
 
 // ========== Task segment scoring coefficients (统一评分系数) ==========
 #define COEFF_AGENT_TASK1   1.0f    // agent→第一errand 距离系数

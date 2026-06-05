@@ -112,7 +112,7 @@ bool causalMY_PIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
 			int c_lane = get_cell_lane_fast(prev_loc);
 			if (c_lane < 0) {
 				int n_lane = get_cell_lane_fast(neighbor);
-				if (n_lane >= 0 && n_lane < 20) {
+				if (n_lane >= 0 && n_lane < LANE_TABLE_SIZE) {
 					int lock = LaneFlow::g_lane_lock_dir[n_lane];
 #if USE_LANE_FORBIDS_EXCLUDE_IDLE
 					if (lock != 0 && lns.env->curr_task_schedule[curr_id] >= 0) {
@@ -123,7 +123,7 @@ bool causalMY_PIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
 						const auto& path = lns.trajs[curr_id];
 						int dir = 0;
 						int first_m = -1, last_m = -1;
-						int limit = std::min((int)path.size(), LANE_DIR_LOOKAHEAD + 1);
+						int limit = std::min((int)path.size(), LANE_DIR_LOOKAHEAD);
 						for (int pi = 0; pi < limit; pi++) {
 							int loc = path[pi];
 							if (loc < 0) continue;

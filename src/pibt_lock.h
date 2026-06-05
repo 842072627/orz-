@@ -2,6 +2,7 @@
 // Shared state between scheduler (Centerline) and PIBT for direction ahead-check
 
 #include "../src/config.h"
+#include "lane_cells.h"
 #include <vector>
 
 namespace PIBT_Lock {
@@ -13,14 +14,14 @@ namespace PIBT_Lock {
 
 // Lane direction lock state — set by my_planner.cpp vote, read by my_pibt.cpp forbids/pibt_priority
 namespace LaneFlow {
-    extern int g_lane_lock_dir[20];             // 每条lane的锁方向: +1=end0→end1, -1=end1→end0, 0=无锁
+    extern int g_lane_lock_dir[LANE_TABLE_SIZE];             // 每条lane的锁方向: +1=end0→end1, -1=end1→end0, 0=无锁
     extern int g_lane_next_vote_tick;          // 当前会话中下一次投票的tick
     extern int* g_lane_exit_target;            // [loc] = 每个lane格最近的出口(非lane格)，-1=未初始化
     extern bool g_lane_exit_target_initialized;
-    extern int g_lane_blocked_plus[20];          // 当前周期被拦(+1方向)次数
-    extern int g_lane_blocked_minus[20];         // 当前周期被拦(-1方向)次数
-    extern int g_lane_passed_plus[20];           // 当前周期放行(+1方向)次数
-    extern int g_lane_passed_minus[20];          // 当前周期放行(-1方向)次数
+    extern int g_lane_blocked_plus[LANE_TABLE_SIZE];          // 当前周期被拦(+1方向)次数
+    extern int g_lane_blocked_minus[LANE_TABLE_SIZE];         // 当前周期被拦(-1方向)次数
+    extern int g_lane_passed_plus[LANE_TABLE_SIZE];           // 当前周期放行(+1方向)次数
+    extern int g_lane_passed_minus[LANE_TABLE_SIZE];          // 当前周期放行(-1方向)次数
 }
 
 // Centerline data shared with PIBT for wall-hugging (set by scheduler after init)

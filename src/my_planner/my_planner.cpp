@@ -64,14 +64,14 @@ namespace MyPlanner{
 
 // Lane flow gate state (outside MyPlanner namespace)
 #if USE_PLANNER_LANE_FLOW
-int LaneFlow::g_lane_lock_dir[20] = {0};
+int LaneFlow::g_lane_lock_dir[LANE_TABLE_SIZE] = {0};
 int LaneFlow::g_lane_next_vote_tick = 0;
 int* LaneFlow::g_lane_exit_target = nullptr;
 bool LaneFlow::g_lane_exit_target_initialized = false;
-int LaneFlow::g_lane_blocked_plus[20] = {0};
-int LaneFlow::g_lane_blocked_minus[20] = {0};
-int LaneFlow::g_lane_passed_plus[20] = {0};
-int LaneFlow::g_lane_passed_minus[20] = {0};
+int LaneFlow::g_lane_blocked_plus[LANE_TABLE_SIZE] = {0};
+int LaneFlow::g_lane_blocked_minus[LANE_TABLE_SIZE] = {0};
+int LaneFlow::g_lane_passed_plus[LANE_TABLE_SIZE] = {0};
+int LaneFlow::g_lane_passed_minus[LANE_TABLE_SIZE] = {0};
 #endif
 
 namespace MyPlanner{
@@ -149,36 +149,36 @@ namespace MyPlanner{
         LaneFlow::g_lane_next_vote_tick = ts + LANE_VOTE_PERIOD;
 
         // Check each lane's core zone for occupancy (only agents with real tasks)
-        bool core_occupied[20] = {false};
-        int core_count[20] = {0};  // number of agents in core
+        bool core_occupied[LANE_TABLE_SIZE] = {false};
+        int core_count[LANE_TABLE_SIZE] = {0};  // number of agents in core
         for (int i = 0; i < env->num_of_agents; i++) {
             if (env->curr_task_schedule[i] < 0) continue;  // no real task
             int loc = env->start_states[i].location;
             if (loc < 0) continue;
             int cl = get_cell_core_fast(loc);
-            if (cl >= 0 && cl < 20) {
+            if (cl >= 0 && cl < LANE_TABLE_SIZE) {
                 core_occupied[cl] = true;
                 core_count[cl]++;
             }
         }
 
-        int cnt0[20] = {0}, cnt1[20] = {0};
+        int cnt0[LANE_TABLE_SIZE] = {0}, cnt1[LANE_TABLE_SIZE] = {0};
         for (int i = 0; i < env->num_of_agents; i++) {
             if (env->curr_task_schedule[i] < 0) continue;  // no real task
             int loc = env->start_states[i].location;
             if (loc < 0) continue;
             int li = get_cell_lane_fast(loc);
-            if (li < 0 || li >= 20) continue;
+            if (li < 0 || li >= LANE_TABLE_SIZE) continue;
             int dir = path_dir_in_lane(trajLNS.trajs[i], li, LANE_DIR_LOOKAHEAD);
             if (dir > 0) cnt0[li]++;
             else if (dir < 0) cnt1[li]++;
         }
 
-        int prev_lock[20];
-        for (int li = 0; li < 20; li++) {
+        int prev_lock[LANE_TABLE_SIZE];
+        for (int li = 0; li < LANE_TABLE_SIZE; li++) {
             prev_lock[li] = LaneFlow::g_lane_lock_dir[li];
         }
-        for (int li = 0; li < 20; li++) {
+        for (int li = 0; li < LANE_TABLE_SIZE; li++) {
 #if USE_LANE_FLOW_STATS
             bool flow_exceeded = false;
             if (prev_lock[li] != 0) {
@@ -222,7 +222,7 @@ namespace MyPlanner{
             if (lf) fprintf(lf, "tick,li,lock,cnt0,cnt1,core_occ,workers_in_lane,workers_in_core,blk_p,blk_m,pass_p,pass_m\n");
         }
         if (lf && (ts % 400 == 0 || ts <= 2000)) {
-            for (int li = 0; li < 20; li++) {
+            for (int li = 0; li < LANE_TABLE_SIZE; li++) {
                 int workers_in_lane = 0, workers_in_core = 0;
                 for (int i = 0; i < env->num_of_agents; i++) {
                     if (env->curr_task_schedule[i] < 0) continue;
@@ -244,7 +244,7 @@ namespace MyPlanner{
         }
 #if USE_LANE_FLOW_STATS
         // Reset per-period counters
-        for (int li = 0; li < 20; li++) {
+        for (int li = 0; li < LANE_TABLE_SIZE; li++) {
             LaneFlow::g_lane_blocked_plus[li] = 0;
             LaneFlow::g_lane_blocked_minus[li] = 0;
             LaneFlow::g_lane_passed_plus[li] = 0;
