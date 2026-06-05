@@ -98,7 +98,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define LANE_FLOW_RATIO_FLIP    3   // 拦/放流比>=此值强制翻转锁(无视core_occupied)
 
 // ========== BFS distance table (0=offmain only, 1=full matrix for cloud) ==========
-#define USE_BFS_TABLE       0   // 0: off-main only (本地), 1: 全量矩阵 (云端)
+#define USE_BFS_TABLE       1   // 0: off-main only (本地), 1: 全量矩阵 (云端)
 
 // ========== Migration flags (step-by-step control, can revert individually) ==========
 #define USE_MP_CENTERLINE   1   // Phase 1: A* widest path centerline (matches heatmap analysis)
@@ -108,7 +108,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define WIDTH_GRAD_2        18   // width < this → TH_GRAD_2 (窄, baseline)
 #define WIDTH_GRAD_3        999  // width < this → TH_GRAD_3 (中)
 // width >= WIDTH_GRAD_3 → TH_GRAD_4 (宽不锁)
-#define TH_GRAD_1           1.72f
+#define TH_GRAD_1           1.52f
 #define TH_GRAD_2           3.72f
 #define TH_GRAD_3           5.72f
 #define TH_GRAD_4           5.72f   // 宽走廊不锁
