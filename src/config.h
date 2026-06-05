@@ -73,6 +73,23 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define WALL_HUG_WIDTH_MAX       20      // max corridor width (cells) for wall-hugging
 #define WALL_HUG_BRANCH_BIAS_MAX 2       // max per-step branch bias for A* (0-5, larger = stronger)
 
+// ========== Planner-layer lane flow gate (红绿灯) ==========
+#define USE_PLANNER_LANE_FLOW   1   // 1=启用planner层lane方向门控
+#define LANE_VOTE_PERIOD        80   // 每N tick投票翻转方向锁
+#define LANE_VOTE_RATIO         2   // 翻转阈值: 需 2:1 才翻转锁
+#define LANE_PRIORITY_DELTA   1000  // 顺流agent优先级增加量
+#define LANE_DIR_LOOKAHEAD      20  // 扫guide path前N步内的lane格求方向
+
+// ========== Lane flow statistics ==========
+#define USE_LANE_FLOW_STATS     1   // 1=统计forbids_move拦/放次数
+#define LANE_CORE_CLEAR_THRESH  4   // 核心区人数<=此值视为清空
+#define LANE_FLOW_RATIO_FLIP    3   // 拦/放流比>=此值强制翻锁
+#define USE_LANE_FORBIDS_EXCLUDE_IDLE 1  // 1=无任务agent不受forbids_move限制
+
+// ========== Dummy goal behavior for idle agents ==========
+#define USE_DUMMY_GOAL_STAY     1   // 1=dummy goal = 当前位置
+#define USE_DUMMY_EXIT_TARGET   1   // 1=没任务agent走到最近lane出口
+
 // ========== Idle capacity control ==========
 #define USE_IDLE_CAP         false   // 空载容量控制开关
 #define IDLE_RATIO           0.4f  // 最大活跃 agent 比例 (0~1.0)

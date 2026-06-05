@@ -3,6 +3,7 @@
 
 #include "my_pibt.h"
 #include "../pibt_lock.h"
+#include "../lane_cells.h"
 #include <cstdint>
 
 namespace MyPlanner{
@@ -104,6 +105,62 @@ bool causalMY_PIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
 	for (auto& neighbor: neighbors){
 
 		assert(validateMove(prev_loc, neighbor, lns.env));
+
+#if USE_PLANNER_LANE_FLOW
+		// Forbids_move: block counterflow entry based on guide path direction through lane
+		{
+			int c_lane = get_cell_lane_fast(prev_loc);
+			if (c_lane < 0) {
+				int n_lane = get_cell_lane_fast(neighbor);
+				if (n_lane >= 0 && n_lane < 20) {
+					int lock = LaneFlow::g_lane_lock_dir[n_lane];
+#if USE_LANE_FORBIDS_EXCLUDE_IDLE
+					if (lock != 0 && lns.env->curr_task_schedule[curr_id] >= 0) {
+#else
+					if (lock != 0) {
+#endif
+						// Scan guide path lookahead for first→last main_dist in this lane
+						const auto& path = lns.trajs[curr_id];
+						int dir = 0;
+						int first_m = -1, last_m = -1;
+						int limit = std::min((int)path.size(), LANE_DIR_LOOKAHEAD + 1);
+						for (int pi = 0; pi < limit; pi++) {
+							int loc = path[pi];
+							if (loc < 0) continue;
+							if (get_cell_lane_fast(loc) != n_lane) {
+								if (first_m >= 0) break;  // exited lane
+								continue;
+							}
+							if (CenterlineAccess::g_main_dist) {
+								int m = (*CenterlineAccess::g_main_dist)[loc];
+								if (m >= 0) {
+									if (first_m < 0) first_m = m;
+									last_m = m;
+								}
+							}
+						}
+						if (first_m >= 0 && last_m >= 0)
+							dir = (last_m > first_m) ? 1 : -1;
+#if USE_LANE_FLOW_STATS
+						if (dir != 0) {
+							if (dir != lock) {
+								if (dir > 0) LaneFlow::g_lane_blocked_plus[n_lane]++;
+								else LaneFlow::g_lane_blocked_minus[n_lane]++;
+								continue;  // counterflow → FORBID
+							} else {
+								if (dir > 0) LaneFlow::g_lane_passed_plus[n_lane]++;
+								else LaneFlow::g_lane_passed_minus[n_lane]++;
+							}
+						}
+#else
+						if (dir != 0 && dir != lock)
+							continue;  // counterflow → FORBID
+#endif
+					}
+				}
+			}
+		}
+#endif
 
 		int min_heuristic = get_gp_h(lns, curr_id, neighbor);
 
