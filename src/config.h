@@ -38,8 +38,8 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define WIDTH_BAND_1          4       // width < 4: very narrow
 #define WIDTH_BAND_2          12       // width 4-8: narrow
 #define WIDTH_BAND_3          18      // width 9-15: moderate
-#define FF_TH_BAND_1          1.58f   // threshold for width < 4 (very narrow)
-#define FF_TH_BAND_2          1.58f   // threshold for width 4-12 (narrow)
+#define FF_TH_BAND_1          6.0f   // threshold for width < 4 (very narrow)
+#define FF_TH_BAND_2          6.0f   // threshold for width 4-12 (narrow)
 #define FF_TH_BAND_3          3.52f    // threshold for width 12-18 (moderate)
 #define FF_TH_BAND_4          5.72f // threshold for width >= 16 (wide, never lock by default)
 
@@ -74,7 +74,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define WALL_HUG_BRANCH_BIAS_MAX 2       // max per-step branch bias for A* (0-5, larger = stronger)
 
 // ========== Planner-layer lane flow gate (红绿灯) ==========
-#define USE_PLANNER_LANE_FLOW   1   // 1=启用planner层lane方向门控
+#define USE_PLANNER_LANE_FLOW   0   // 1=启用planner层lane方向门控
 #define LANE_VOTE_PERIOD        80   // 每N tick投票翻转方向锁
 #define LANE_PRIORITY_DELTA   1000  // 顺流agent优先级增加量
 #define LANE_DIR_LOOKAHEAD      20  // 扫guide path前N步内的lane格求方向
@@ -111,6 +111,19 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 
 // ========== Diagnostic logging ==========
 #define USE_DIAG_LOG    0   // 1 = write CSV logs + console prints; 0 = silent (cloud test)
+
+// ========== Congestion data collection (independent of lane flow gate) ==========
+#define USE_CONGESTION_DATA  1   // 1 = collect per-tick core/lane congestion stats
+
+// ========== Lane congestion relief (redirect counterflow + red light) ==========
+#define LANE_RELIEF_ENABLED      1     // 拥塞疏导总开关
+#define LANE_RELIEF_TICKS       300   // 疏导持续tick数
+#define LANE_RELIEF_OCC_THRESH  75    // occ >= 此值触发条件1
+#define LANE_RELIEF_S10_THRESH  2     // stuck10 >= 此值触发条件1
+#define LANE_RELIEF_ALT_OCC     65    // occ >= 此值触发条件2(备选)
+#define LANE_RELIEF_ALT_GROWTH  50    // 增长率 >= 此值触发条件2(备选)
+#define LANE_RELIEF_BALANCE     0.3f  // 方向均衡度 >= 此值才允许触发
+#define LANE_RELIEF_FRINGE_NEAR 5     // 距端点几步内的cell算"出口端"
 
 // Runtime strategy name getter (used by TaskScheduler.cpp)
 inline std::string get_orz_strategy() { return ORZ_SCHEDULER; }

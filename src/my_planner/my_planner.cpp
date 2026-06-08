@@ -63,15 +63,20 @@ namespace MyPlanner{
 }
 
 // Lane flow gate state (outside MyPlanner namespace)
-#if USE_PLANNER_LANE_FLOW
 int LaneFlow::g_lane_lock_dir[LANE_TABLE_SIZE] = {0};
 int LaneFlow::g_lane_next_vote_tick = 0;
-int* LaneFlow::g_lane_exit_target = nullptr;
-bool LaneFlow::g_lane_exit_target_initialized = false;
 int LaneFlow::g_lane_blocked_plus[LANE_TABLE_SIZE] = {0};
 int LaneFlow::g_lane_blocked_minus[LANE_TABLE_SIZE] = {0};
 int LaneFlow::g_lane_passed_plus[LANE_TABLE_SIZE] = {0};
 int LaneFlow::g_lane_passed_minus[LANE_TABLE_SIZE] = {0};
+// Exit target used by dummy goal system (independent of red light)
+int* LaneFlow::g_lane_exit_target = nullptr;
+bool LaneFlow::g_lane_exit_target_initialized = false;
+
+// Lane congestion relief state
+#if LANE_RELIEF_ENABLED
+int LaneFlow::g_lane_relief_until[LANE_TABLE_SIZE] = {0};
+int LaneFlow::g_lane_relief_dir[LANE_TABLE_SIZE] = {0};
 #endif
 
 namespace MyPlanner{
@@ -103,13 +108,13 @@ namespace MyPlanner{
                 last_m = m;
             }
         }
-        if (first_m >= 0 && last_m >= 0)
+        if (first_m >= 0 && last_m >= 0 && first_m != last_m)
             return (last_m > first_m) ? 1 : -1;
         return 0;
     }
 
     // Scan guide path for lane entry (prev outside, curr inside), returns direction
-#if USE_PLANNER_LANE_FLOW
+#if USE_PLANNER_LANE_FLOW || LANE_RELIEF_ENABLED
     static int lane_entry_dir_short(const std::vector<int>& path, int cols, int goal_loc, int& out_lane) {
         out_lane = -1;
         if (path.size() < 2) return 0;
@@ -265,7 +270,7 @@ namespace MyPlanner{
             else priority[i] -= LANE_PRIORITY_DELTA;
         }
     }
-#endif
+#endif  // USE_PLANNER_LANE_FLOW || LANE_RELIEF_ENABLED
 
     static State rollout_next_state(const State& state, Action action, const SharedEnvironment* env)
     {
@@ -562,7 +567,7 @@ namespace MyPlanner{
     {
         const auto start_time = std::chrono::steady_clock::now();
         std::vector<double> pibt_priority = local_priority;  // copy for lane adjustments
-#if USE_PLANNER_LANE_FLOW
+#if USE_PLANNER_LANE_FLOW || LANE_RELIEF_ENABLED
         apply_lane_priority(pibt_priority, env);  // modify copy only
 #endif
         std::sort(ids.begin(), ids.end(), [&](int a, int b) {
@@ -718,6 +723,533 @@ namespace MyPlanner{
         env->curr_timestep += 1;
     }
 
+#if USE_CONGESTION_DATA
+    // ===== Congestion data collection (per-tick aggregate + per-lane every 200 ticks) =====
+    static std::vector<int> g_cd_prev_loc;
+    static std::vector<int> g_cd_prev_in_lane;
+    static std::vector<int> g_cd_stuck_ticks;
+    static int g_cd_core_cell_count[LANE_TABLE_SIZE] = {0};
+    static bool g_cd_inited = false;
+    static int g_cd_last_lane_tick = 0;  // last tick we wrote per-lane data
+    static int g_cd_call_count = 0;      // global call counter for periodic lane CSV
+    static int g_cd_prev_lane_agents[LANE_TABLE_SIZE] = {0};  // previous call's lane agent counts
+
+    static void init_congestion_data(SharedEnvironment* env) {
+        if (g_cd_inited) return;
+        int N = env->num_of_agents;
+        g_cd_prev_loc.assign(N, -1);
+        g_cd_prev_in_lane.assign(N, -1);
+        g_cd_stuck_ticks.assign(N, 0);
+        for (int loc = 0; loc < (int)env->map.size(); loc++) {
+            if (env->map[loc] != 0) continue;
+            int cl = get_cell_core_fast(loc);
+            if (cl >= 0 && cl < LANE_TABLE_SIZE)
+                g_cd_core_cell_count[cl]++;
+        }
+        g_cd_inited = true;
+    }
+
+    static void collect_congestion_data(SharedEnvironment* env, int tick) {
+        if (!g_cd_inited) init_congestion_data(env);
+        g_cd_call_count++;
+        int N = env->num_of_agents;
+        int cols = env->cols;
+
+        // Per-lane accumulators
+        int lane_agents[LANE_TABLE_SIZE] = {0};
+        int lane_idle_cnt[LANE_TABLE_SIZE] = {0};
+        int core_agents_cnt[LANE_TABLE_SIZE] = {0};
+        int core_idle_cnt[LANE_TABLE_SIZE] = {0};
+        int core_stuck10[LANE_TABLE_SIZE] = {0};
+        int core_stuck50[LANE_TABLE_SIZE] = {0};
+        int core_stuck100[LANE_TABLE_SIZE] = {0};
+        int dir_plus_cnt[LANE_TABLE_SIZE] = {0};
+        int dir_minus_cnt[LANE_TABLE_SIZE] = {0};
+        int inflow_cnt[LANE_TABLE_SIZE] = {0};
+        int outflow_cnt[LANE_TABLE_SIZE] = {0};
+        int entry_q_cnt[LANE_TABLE_SIZE] = {0};
+
+        // Aggregate totals
+        int tot_core_agents = 0, tot_core_idle = 0;
+        int tot_stuck10 = 0, tot_stuck50 = 0, tot_stuck100 = 0;
+        int tot_lane_agents = 0, tot_lane_idle = 0;
+        int tot_inflow = 0, tot_outflow = 0, tot_entry_q = 0;
+        int tot_dir_plus = 0, tot_dir_minus = 0;
+
+        for (int i = 0; i < N; i++) {
+            if (env->curr_task_schedule[i] < -1) continue; // skip invalid
+            int loc = env->start_states[i].location;
+            if (loc < 0) continue;
+            bool has_task = (env->curr_task_schedule[i] >= 0);
+
+            int li = get_cell_lane_fast(loc);
+            int ci = get_cell_core_fast(loc);
+
+            // Stuck tracking
+            if ((int)g_cd_prev_loc.size() <= i) {
+                g_cd_prev_loc.resize(i + 1, -1);
+                g_cd_prev_in_lane.resize(i + 1, -1);
+                g_cd_stuck_ticks.resize(i + 1, 0);
+            }
+            if (g_cd_prev_loc[i] == loc)
+                g_cd_stuck_ticks[i]++;
+            else
+                g_cd_stuck_ticks[i] = 0;
+            g_cd_prev_loc[i] = loc;
+
+            int prev_li = g_cd_prev_in_lane[i];
+            g_cd_prev_in_lane[i] = li;
+
+            // Lane agent counts
+            if (li >= 0 && li < LANE_TABLE_SIZE) {
+                lane_agents[li]++;
+                tot_lane_agents++;
+                if (!has_task) { lane_idle_cnt[li]++; tot_lane_idle++; }
+
+                // Direction from guide path
+                if (i < (int)trajLNS.trajs.size()) {
+                    int dir = path_dir_in_lane(trajLNS.trajs[i], li, LANE_DIR_LOOKAHEAD);
+                    if (dir > 0) { dir_plus_cnt[li]++; tot_dir_plus++; }
+                    else if (dir < 0) { dir_minus_cnt[li]++; tot_dir_minus++; }
+                }
+            }
+
+            // Core agent counts
+            if (ci >= 0 && ci < LANE_TABLE_SIZE) {
+                core_agents_cnt[ci]++;
+                tot_core_agents++;
+                if (!has_task) { core_idle_cnt[ci]++; tot_core_idle++; }
+                int st = g_cd_stuck_ticks[i];
+                if (st >= 100) { core_stuck100[ci]++; tot_stuck100++; }
+                if (st >= 50)  { core_stuck50[ci]++; tot_stuck50++; }
+                if (st >= 10)  { core_stuck10[ci]++; tot_stuck10++; }
+            }
+
+            // Inflow/outflow (lane transition detection)
+            if (prev_li != li) {
+                if (li >= 0) { inflow_cnt[li]++; tot_inflow++; }
+                if (prev_li >= 0 && prev_li < LANE_TABLE_SIZE) { outflow_cnt[prev_li]++; tot_outflow++; }
+            }
+
+            // Entry queue: outside lane but adjacent to a lane cell
+            if (li < 0) {
+                int r = loc / cols, c = loc % cols;
+                int ndirs[4] = {1, -1, cols, -cols};
+                for (int d = 0; d < 4; d++) {
+                    int nloc = loc + ndirs[d];
+                    if (nloc < 0 || nloc >= (int)env->map.size()) continue;
+                    // Bounds check for lateral moves
+                    if (ndirs[d] == 1 || ndirs[d] == -1) {
+                        int nc = (loc % cols) + (ndirs[d] == 1 ? 1 : -1);
+                        if (nc < 0 || nc >= cols) continue;
+                    }
+                    int nl = get_cell_lane_fast(nloc);
+                    if (nl >= 0 && nl < LANE_TABLE_SIZE) {
+                        entry_q_cnt[nl]++;
+                        tot_entry_q++;
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Write aggregate CSV (every tick)
+        static FILE* agg_f = nullptr;
+        if (!agg_f) {
+            agg_f = fopen("congestion_agg.csv", "w");
+            if (agg_f) fprintf(agg_f, "tick,core_agents,core_idle,stuck10,stuck50,stuck100,"
+                "lane_agents,lane_idle,inflow,outflow,entry_q,dir_plus,dir_minus\n");
+        }
+        if (agg_f) {
+            fprintf(agg_f, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n",
+                tick, tot_core_agents, tot_core_idle,
+                tot_stuck10, tot_stuck50, tot_stuck100,
+                tot_lane_agents, tot_lane_idle,
+                tot_inflow, tot_outflow, tot_entry_q,
+                tot_dir_plus, tot_dir_minus);
+            if (tick % 500 == 0) fflush(agg_f);
+        }
+
+        // Write per-lane CSV (every ~200 system ticks, use call count as proxy)
+        if (g_cd_call_count % 200 == 1) {
+            static FILE* lane_f = nullptr;
+            if (!lane_f) {
+                lane_f = fopen("congestion_lane.csv", "w");
+                if (lane_f) fprintf(lane_f, "tick,li,lane_agents,lane_idle,"
+                    "core_agents,core_idle,core_cells,core_occ_pct,"
+                    "stuck10,stuck50,stuck100,"
+                    "dir_plus,dir_minus,inflow,outflow,entry_q\n");
+            }
+            if (lane_f) {
+                for (int li = 0; li < LANE_TABLE_SIZE; li++) {
+                    int cc = g_cd_core_cell_count[li];
+                    int occ_pct = (cc > 0) ? (core_agents_cnt[li] * 100 / cc) : 0;
+                    fprintf(lane_f, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n",
+                        g_cd_call_count, li,
+                        lane_agents[li], lane_idle_cnt[li],
+                        core_agents_cnt[li], core_idle_cnt[li], cc, occ_pct,
+                        core_stuck10[li], core_stuck50[li], core_stuck100[li],
+                        dir_plus_cnt[li], dir_minus_cnt[li],
+                        inflow_cnt[li], outflow_cnt[li], entry_q_cnt[li]);
+                }
+                fflush(lane_f);
+            }
+        }
+
+        // Congestion alert: check each lane against detection rule
+        // Rule: balance>=0.3 AND [(occ>=75% && stuck10>=2) || (occ>=65% && laneAg_growth>=50%)]
+        {
+            static FILE* alert_f = nullptr;
+            if (!alert_f) {
+                alert_f = fopen("congestion_alerts.csv", "w");
+                if (alert_f) fprintf(alert_f, "call,tick,li,occ_pct,stuck10,growth_pct,balance,trigger_rule\n");
+            }
+            if (alert_f) {
+                for (int li = 0; li < LANE_TABLE_SIZE; li++) {
+                    int occ_pct = (g_cd_core_cell_count[li] > 0)
+                        ? (core_agents_cnt[li] * 100 / g_cd_core_cell_count[li]) : 0;
+                    int total_dir = dir_plus_cnt[li] + dir_minus_cnt[li];
+                    double balance = (total_dir > 5)
+                        ? (std::min(dir_plus_cnt[li], dir_minus_cnt[li]) * 2.0 / total_dir)
+                        : 0.0;
+                    
+                    // Compute growth rate from previous snapshot
+                    int growth = 0;
+                    if (g_cd_prev_lane_agents[li] > 0 && lane_agents[li] > g_cd_prev_lane_agents[li])
+                        growth = (lane_agents[li] - g_cd_prev_lane_agents[li]) * 100 / g_cd_prev_lane_agents[li];
+                    
+                    bool triggered = false;
+                    const char* rule = "";
+                    if (balance >= 0.3) {
+                        if (occ_pct >= 75 && core_stuck10[li] >= 2) {
+                            triggered = true;
+                            rule = "occ75+s10";
+                        } else if (occ_pct >= 65 && growth >= 50) {
+                            triggered = true;
+                            rule = "occ65+growth";
+                        }
+                    }
+                    if (triggered) {
+                        fprintf(alert_f, "%d,%d,%d,%d,%d,%d,%.2f,%s\n",
+                            g_cd_call_count, tick, li, occ_pct, core_stuck10[li],
+                            growth, balance, rule);
+                    }
+                    
+                    // Save for next growth calculation
+                    g_cd_prev_lane_agents[li] = lane_agents[li];
+                }
+                if (tick % 100 == 0) fflush(alert_f);
+            }
+        }
+    }
+#endif
+
+// ===== Lane congestion relief: redirect counterflow + red light =====
+#if LANE_RELIEF_ENABLED
+// Pre-computed exit fringe cells for each lane+direction
+static std::vector<int> g_lane_fringe[LANE_TABLE_SIZE][2]; // [li][0]=dir-1, [li][1]=dir+1
+static bool g_lane_fringe_ready = false;
+static int g_lane_core_cell_count[LANE_TABLE_SIZE] = {0};  // core cells per lane
+
+static void init_lane_fringe(SharedEnvironment* env) {
+    if (g_lane_fringe_ready) return;
+    if (!CenterlineAccess::g_main_dist) return;
+    int N = env->map.size();
+    int cols = env->cols;
+    for (int li = 0; li < LANE_TABLE_SIZE; li++) {
+        g_lane_fringe[li][0].clear();
+        g_lane_fringe[li][1].clear();
+    }
+    // Step 1: find min/max main_dist per lane + count core cells
+    int min_m[LANE_TABLE_SIZE], max_m[LANE_TABLE_SIZE];
+    memset(g_lane_core_cell_count, 0, sizeof(g_lane_core_cell_count));
+    for (int li = 0; li < LANE_TABLE_SIZE; li++) { min_m[li] = 99999999; max_m[li] = -1; }
+    for (int loc = 0; loc < N; loc++) {
+        if (env->map[loc] != 0) continue;
+        int li = get_cell_lane_fast(loc);
+        if (li >= 0 && li < LANE_TABLE_SIZE) {
+            int m = (*CenterlineAccess::g_main_dist)[loc];
+            if (m >= 0) {
+                if (m < min_m[li]) min_m[li] = m;
+                if (m > max_m[li]) max_m[li] = m;
+            }
+        }
+        int ci = get_cell_core_fast(loc);
+        if (ci >= 0 && ci < LANE_TABLE_SIZE) g_lane_core_cell_count[ci]++;
+    }
+    // Step 2: for cells near min main_dist → fringe[-1], near max → fringe[+1]
+    // Fringe = walkable cells OUTSIDE the lane adjacent to lane edge cells
+    for (int loc = 0; loc < N; loc++) {
+        if (env->map[loc] != 0) continue;
+        int li = get_cell_lane_fast(loc);
+        if (li < 0 || li >= LANE_TABLE_SIZE) continue;
+        int m = (*CenterlineAccess::g_main_dist)[loc];
+        if (m < 0) continue;
+        int range = max_m[li] - min_m[li];
+        if (range <= 0) continue;
+        int fringe_idx = (m - min_m[li] >= range / 2) ? 1 : 0;
+        int ndirs[4] = {1, -1, cols, -cols};
+        for (int d = 0; d < 4; d++) {
+            int nloc = loc + ndirs[d];
+            if (nloc < 0 || nloc >= N) continue;
+            if (ndirs[d] == 1 || ndirs[d] == -1) {
+                int nc = (loc % cols) + (ndirs[d] == 1 ? 1 : -1);
+                if (nc < 0 || nc >= cols) continue;
+            }
+            if (env->map[nloc] != 0) continue;
+            if (get_cell_lane_fast(nloc) >= 0) continue;
+            auto& vec = g_lane_fringe[li][fringe_idx];
+            if (std::find(vec.begin(), vec.end(), nloc) == vec.end())
+                vec.push_back(nloc);
+        }
+    }
+    for (int li = 0; li < LANE_TABLE_SIZE; li++) {
+        for (int di = 0; di < 2; di++) {
+            auto& vec = g_lane_fringe[li][di];
+            std::sort(vec.begin(), vec.end());
+            vec.erase(std::unique(vec.begin(), vec.end()), vec.end());
+        }
+    }
+    g_lane_fringe_ready = true;
+}
+
+// Determine顺流 direction for a lane: majority direction of agents inside it
+static int lane_majority_dir(int li, SharedEnvironment* env) {
+    int cnt_plus = 0, cnt_minus = 0;
+    for (int i = 0; i < env->num_of_agents; i++) {
+        if (env->curr_task_schedule[i] < 0) continue;
+        int loc = env->start_states[i].location;
+        if (loc < 0) continue;
+        if (get_cell_lane_fast(loc) != li) continue;
+        int dir = path_dir_in_lane(trajLNS.trajs[i], li, LANE_DIR_LOOKAHEAD);
+        if (dir > 0) cnt_plus++;
+        else if (dir < 0) cnt_minus++;
+    }
+    if (cnt_plus > cnt_minus) return 1;
+    if (cnt_minus > cnt_plus) return -1;
+    return (rand() > RAND_MAX / 2) ? 1 : -1;
+}
+
+// Check congestion trigger for a lane (same rule as alert CSV)
+static bool lane_is_congested(int li, int& occ_pct, int& stuck10, int& growth_pct,
+                              int lane_agents, int prev_lane_agents,
+                              int core_agents, int core_cells,
+                              int dir_plus, int dir_minus) {
+    if (core_cells <= 0) return false;
+    occ_pct = core_agents * 100 / core_cells;
+    
+    // Flow balance check
+    int total_dir = dir_plus + dir_minus;
+    float balance = (total_dir > 5) ? (std::min(dir_plus, dir_minus) * 2.0f / total_dir) : 0.0f;
+    if (balance < LANE_RELIEF_BALANCE) return false;
+    
+    // Condition 1: high occ + stuck
+    if (occ_pct >= LANE_RELIEF_OCC_THRESH && stuck10 >= LANE_RELIEF_S10_THRESH)
+        return true;
+    
+    // Condition 2: moderate occ + rapid growth
+    if (prev_lane_agents > 0 && lane_agents > prev_lane_agents) {
+        growth_pct = (lane_agents - prev_lane_agents) * 100 / prev_lane_agents;
+        if (occ_pct >= LANE_RELIEF_ALT_OCC && growth_pct >= LANE_RELIEF_ALT_GROWTH)
+            return true;
+    }
+    return false;
+}
+
+// Per-tick: relieve congested lanes (called from plan() after lane_vote)
+static int g_relief_prev_lane_agents[LANE_TABLE_SIZE] = {0};
+static int g_relief_window_agents[LANE_TABLE_SIZE] = {0};
+static int g_relief_window_tick = -100;  // first window update at tick 0
+static std::mt19937 g_relief_rng(42);
+// Diagnostic counters for relief effectiveness
+static int g_relief_trigger_count = 0;
+static int g_relief_redirect_total = 0;
+static int g_relief_triggers_per_lane[LANE_TABLE_SIZE] = {0};
+static int g_relief_redirects_per_lane[LANE_TABLE_SIZE] = {0};
+
+// Find nearest fringe cell (by main_dist) for an agent in the lane
+static int find_nearest_fringe_in_set(int loc, const std::vector<int>& fringe) {
+    if (fringe.empty()) return -1;
+    if (!CenterlineAccess::g_main_dist) return fringe[0];
+    int agent_m = (*CenterlineAccess::g_main_dist)[loc];
+    if (agent_m < 0) return fringe[0];
+    int best = fringe[0];
+    int best_d = abs((*CenterlineAccess::g_main_dist)[best] - agent_m);
+    for (int f : fringe) {
+        int d = abs((*CenterlineAccess::g_main_dist)[f] - agent_m);
+        if (d < best_d) { best_d = d; best = f; }
+    }
+    return best;
+}
+
+static void relieve_congestion(SharedEnvironment* env) {
+    // Lazy init fallback: if fringe not ready (main_dist init delayed), retry
+    if (!g_lane_fringe_ready) init_lane_fringe(env);
+    int tick = env->system_timestep >= 0 ? env->system_timestep : env->curr_timestep;
+    int N = env->num_of_agents;
+    
+    // === STEP 1: Check expired relief → unlock ===
+    for (int li = 0; li < LANE_TABLE_SIZE; li++) {
+        if (LaneFlow::g_lane_relief_until[li] > 0 && tick > LaneFlow::g_lane_relief_until[li]) {
+            LaneFlow::g_lane_lock_dir[li] = 0;
+            LaneFlow::g_lane_relief_until[li] = 0;
+            LaneFlow::g_lane_relief_dir[li] = 0;
+        }
+    }
+    
+    // === STEP 2: Per-tick lane stats for detection ===
+    int lane_agents[LANE_TABLE_SIZE] = {0};
+    int core_agents[LANE_TABLE_SIZE] = {0};
+    int stuck10[LANE_TABLE_SIZE] = {0};
+    int dir_plus[LANE_TABLE_SIZE] = {0};
+    int dir_minus[LANE_TABLE_SIZE] = {0};
+    
+    // Track stuck ticks per agent (use static storage)
+    static std::vector<int> relief_prev_loc;
+    static std::vector<int> relief_stuck;
+    relief_prev_loc.resize(N, -1);
+    relief_stuck.resize(N, 0);
+    
+    for (int i = 0; i < N; i++) {
+        int loc = env->start_states[i].location;
+        if (loc < 0) continue;
+        int li = get_cell_lane_fast(loc);
+        int ci = get_cell_core_fast(loc);
+        
+        // Stuck tracking
+        if (relief_prev_loc[i] == loc)
+            relief_stuck[i]++;
+        else
+            relief_stuck[i] = 0;
+        relief_prev_loc[i] = loc;
+        
+        if (li >= 0 && li < LANE_TABLE_SIZE) {
+            lane_agents[li]++;
+            int dir = path_dir_in_lane(trajLNS.trajs[i], li, LANE_DIR_LOOKAHEAD);
+            if (dir > 0) dir_plus[li]++;
+            else if (dir < 0) dir_minus[li]++;
+        }
+        if (ci >= 0 && ci < LANE_TABLE_SIZE) {
+            core_agents[ci]++;
+            if (relief_stuck[i] >= 10) stuck10[ci]++;
+        }
+    }
+    
+    // Rolling window update (every 100 ticks for growth rate)
+    if (tick - g_relief_window_tick >= 100) {
+        for (int li = 0; li < LANE_TABLE_SIZE; li++)
+            g_relief_window_agents[li] = lane_agents[li];
+        g_relief_window_tick = tick;
+    }
+    
+    // === STEP 3: Detect + trigger relief ===
+    for (int li = 0; li < LANE_TABLE_SIZE; li++) {
+        // Skip if already in relief
+        if (LaneFlow::g_lane_relief_until[li] > 0) continue;
+        
+        int occ = 0, s10 = stuck10[li], growth = 0;
+        bool congested = lane_is_congested(li, occ, s10, growth,
+                                          lane_agents[li], g_relief_window_agents[li],
+                                          core_agents[li], g_lane_core_cell_count[li],
+                                          dir_plus[li], dir_minus[li]);
+        if (!congested) continue;
+        
+        // Congestion confirmed! Determine顺流 direction
+        int flood_dir = lane_majority_dir(li, env);
+        if (flood_dir == 0) flood_dir = 1;
+        
+        // Get exit fringe for this direction
+        int fringe_idx = (flood_dir > 0) ? 1 : 0;
+        auto& fringe = g_lane_fringe[li][fringe_idx];
+        if (fringe.empty()) continue;
+        
+        // Counterflow: redirect to nearest fringe cell
+        int redirected = 0;
+        for (int i = 0; i < N; i++) {
+            int loc = env->start_states[i].location;
+            if (loc < 0) continue;
+            if (get_cell_lane_fast(loc) != li) continue;
+            
+            int dir = path_dir_in_lane(trajLNS.trajs[i], li, LANE_DIR_LOOKAHEAD);
+            if (dir == flood_dir) continue; // 顺流方向 → 不动
+            
+            // Nearest fringe cell in the target (flood) direction
+            int target = find_nearest_fringe_in_set(loc, fringe);
+            if (target < 0) continue;
+            trajLNS.tasks[i] = target;
+            require_guide_path[i] = true;
+            redirected++;
+        }
+        
+        if (redirected == 0) continue;
+        
+        // Diagnostic
+        g_relief_trigger_count++;
+        g_relief_redirect_total += redirected;
+        g_relief_triggers_per_lane[li]++;
+        g_relief_redirects_per_lane[li] += redirected;
+        fprintf(stderr, "[DIAG] relief TRIGGER tick=%d li=%d laneAg=%d cntFlow=%d redirected=%d occ=%d%% s10=%d floodDir=%+d expire=%d\n",
+                tick, li, lane_agents[li], dir_minus[li] + dir_plus[li], redirected,
+                occ, stuck10[li], flood_dir, tick + LANE_RELIEF_TICKS);
+        fflush(stderr);
+        
+        // Enable red light lock
+        LaneFlow::g_lane_lock_dir[li] = flood_dir;
+        LaneFlow::g_lane_relief_until[li] = tick + LANE_RELIEF_TICKS;
+        LaneFlow::g_lane_relief_dir[li] = flood_dir;
+    }
+    
+    // === STEP 4: During active relief, keep overriding counterflow agent goals ===
+    for (int li = 0; li < LANE_TABLE_SIZE; li++) {
+        if (LaneFlow::g_lane_relief_until[li] <= 0) continue;
+        if (tick > LaneFlow::g_lane_relief_until[li]) continue;
+        
+        int flood_dir = LaneFlow::g_lane_relief_dir[li];
+        int fringe_idx = (flood_dir > 0) ? 1 : 0;
+        auto& fringe = g_lane_fringe[li][fringe_idx];
+        if (fringe.empty()) continue;
+        
+        for (int i = 0; i < N; i++) {
+            int loc = env->start_states[i].location;
+            if (loc < 0) continue;
+            if (get_cell_lane_fast(loc) != li) continue;
+            
+            int dir = path_dir_in_lane(trajLNS.trajs[i], li, LANE_DIR_LOOKAHEAD);
+            if (dir == flood_dir) continue;
+            
+            // Nearest fringe cell in the flood direction
+            int target = find_nearest_fringe_in_set(loc, fringe);
+            if (target < 0) continue;
+            trajLNS.tasks[i] = target;
+            require_guide_path[i] = true;
+        }
+    }
+    
+    // Save lane counts for next tick's growth calculation
+    for (int li = 0; li < LANE_TABLE_SIZE; li++)
+        g_relief_prev_lane_agents[li] = lane_agents[li];
+    
+    // Final diagnostic at end of run
+    // Print every 500 ticks to confirm relief is active
+    if (tick > 0 && tick % 500 == 0) {
+        fprintf(stderr, "[DIAG] relief PROGRESS tick=%d triggers=%d redirects=%d\n",
+                tick, g_relief_trigger_count, g_relief_redirect_total);
+        fflush(stderr);
+    }
+    // End-of-run summary
+    if (tick >= 2990) {
+        fprintf(stderr, "[DIAG] relief END total=%d redirects=%d\n",
+                g_relief_trigger_count, g_relief_redirect_total);
+        for (int li = 0; li < LANE_TABLE_SIZE; li++) {
+            if (g_relief_triggers_per_lane[li] > 0)
+                fprintf(stderr, "[DIAG] relief END Lane%02d: triggers=%d redirects=%d\n",
+                        li, g_relief_triggers_per_lane[li], g_relief_redirects_per_lane[li]);
+        }
+        fflush(stderr);
+    }
+}
+#endif
+
     /**
      * @brief Default planner initialization
      * 
@@ -756,6 +1288,10 @@ namespace MyPlanner{
                 p[ids[i]] = ((double)(ids.size() - i))/((double)(ids.size()+1));
             }
             p_copy = p;
+#if LANE_RELIEF_ENABLED
+            // Pre-compute exit fringe and core cell counts (once)
+            init_lane_fringe(env);
+#endif
             return;
     };
 
@@ -809,6 +1345,10 @@ namespace MyPlanner{
         // --- One-time setup for this planning episode ---
         initialize_dummy_goals_if_needed(env);
         setup_multistep_episode_state(env, flow_end_time, local_priority);
+#if LANE_RELIEF_ENABLED
+        // Congestion relief: redirect counterflow BEFORE guide path recalculation
+        relieve_congestion(env);
+#endif
         update_guide_paths_once_for_multistep(env, flow_end_time);
 
         const auto after_setup = std::chrono::steady_clock::now();
@@ -832,6 +1372,9 @@ namespace MyPlanner{
             }
             run_multistep_pibt_once(env, local_priority, one_step_actions);
             append_actions_and_rollout_states(env, actions, one_step_actions);
+#if USE_CONGESTION_DATA
+            collect_congestion_data(env, env->curr_timestep);
+#endif
         }
 
         // restore env state after internal rollout simulation

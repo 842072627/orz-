@@ -22,6 +22,10 @@ namespace LaneFlow {
     extern int g_lane_blocked_minus[LANE_TABLE_SIZE];         // 当前周期被拦(-1方向)次数
     extern int g_lane_passed_plus[LANE_TABLE_SIZE];           // 当前周期放行(+1方向)次数
     extern int g_lane_passed_minus[LANE_TABLE_SIZE];          // 当前周期放行(-1方向)次数
+
+    // Lane congestion relief state
+    extern int g_lane_relief_until[LANE_TABLE_SIZE];          // 0=未疏导, >0=疏导截止tick
+    extern int g_lane_relief_dir[LANE_TABLE_SIZE];             // 本次疏导的顺流方向(+1/-1)
 }
 
 // Centerline data shared with PIBT for wall-hugging (set by scheduler after init)

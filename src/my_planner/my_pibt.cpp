@@ -106,7 +106,7 @@ bool causalMY_PIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
 
 		assert(validateMove(prev_loc, neighbor, lns.env));
 
-#if USE_PLANNER_LANE_FLOW
+#if USE_PLANNER_LANE_FLOW || LANE_RELIEF_ENABLED
 		// Forbids_move: block counterflow entry based on guide path direction through lane
 		{
 			int c_lane = get_cell_lane_fast(prev_loc);
@@ -139,7 +139,7 @@ bool causalMY_PIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
 								}
 							}
 						}
-						if (first_m >= 0 && last_m >= 0)
+						if (first_m >= 0 && last_m >= 0 && first_m != last_m)
 							dir = (last_m > first_m) ? 1 : -1;
 #if USE_LANE_FLOW_STATS
 						if (dir != 0) {
@@ -160,7 +160,7 @@ bool causalMY_PIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
 				}
 			}
 		}
-#endif
+#endif  // USE_PLANNER_LANE_FLOW || LANE_RELIEF_ENABLED
 
 		int min_heuristic = get_gp_h(lns, curr_id, neighbor);
 
