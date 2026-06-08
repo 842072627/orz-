@@ -733,6 +733,13 @@ namespace MyPlanner{
     static int g_cd_last_lane_tick = 0;  // last tick we wrote per-lane data
     static int g_cd_call_count = 0;      // global call counter for periodic lane CSV
     static int g_cd_prev_lane_agents[LANE_TABLE_SIZE] = {0};  // previous call's lane agent counts
+    static int g_cd_win_start_tick = -1; // start tick of current accumulation window
+    static int g_cd_win_inflow[LANE_TABLE_SIZE] = {0};   // window-accumulated inflow
+    static int g_cd_win_outflow[LANE_TABLE_SIZE] = {0};  // window-accumulated outflow
+    static int g_cd_prev_win_outflow[LANE_TABLE_SIZE] = {0}; // completed window's outflow
+    static int g_cd_real_last_tick = -1;  // last system tick processed for real-state tracking
+    static std::vector<int> g_cd_real_prev_lane;  // [aid] = lane from real state at last plan() start
+    static std::vector<bool> g_cd_agent_outflow_window; // [aid] = counted outflow this window (dedup)
 
     static void init_congestion_data(SharedEnvironment* env) {
         if (g_cd_inited) return;
@@ -775,6 +782,39 @@ namespace MyPlanner{
         int tot_lane_agents = 0, tot_lane_idle = 0;
         int tot_inflow = 0, tot_outflow = 0, tot_entry_q = 0;
         int tot_dir_plus = 0, tot_dir_minus = 0;
+
+        // ---- Real-state inflow/outflow tracking (once per plan() call) ----
+        // Uses env->start_states which is the REAL game state at plan() start
+        if (tick != g_cd_real_last_tick) {
+            g_cd_real_last_tick = tick;
+            if ((int)g_cd_real_prev_lane.size() < N) g_cd_real_prev_lane.resize(N, -1);
+            for (int i = 0; i < N; i++) {
+                if (env->curr_task_schedule[i] < -1) continue;
+                int loc = env->start_states[i].location;
+                if (loc < 0) continue;
+                int prev_li = g_cd_real_prev_lane[i];
+                int li = get_cell_lane_fast(loc);
+                g_cd_real_prev_lane[i] = li;
+                if (prev_li != li) {
+                    if (li >= 0 && li < LANE_TABLE_SIZE) { inflow_cnt[li]++; tot_inflow++; }
+                    if (prev_li >= 0 && prev_li < LANE_TABLE_SIZE) {
+                        // Count outflow only once per agent per window (avoid boundary jitter)
+                        if ((int)g_cd_agent_outflow_window.size() <= i)
+                            g_cd_agent_outflow_window.resize(i + 1, false);
+                        if (!g_cd_agent_outflow_window[i]) {
+                            g_cd_agent_outflow_window[i] = true;
+                            outflow_cnt[prev_li]++; tot_outflow++;
+                        }
+                    }
+                }
+            }
+            // Accumulate real-state inflow/outflow into window counters
+            if (g_cd_win_start_tick < 0) g_cd_win_start_tick = tick;
+            for (int li = 0; li < LANE_TABLE_SIZE; li++) {
+                g_cd_win_inflow[li] += inflow_cnt[li];
+                g_cd_win_outflow[li] += outflow_cnt[li];
+            }
+        }
 
         for (int i = 0; i < N; i++) {
             if (env->curr_task_schedule[i] < -1) continue; // skip invalid
@@ -825,12 +865,6 @@ namespace MyPlanner{
                 if (st >= 10)  { core_stuck10[ci]++; tot_stuck10++; }
             }
 
-            // Inflow/outflow (lane transition detection)
-            if (prev_li != li) {
-                if (li >= 0) { inflow_cnt[li]++; tot_inflow++; }
-                if (prev_li >= 0 && prev_li < LANE_TABLE_SIZE) { outflow_cnt[prev_li]++; tot_outflow++; }
-            }
-
             // Entry queue: outside lane but adjacent to a lane cell
             if (li < 0) {
                 int r = loc / cols, c = loc % cols;
@@ -853,6 +887,7 @@ namespace MyPlanner{
             }
         }
 
+
         // Write aggregate CSV (every tick)
         static FILE* agg_f = nullptr;
         if (!agg_f) {
@@ -870,30 +905,39 @@ namespace MyPlanner{
             if (tick % 500 == 0) fflush(agg_f);
         }
 
-        // Write per-lane CSV (every ~200 system ticks, use call count as proxy)
-        if (g_cd_call_count % 200 == 1) {
+        // Write per-lane CSV (every 100 game ticks, accumulated window data)
+        if (tick - g_cd_win_start_tick >= 100) {
             static FILE* lane_f = nullptr;
             if (!lane_f) {
                 lane_f = fopen("congestion_lane.csv", "w");
                 if (lane_f) fprintf(lane_f, "tick,li,lane_agents,lane_idle,"
                     "core_agents,core_idle,core_cells,core_occ_pct,"
                     "stuck10,stuck50,stuck100,"
-                    "dir_plus,dir_minus,inflow,outflow,entry_q\n");
+                    "dir_plus,dir_minus,"
+                    "win_inflow,win_outflow,entry_q\n");
             }
             if (lane_f) {
                 for (int li = 0; li < LANE_TABLE_SIZE; li++) {
                     int cc = g_cd_core_cell_count[li];
                     int occ_pct = (cc > 0) ? (core_agents_cnt[li] * 100 / cc) : 0;
                     fprintf(lane_f, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n",
-                        g_cd_call_count, li,
+                        tick, li,
                         lane_agents[li], lane_idle_cnt[li],
                         core_agents_cnt[li], core_idle_cnt[li], cc, occ_pct,
                         core_stuck10[li], core_stuck50[li], core_stuck100[li],
                         dir_plus_cnt[li], dir_minus_cnt[li],
-                        inflow_cnt[li], outflow_cnt[li], entry_q_cnt[li]);
+                        g_cd_win_inflow[li], g_cd_win_outflow[li], entry_q_cnt[li]);
                 }
                 fflush(lane_f);
             }
+            // Save completed window outflow for COND3, then reset
+            for (int li = 0; li < LANE_TABLE_SIZE; li++) {
+                g_cd_prev_win_outflow[li] = g_cd_win_outflow[li];
+                g_cd_win_inflow[li] = 0;
+                g_cd_win_outflow[li] = 0;
+            }
+            g_cd_agent_outflow_window.assign(g_cd_agent_outflow_window.size(), false);
+            g_cd_win_start_tick = tick;
         }
 
         // Congestion alert: check each lane against detection rule
@@ -927,6 +971,17 @@ namespace MyPlanner{
                         } else if (occ_pct >= 65 && growth >= 50) {
                             triggered = true;
                             rule = "occ65+growth";
+                        } else if (occ_pct >= 50 && lane_agents[li] >= 80
+                                   && g_cd_prev_win_outflow[li] <= 15
+                                   && g_cd_win_start_tick >= 0) {
+                            int min_dir = std::min(dir_plus_cnt[li], dir_minus_cnt[li]);
+                            if (min_dir >= 3) {
+                                int max_dir = std::max(dir_plus_cnt[li], dir_minus_cnt[li]);
+                                if (max_dir >= min_dir * 8) {
+                                    triggered = true;
+                                    rule = "tidal8";
+                                }
+                            }
                         }
                     }
                     if (triggered) {
@@ -948,6 +1003,7 @@ namespace MyPlanner{
 #if LANE_RELIEF_ENABLED
 // Pre-computed exit fringe cells for each lane+direction
 static std::vector<int> g_lane_fringe[LANE_TABLE_SIZE][2]; // [li][0]=dir-1, [li][1]=dir+1
+static int g_lane_wall_fringe[LANE_TABLE_SIZE][2][2]; // [li][dir][0]=-branch墙边, [1]=+branch墙边
 static bool g_lane_fringe_ready = false;
 static int g_lane_core_cell_count[LANE_TABLE_SIZE] = {0};  // core cells per lane
 
@@ -1010,6 +1066,25 @@ static void init_lane_fringe(SharedEnvironment* env) {
             vec.erase(std::unique(vec.begin(), vec.end()), vec.end());
         }
     }
+    // Step 3: per lane+direction, pick fringe cells at max/min branch (wall sides)
+    memset(g_lane_wall_fringe, -1, sizeof(g_lane_wall_fringe));
+    for (int li = 0; li < LANE_TABLE_SIZE; li++) {
+        for (int di = 0; di < 2; di++) {
+            int best_neg = -1, best_pos = -1;
+            int max_neg = -99999999, min_pos = 99999999;
+            for (int fc : g_lane_fringe[li][di]) {
+                if (!CenterlineAccess::g_branch_dist) break;
+                int bd = (*CenterlineAccess::g_branch_dist)[fc];
+                if (bd < 0 && bd > max_neg) { max_neg = bd; best_neg = fc; }
+                if (bd >= 0 && bd < min_pos) { min_pos = bd; best_pos = fc; }
+            }
+            // Fallback: if branch data missing, use first/last fringe cell
+            if (best_neg < 0 && !g_lane_fringe[li][di].empty()) best_neg = g_lane_fringe[li][di][0];
+            if (best_pos < 0 && !g_lane_fringe[li][di].empty()) best_pos = g_lane_fringe[li][di].back();
+            g_lane_wall_fringe[li][di][0] = best_neg;
+            g_lane_wall_fringe[li][di][1] = best_pos;
+        }
+    }
     g_lane_fringe_ready = true;
 }
 
@@ -1038,7 +1113,21 @@ static bool lane_is_congested(int li, int& occ_pct, int& stuck10, int& growth_pc
     if (core_cells <= 0) return false;
     occ_pct = core_agents * 100 / core_cells;
     
-    // Flow balance check
+    // Condition 3 (tidal): checked before balance — extreme imbalance IS the condition
+    {
+        int min_dir = std::min(dir_plus, dir_minus);
+        if (min_dir >= 3) {
+            int max_dir = std::max(dir_plus, dir_minus);
+            if (max_dir >= min_dir * 8 && occ_pct >= 50 && lane_agents >= 80
+                && g_cd_prev_win_outflow[li] <= 15 && g_cd_win_start_tick >= 0)
+            {
+                growth_pct = -g_cd_prev_win_outflow[li];
+                return true;
+            }
+        }
+    }
+    
+    // Flow balance check (for COND1 and COND2 only)
     int total_dir = dir_plus + dir_minus;
     float balance = (total_dir > 5) ? (std::min(dir_plus, dir_minus) * 2.0f / total_dir) : 0.0f;
     if (balance < LANE_RELIEF_BALANCE) return false;
@@ -1053,9 +1142,9 @@ static bool lane_is_congested(int li, int& occ_pct, int& stuck10, int& growth_pc
         if (occ_pct >= LANE_RELIEF_ALT_OCC && growth_pct >= LANE_RELIEF_ALT_GROWTH)
             return true;
     }
+    
     return false;
 }
-
 // Per-tick: relieve congested lanes (called from plan() after lane_vote)
 static int g_relief_prev_lane_agents[LANE_TABLE_SIZE] = {0};
 static int g_relief_window_agents[LANE_TABLE_SIZE] = {0};
@@ -1174,8 +1263,10 @@ static void relieve_congestion(SharedEnvironment* env) {
             int dir = agent_main_dir(loc, trajLNS.tasks[i]);   // 当前→task main轴方向
             if (dir == flood_dir) continue; // 顺流方向 → 不动
             
-            // Nearest fringe cell in the target (flood) direction
-            int target = find_nearest_fringe_in_set(loc, fringe);
+            // Redirect to wall-side fringe (same branch sign as agent)
+            int bd = CenterlineAccess::g_branch_dist ? (*CenterlineAccess::g_branch_dist)[loc] : 0;
+            int side = (bd >= 0) ? 1 : 0;
+            int target = g_lane_wall_fringe[li][fringe_idx][side];
             if (target < 0) continue;
             trajLNS.tasks[i] = target;
             require_guide_path[i] = true;
@@ -1218,8 +1309,10 @@ static void relieve_congestion(SharedEnvironment* env) {
             int dir = agent_main_dir(loc, trajLNS.tasks[i]);   // 当前→task main轴方向
             if (dir == flood_dir) continue;
             
-            // Nearest fringe cell in the flood direction
-            int target = find_nearest_fringe_in_set(loc, fringe);
+            // Redirect to wall-side fringe (same branch as agent)
+            int bd = CenterlineAccess::g_branch_dist ? (*CenterlineAccess::g_branch_dist)[loc] : 0;
+            int side = (bd >= 0) ? 1 : 0;
+            int target = g_lane_wall_fringe[li][fringe_idx][side];
             if (target < 0) continue;
             trajLNS.tasks[i] = target;
             require_guide_path[i] = true;
@@ -1375,7 +1468,7 @@ static void relieve_congestion(SharedEnvironment* env) {
             run_multistep_pibt_once(env, local_priority, one_step_actions);
             append_actions_and_rollout_states(env, actions, one_step_actions);
 #if USE_CONGESTION_DATA
-            collect_congestion_data(env, env->curr_timestep);
+            collect_congestion_data(env, env->system_timestep);
 #endif
         }
 

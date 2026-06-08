@@ -38,8 +38,8 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define WIDTH_BAND_1          4       // width < 4: very narrow
 #define WIDTH_BAND_2          12       // width 4-8: narrow
 #define WIDTH_BAND_3          18      // width 9-15: moderate
-#define FF_TH_BAND_1          1.52f   // threshold for width < 4 (very narrow)
-#define FF_TH_BAND_2          1.52f   // threshold for width 4-12 (narrow)
+#define FF_TH_BAND_1          1.72f   // threshold for width < 4 (very narrow)
+#define FF_TH_BAND_2          1.72f   // threshold for width 4-12 (narrow)
 #define FF_TH_BAND_3          3.52f    // threshold for width 12-18 (moderate)
 #define FF_TH_BAND_4          5.72f // threshold for width >= 16 (wide, never lock by default)
 
