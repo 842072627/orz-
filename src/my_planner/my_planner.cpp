@@ -1021,7 +1021,7 @@ static int lane_majority_dir(int li, SharedEnvironment* env) {
         int loc = env->start_states[i].location;
         if (loc < 0) continue;
         if (get_cell_lane_fast(loc) != li) continue;
-        int dir = path_dir_in_lane(trajLNS.trajs[i], li, LANE_DIR_LOOKAHEAD);
+        int dir = agent_main_dir(loc, trajLNS.tasks[i]);   // 当前→task main轴方向
         if (dir > 0) cnt_plus++;
         else if (dir < 0) cnt_minus++;
     }
@@ -1066,6 +1066,7 @@ static int g_relief_trigger_count = 0;
 static int g_relief_redirect_total = 0;
 static int g_relief_triggers_per_lane[LANE_TABLE_SIZE] = {0};
 static int g_relief_redirects_per_lane[LANE_TABLE_SIZE] = {0};
+static bool g_relief_printed_end = false;
 
 // Find nearest fringe cell (by main_dist) for an agent in the lane
 static int find_nearest_fringe_in_set(int loc, const std::vector<int>& fringe) {
@@ -1125,7 +1126,7 @@ static void relieve_congestion(SharedEnvironment* env) {
         
         if (li >= 0 && li < LANE_TABLE_SIZE) {
             lane_agents[li]++;
-            int dir = path_dir_in_lane(trajLNS.trajs[i], li, LANE_DIR_LOOKAHEAD);
+            int dir = agent_main_dir(loc, trajLNS.tasks[i]);   // 当前→task main轴方向
             if (dir > 0) dir_plus[li]++;
             else if (dir < 0) dir_minus[li]++;
         }
@@ -1170,7 +1171,7 @@ static void relieve_congestion(SharedEnvironment* env) {
             if (loc < 0) continue;
             if (get_cell_lane_fast(loc) != li) continue;
             
-            int dir = path_dir_in_lane(trajLNS.trajs[i], li, LANE_DIR_LOOKAHEAD);
+            int dir = agent_main_dir(loc, trajLNS.tasks[i]);   // 当前→task main轴方向
             if (dir == flood_dir) continue; // 顺流方向 → 不动
             
             // Nearest fringe cell in the target (flood) direction
@@ -1214,7 +1215,7 @@ static void relieve_congestion(SharedEnvironment* env) {
             if (loc < 0) continue;
             if (get_cell_lane_fast(loc) != li) continue;
             
-            int dir = path_dir_in_lane(trajLNS.trajs[i], li, LANE_DIR_LOOKAHEAD);
+            int dir = agent_main_dir(loc, trajLNS.tasks[i]);   // 当前→task main轴方向
             if (dir == flood_dir) continue;
             
             // Nearest fringe cell in the flood direction
@@ -1236,8 +1237,9 @@ static void relieve_congestion(SharedEnvironment* env) {
                 tick, g_relief_trigger_count, g_relief_redirect_total);
         fflush(stderr);
     }
-    // End-of-run summary
-    if (tick >= 2990) {
+    // End-of-run summary (print once near end)
+    if (!g_relief_printed_end && tick >= 2990) {
+        g_relief_printed_end = true;
         fprintf(stderr, "[DIAG] relief END total=%d redirects=%d\n",
                 g_relief_trigger_count, g_relief_redirect_total);
         for (int li = 0; li < LANE_TABLE_SIZE; li++) {
