@@ -110,7 +110,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define EXCLUDE_AGENT_ZONE   false   // true=检查路径热区时跳过agent所在zone，false=全路径检查
 
 // ========== Diagnostic logging ==========
-#define USE_DIAG_LOG    0   // 1 = write CSV logs + console prints; 0 = silent (cloud test)
+#define USE_DIAG_LOG    1   // 1 = write CSV logs + console prints; 0 = silent (cloud test)
 
 // ========== Congestion data collection (independent of lane flow gate) ==========
 #define USE_CONGESTION_DATA  1   // 1 = collect per-tick core/lane congestion stats
@@ -124,6 +124,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define LANE_RELIEF_ALT_GROWTH  50    // 增长率 >= 此值触发条件2(备选)
 #define LANE_RELIEF_BALANCE     0.3f  // 方向均衡度 >= 此值才允许触发
 #define LANE_RELIEF_FRINGE_NEAR 5     // 距端点几步内的cell算"出口端"
+#define LANE_RELIEF_FLIP_RATIO  5     // 疏导期内逆流/顺流>=此倍 → 反转顺流方向
 
 // Runtime strategy name getter (used by TaskScheduler.cpp)
 inline std::string get_orz_strategy() { return ORZ_SCHEDULER; }
