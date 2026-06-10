@@ -88,6 +88,11 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 // Runtime strategy name getter (used by TaskScheduler.cpp)
 inline std::string get_orz_strategy() { return ORZ_SCHEDULER; }
 
+// ========== Lane congestion relief (data collection framework) ==========
+#define LANE_RELIEF_ENABLED      1       // master switch: lane data collection
+#define USE_DIAG_LOG             0       // reduced debug output (0=off for now)
+#define LANE_RELIEF_FLIP_RATIO   5       // direction flip threshold (unused until conditions active)
+
 
 
 

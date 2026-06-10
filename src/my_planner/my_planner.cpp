@@ -20,8 +20,12 @@
 #include "my_pibt.h"
 #include "my_flow.h"
 #include "my_const.h"
+#include "../config.h"
+#include "../lane_cells.h"
+#include "../pibt_lock.h"
 #include <chrono>
 #include <iostream>
+#include <cstdio>
 
 
 namespace MyPlanner{
@@ -54,6 +58,73 @@ namespace MyPlanner{
     std::vector<int> dummy_goals;
     TrajLNS trajLNS;
     std::mt19937 mt1;
+
+#if LANE_RELIEF_ENABLED
+    // ========== Lane data collection framework ==========
+    static int agent_main_dir(int loc, int task) {
+        if (loc < 0 || task < 0 || loc == task) return 0;
+        auto* main_dist = CenterlineAccess::g_main_dist;
+        if (!main_dist) return 0;
+        if (loc >= (int)main_dist->size() || task >= (int)main_dist->size()) return 0;
+        int loc_md = (*main_dist)[loc];
+        int task_md = (*main_dist)[task];
+        if (loc_md < 0 || task_md < 0 || loc_md == task_md) return 0;
+        return (task_md > loc_md) ? 1 : -1;
+    }
+
+    static int g_last_lane_stats_tick = 0;
+    
+    static void collect_lane_stats(SharedEnvironment* env) {
+        int tick = env->system_timestep >= 0 ? env->system_timestep : env->curr_timestep;
+        int N = env->num_of_agents;
+        
+        int lane_agents[LANE_TABLE_SIZE] = {0};
+        int core_agents[LANE_TABLE_SIZE] = {0};
+        int dir_plus[LANE_TABLE_SIZE] = {0};
+        int dir_minus[LANE_TABLE_SIZE] = {0};
+        
+        for (int i = 0; i < N; i++) {
+            int loc = env->start_states[i].location;
+            if (loc < 0) continue;
+            int li = get_cell_lane_fast(loc);
+            int ci = get_cell_core_fast(loc);
+            
+            if (li >= 0 && li < LANE_TABLE_SIZE) {
+                lane_agents[li]++;
+                int dir = agent_main_dir(loc, trajLNS.tasks[i]);
+                if (dir > 0) dir_plus[li]++;
+                else if (dir < 0) dir_minus[li]++;
+            }
+            if (ci >= 0 && ci < LANE_TABLE_SIZE) {
+                core_agents[ci]++;
+            }
+        }
+        
+        if (tick - g_last_lane_stats_tick >= 100 || g_last_lane_stats_tick == 0) {
+            g_last_lane_stats_tick = tick;
+            
+            static bool csv_header_written = false;
+            FILE* f = fopen("congestion_lane.csv", csv_header_written ? "a" : "w");
+            if (!f) return;
+            
+            if (!csv_header_written) {
+                fprintf(f, "tick,li,lane_agents,core_agents,core_cells,core_occ_pct,dir_plus,dir_minus\n");
+                csv_header_written = true;
+            }
+            
+            for (int li = 0; li < LANE_TABLE_SIZE; li++) {
+                if (lane_agents[li] == 0 && core_agents[li] == 0 && dir_plus[li] == 0 && dir_minus[li] == 0)
+                    continue;
+                int core_cells = (li < LANE_TABLE_SIZE) ? g_lane_core_cell_count[li] : 0;
+                int occ_pct = (core_cells > 0) ? (core_agents[li] * 100 / core_cells) : 0;
+                fprintf(f, "%d,%d,%d,%d,%d,%d,%d,%d\n",
+                        tick, li, lane_agents[li], core_agents[li], core_cells, occ_pct,
+                        dir_plus[li], dir_minus[li]);
+            }
+            fclose(f);
+        }
+    }
+#endif
 
     static State rollout_next_state(const State& state, Action action, const SharedEnvironment* env)
     {
@@ -376,6 +447,9 @@ namespace MyPlanner{
         initialize_dummy_goals_if_needed(env);
         setup_multistep_episode_state(env, flow_end_time, local_priority);
         update_guide_paths_once_for_multistep(env, flow_end_time);
+#if LANE_RELIEF_ENABLED
+        collect_lane_stats(env);
+#endif
 
         const auto after_setup = std::chrono::steady_clock::now();
         const auto setup_elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(after_setup - episode_start).count();
