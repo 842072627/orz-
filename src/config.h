@@ -92,13 +92,34 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define WIDTH_GRAD_2        18   // width < this → TH_GRAD_2 (窄, baseline)
 #define WIDTH_GRAD_3        999  // width < this → TH_GRAD_3 (中)
 // width >= WIDTH_GRAD_3 → TH_GRAD_4 (宽不锁)
-#define TH_GRAD_1           1.72f
+#define TH_GRAD_1           1.52f
 #define TH_GRAD_2           3.72f
 #define TH_GRAD_3           5.72f
 #define TH_GRAD_4           5.72f   // 宽走廊不锁
 
 // Runtime strategy name getter (used by TaskScheduler.cpp)
 inline std::string get_orz_strategy() { return ORZ_SCHEDULER; }
+
+// ========== Lane congestion relief ==========
+#define LANE_RELIEF_ENABLED      1     // 拥塞疏导总开关
+#define USE_DIAG_LOG    1   // 1 = write CSV logs + console prints; 0 = silent (cloud test)
+#define LANE_RELIEF_TICKS       300   // 疏导持续tick数（废弃，由保持条件替代）
+#define LANE_RELIEF_OCC_THRESH  75    // occ >= 此值触发条件1（废弃）
+#define LANE_RELIEF_S10_THRESH  2     // stuck10 >= 此值触发条件1（废弃）
+#define LANE_RELIEF_ALT_OCC     65    // occ >= 此值触发条件2(备选)（废弃）
+#define LANE_RELIEF_ALT_GROWTH  50    // 增长率 >= 此值触发条件2(备选)（废弃）
+#define LANE_RELIEF_BALANCE     0.3f  // 方向均衡度 >= 此值才允许触发（废弃）
+#define LANE_RELIEF_FRINGE_NEAR 5     // 距端点几步内的cell算"出口端"
+#define LANE_RELIEF_FLIP_RATIO  5     // 疏导期内逆流/顺流>=此倍 → 反转顺流方向
+
+// ===== 新版触发+保持条件 =====
+#define LANE_RELIEF_TRIGGER_NI      5    // 触发: 逆流 >= 此值
+#define LANE_RELIEF_TRIGGER_OCC     50   // 触发: core_occ >= 此值(%) 
+#define LANE_RELIEF_TRIGGER_RATIO   2.0f // 触发: ag/core >= 此值(替代高occ)
+#define LANE_RELIEF_TRIGGER_MIN_RATIO 1.5f // 触发: ag/core最低要求
+
+#define LANE_RELIEF_KEEP_OCC       30   // 保持: core_occ > 此值(%)
+#define LANE_RELIEF_KEEP_RATIO     0.65f // 保持: ag/core > 此值
 
 
 

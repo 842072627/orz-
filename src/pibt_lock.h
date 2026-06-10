@@ -2,6 +2,7 @@
 // Shared state between scheduler (Centerline) and PIBT for direction ahead-check
 
 #include "../src/config.h"
+#include "lane_cells.h"
 #include <vector>
 
 namespace PIBT_Lock {
@@ -9,6 +10,22 @@ namespace PIBT_Lock {
 
     extern int g_agent_blocked[MAX_AGENTS];    // 1 = PIBT should wait, 0 = normal
     extern int g_parked_task[MAX_AGENTS];      // pending second errand task id, -1 = none
+}
+
+// Lane direction lock state — set by my_planner.cpp vote, read by my_pibt.cpp forbids/pibt_priority
+namespace LaneFlow {
+    extern int g_lane_lock_dir[LANE_TABLE_SIZE];             // 每条lane的锁方向: +1=end0→end1, -1=end1→end0, 0=无锁
+    extern int g_lane_next_vote_tick;          // 当前会话中下一次投票的tick
+    extern int* g_lane_exit_target;            // [loc] = 每个lane格最近的出口(非lane格)，-1=未初始化
+    extern bool g_lane_exit_target_initialized;
+    extern int g_lane_blocked_plus[LANE_TABLE_SIZE];          // 当前周期被拦(+1方向)次数
+    extern int g_lane_blocked_minus[LANE_TABLE_SIZE];         // 当前周期被拦(-1方向)次数
+    extern int g_lane_passed_plus[LANE_TABLE_SIZE];           // 当前周期放行(+1方向)次数
+    extern int g_lane_passed_minus[LANE_TABLE_SIZE];          // 当前周期放行(-1方向)次数
+
+    // Lane congestion relief state
+    extern int g_lane_relief_until[LANE_TABLE_SIZE];          // 0=未疏导, >0=疏导截止tick
+    extern int g_lane_relief_dir[LANE_TABLE_SIZE];             // 本次疏导的顺流方向(+1/-1)
 }
 
 // Centerline data shared with PIBT for wall-hugging (set by scheduler after init)

@@ -169,6 +169,28 @@ bool causalMY_PIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
 			continue;
 		assert(validateMove(prev_loc, next.location, lns.env));
 		
+		// Lane lock check: block ENTRY into locked lane against lock direction
+#if LANE_RELIEF_ENABLED
+		{
+			int c_lane = get_cell_lane_fast(prev_loc);
+			if (c_lane < 0) {
+				int n_lane = get_cell_lane_fast(next.location);
+				if (n_lane >= 0 && n_lane < LANE_TABLE_SIZE && LaneFlow::g_lane_lock_dir[n_lane] != 0) {
+				    int task = lns.tasks[curr_id];
+				    if (task >= 0 && CenterlineAccess::g_main_dist) {
+				        int loc_md = (*CenterlineAccess::g_main_dist)[prev_loc];
+				        int task_md = (*CenterlineAccess::g_main_dist)[task];
+				        if (loc_md >= 0 && task_md >= 0 && loc_md != task_md) {
+				            int move_dir = (task_md > loc_md) ? 1 : -1;
+				            if (move_dir != 0 && move_dir != LaneFlow::g_lane_lock_dir[n_lane])
+				                continue;  // blocked by lane lock
+				        }
+				    }
+				}
+			}
+		}
+#endif
+		
 		if (next.location == -1)
 			continue;
 		if (decision[next.location] != -1){

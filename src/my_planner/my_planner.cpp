@@ -20,11 +20,15 @@
 #include "my_pibt.h"
 #include "my_flow.h"
 #include "my_const.h"
+#include "../config.h"
+#include "../lane_cells.h"
+#include "../pibt_lock.h"
 #include <chrono>
 #include <iostream>
 #include <unordered_map>
 #include <cmath>
 #include <algorithm>
+#include <cstdio>
 
 
 namespace MyPlanner{
@@ -57,6 +61,258 @@ namespace MyPlanner{
     std::vector<int> dummy_goals;
     TrajLNS trajLNS;
     std::mt19937 mt1;
+}
+
+// Lane congestion relief state (outside MyPlanner namespace)
+int LaneFlow::g_lane_lock_dir[LANE_TABLE_SIZE] = {0};
+int LaneFlow::g_lane_relief_until[LANE_TABLE_SIZE] = {0};
+int LaneFlow::g_lane_relief_dir[LANE_TABLE_SIZE] = {0};
+
+namespace MyPlanner{
+
+#if LANE_RELIEF_ENABLED
+    // ========== Lane congestion relief framework ==========
+    static int agent_main_dir(int loc, int task) {
+        if (loc < 0 || task < 0 || loc == task) return 0;
+        auto* main_dist = CenterlineAccess::g_main_dist;
+        if (!main_dist) return 0;
+        if (loc >= (int)main_dist->size() || task >= (int)main_dist->size()) return 0;
+        int loc_md = (*main_dist)[loc];
+        int task_md = (*main_dist)[task];
+        if (loc_md < 0 || task_md < 0 || loc_md == task_md) return 0;
+        return (task_md > loc_md) ? 1 : -1;
+    }
+    
+    static int g_lane_fringe[LANE_TABLE_SIZE][2][16];
+    static int g_lane_fringe_cnt[LANE_TABLE_SIZE][2];
+    static int g_lane_wall_fringe[LANE_TABLE_SIZE][2][2];
+    static bool g_lane_fringe_ready = false;
+    static int g_relief_window_agents[LANE_TABLE_SIZE] = {0};
+    static int g_relief_window_tick = 0;
+    static int g_last_lane_stats_tick = 0;
+    
+    static void init_lane_fringe(SharedEnvironment* env) {
+        if (g_lane_fringe_ready) return;
+        memset(g_lane_fringe_cnt, 0, sizeof(g_lane_fringe_cnt));
+        memset(g_lane_wall_fringe, -1, sizeof(g_lane_wall_fringe));
+        int N = env->map.size();
+        for (int loc = 0; loc < N; loc++) {
+            if (env->map[loc] != 0) continue;
+            int li = get_cell_lane_fast(loc);
+            if (li < 0 || li >= LANE_TABLE_SIZE) continue;
+            int d4[4] = {1, -1, env->cols, -env->cols};
+            for (int d = 0; d < 4; d++) {
+                int nloc = loc + d4[d];
+                if (nloc < 0 || nloc >= N) continue;
+                if (d4[d] == 1 && loc % env->cols == env->cols - 1) continue;
+                if (d4[d] == -1 && loc % env->cols == 0) continue;
+                if (env->map[nloc] != 0) continue;
+                int nli = get_cell_lane_fast(nloc);
+                if (nli != li) {
+                    for (int di = 0; di < 2; di++) {
+                        int& cnt = g_lane_fringe_cnt[li][di];
+                        if (cnt >= 16) continue;
+                        g_lane_fringe[li][di][cnt++] = loc;
+                    }
+                    break;
+                }
+            }
+        }
+        if (CenterlineAccess::g_branch_dist) {
+            for (int li = 0; li < LANE_TABLE_SIZE; li++) {
+                for (int di = 0; di < 2; di++) {
+                    int best_neg = -1, best_pos = -1;
+                    int max_neg = -10000, min_pos = 10000;
+                    for (int fi = 0; fi < g_lane_fringe_cnt[li][di]; fi++) {
+                        int fc = g_lane_fringe[li][di][fi];
+                        int bd = (*CenterlineAccess::g_branch_dist)[fc];
+                        if (bd < 0 && bd > max_neg) { max_neg = bd; best_neg = fc; }
+                        if (bd >= 0 && bd < min_pos) { min_pos = bd; best_pos = fc; }
+                    }
+                    g_lane_wall_fringe[li][di][0] = best_neg;
+                    g_lane_wall_fringe[li][di][1] = best_pos;
+                }
+            }
+        }
+        g_lane_fringe_ready = true;
+    }
+    
+    static void collect_lane_stats(SharedEnvironment* env) {
+        int tick = env->system_timestep >= 0 ? env->system_timestep : env->curr_timestep;
+        int N = env->num_of_agents;
+        int lane_agents[LANE_TABLE_SIZE] = {0};
+        int core_agents[LANE_TABLE_SIZE] = {0};
+        int dir_plus[LANE_TABLE_SIZE] = {0};
+        int dir_minus[LANE_TABLE_SIZE] = {0};
+        int stuck10[LANE_TABLE_SIZE] = {0};
+        static std::vector<int> prev_loc;
+        static std::vector<int> stuck;
+        prev_loc.resize(N, -1);
+        stuck.resize(N, 0);
+        for (int i = 0; i < N; i++) {
+            int loc = env->start_states[i].location;
+            if (loc < 0) continue;
+            if (prev_loc[i] == loc) stuck[i]++;
+            else stuck[i] = 0;
+            prev_loc[i] = loc;
+            int li = get_cell_lane_fast(loc);
+            int ci = get_cell_core_fast(loc);
+            if (li >= 0 && li < LANE_TABLE_SIZE) {
+                lane_agents[li]++;
+                int dir = agent_main_dir(loc, trajLNS.tasks[i]);
+                if (dir > 0) dir_plus[li]++;
+                else if (dir < 0) dir_minus[li]++;
+            }
+            if (ci >= 0 && ci < LANE_TABLE_SIZE) {
+                core_agents[ci]++;
+                if (stuck[i] >= 10) stuck10[ci]++;
+            }
+        }
+        if (tick - g_relief_window_tick >= 100) {
+            for (int li = 0; li < LANE_TABLE_SIZE; li++)
+                g_relief_window_agents[li] = lane_agents[li];
+            g_relief_window_tick = tick;
+        }
+        if (tick - g_last_lane_stats_tick >= 100 || g_last_lane_stats_tick == 0) {
+            g_last_lane_stats_tick = tick;
+            static bool hdr = false;
+            FILE* f = fopen("congestion_lane.csv", hdr ? "a" : "w");
+            if (!f) return;
+            if (!hdr) {
+                fprintf(f, "tick,li,lane_agents,core_agents,core_cells,core_occ_pct,dir_plus,dir_minus,stuck10\n");
+                hdr = true;
+            }
+            for (int li = 0; li < LANE_TABLE_SIZE; li++) {
+                if (lane_agents[li] == 0 && core_agents[li] == 0) continue;
+                int cc = (li < LANE_TABLE_SIZE) ? g_lane_core_cell_count[li] : 0;
+                int occ = (cc > 0) ? (core_agents[li] * 100 / cc) : 0;
+                fprintf(f, "%d,%d,%d,%d,%d,%d,%d,%d,%d\n",
+                        tick, li, lane_agents[li], core_agents[li], cc, occ,
+                        dir_plus[li], dir_minus[li], stuck10[li]);
+            }
+            fclose(f);
+        }
+    }
+    
+    static void relieve_congestion(SharedEnvironment* env) {
+        init_lane_fringe(env);
+        int tick = env->system_timestep >= 0 ? env->system_timestep : env->curr_timestep;
+        // STEP 1: Expired relief → unlock
+        for (int li = 0; li < LANE_TABLE_SIZE; li++) {
+            if (LaneFlow::g_lane_relief_until[li] > 0 && tick > LaneFlow::g_lane_relief_until[li]) {
+                LaneFlow::g_lane_lock_dir[li] = 0;
+                LaneFlow::g_lane_relief_until[li] = 0;
+                LaneFlow::g_lane_relief_dir[li] = 0;
+            }
+        }
+        // STEP 2: Collect stats (infrastructure only - conditions disabled)
+        int lane_agents[LANE_TABLE_SIZE] = {0};
+        int core_agents[LANE_TABLE_SIZE] = {0};
+        int stuck10[LANE_TABLE_SIZE] = {0};
+        int dir_plus[LANE_TABLE_SIZE] = {0};
+        int dir_minus[LANE_TABLE_SIZE] = {0};
+        int N = env->num_of_agents;
+        static std::vector<int> r_prev_loc;
+        static std::vector<int> r_stuck;
+        r_prev_loc.resize(N, -1);
+        r_stuck.resize(N, 0);
+        for (int i = 0; i < N; i++) {
+            int loc = env->start_states[i].location;
+            if (loc < 0) continue;
+            if (r_prev_loc[i] == loc) r_stuck[i]++;
+            else r_stuck[i] = 0;
+            r_prev_loc[i] = loc;
+            int li = get_cell_lane_fast(loc);
+            int ci = get_cell_core_fast(loc);
+            if (li >= 0 && li < LANE_TABLE_SIZE) {
+                lane_agents[li]++;
+                int dir = agent_main_dir(loc, trajLNS.tasks[i]);
+                if (dir > 0) dir_plus[li]++;
+                else if (dir < 0) dir_minus[li]++;
+            }
+            if (ci >= 0 && ci < LANE_TABLE_SIZE) {
+                core_agents[ci]++;
+                if (r_stuck[i] >= 10) stuck10[ci]++;
+            }
+        }
+        // STEP 3: Trigger detection (for lanes not in relief)
+        for (int li = 0; li < LANE_TABLE_SIZE; li++) {
+            if (LaneFlow::g_lane_relief_until[li] > 0) continue;
+            int ni = std::min(dir_plus[li], dir_minus[li]);
+            int cc = g_lane_core_cell_count[li];
+            if (cc <= 0) continue;
+            float ratio = (float)lane_agents[li] / (float)cc;
+            int l_occ = (cc > 0) ? (core_agents[li] * 100 / cc) : 0;
+            
+            bool trigger = (ni >= LANE_RELIEF_TRIGGER_NI)
+                        && (l_occ >= LANE_RELIEF_TRIGGER_OCC)
+                        && (ratio >= LANE_RELIEF_TRIGGER_MIN_RATIO);
+            
+            if (trigger) {
+                int flood_dir = (dir_plus[li] >= dir_minus[li]) ? 1 : -1;
+                if (flood_dir == 0) flood_dir = 1;
+                
+                LaneFlow::g_lane_lock_dir[li] = flood_dir;
+                LaneFlow::g_lane_relief_until[li] = tick + 1000000;
+                LaneFlow::g_lane_relief_dir[li] = flood_dir;
+                
+                int fringe_idx = (flood_dir > 0) ? 1 : 0;
+                int redirected = 0;
+                int& fcnt = g_lane_fringe_cnt[li][fringe_idx];
+                if (fcnt > 0) {
+                    for (int i = 0; i < N; i++) {
+                        int loc = env->start_states[i].location;
+                        if (loc < 0) continue;
+                        if (get_cell_lane_fast(loc) != li) continue;
+                        int dir = agent_main_dir(loc, trajLNS.tasks[i]);
+                        if (dir == flood_dir || dir == 0) continue;
+                        int bd = CenterlineAccess::g_branch_dist ? (*CenterlineAccess::g_branch_dist)[loc] : 0;
+                        int side = (bd >= 0) ? 1 : 0;
+                        int target = g_lane_wall_fringe[li][fringe_idx][side];
+                        if (target < 0) continue;
+                        trajLNS.tasks[i] = target;
+                        require_guide_path[i] = true;
+                        redirected++;
+                    }
+                }
+                
+                fprintf(stderr, "[DIAG] relief TRIGGER tick=%d li=%d laneAg=%d +%d/-%d "
+                        "occ=%d%% ratio=%.1f floodDir=%+d redirected=%d\n",
+                        tick, li, lane_agents[li], dir_plus[li], dir_minus[li],
+                        l_occ, ratio, flood_dir, redirected);
+                fflush(stderr);
+            }
+        }
+        
+        // STEP 4: Keep/release check (for lanes in relief)
+        for (int li = 0; li < LANE_TABLE_SIZE; li++) {
+            if (LaneFlow::g_lane_relief_until[li] <= 0) continue;
+            int cc = g_lane_core_cell_count[li];
+            if (cc <= 0) continue;
+            int l_occ = (cc > 0) ? (core_agents[li] * 100 / cc) : 0;
+            
+            // Keep condition uses shun-direction count (excludes redirected counterflow)
+            int flood_dir = LaneFlow::g_lane_relief_dir[li];
+            int shun_cnt = (flood_dir > 0) ? dir_plus[li] : dir_minus[li];
+            float keep_ratio = (float)shun_cnt / (float)cc;
+            
+            bool keep = (l_occ > LANE_RELIEF_KEEP_OCC)
+                     || (stuck10[li] > 0)
+                     || (keep_ratio > LANE_RELIEF_KEEP_RATIO);
+            
+            if (!keep) {
+                LaneFlow::g_lane_lock_dir[li] = 0;
+                LaneFlow::g_lane_relief_until[li] = 0;
+                LaneFlow::g_lane_relief_dir[li] = 0;
+                fprintf(stderr, "[DIAG] relief RELEASE tick=%d li=%d laneAg=%d "
+                        "+%d/-%d occ=%d%% ratio=%.1f\n",
+                        tick, li, lane_agents[li], dir_plus[li], dir_minus[li],
+                        l_occ, keep_ratio);
+                fflush(stderr);
+            }
+        }
+    }
+#endif
 
     static State rollout_next_state(const State& state, Action action, const SharedEnvironment* env)
     {
@@ -548,6 +804,10 @@ namespace MyPlanner{
         initialize_dummy_goals_if_needed(env);
         setup_multistep_episode_state(env, flow_end_time, local_priority);
         update_guide_paths_once_for_multistep(env, flow_end_time);
+#if LANE_RELIEF_ENABLED
+        relieve_congestion(env);
+        collect_lane_stats(env);
+#endif
 
         const auto after_setup = std::chrono::steady_clock::now();
         const auto setup_elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(after_setup - episode_start).count();
