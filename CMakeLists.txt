@@ -15,6 +15,7 @@ include_directories("src/my_planner")
 
 file(GLOB SOURCES "src/*.cpp" "default_planner/*.cpp" "src/my_planner/*.cpp")
 list(REMOVE_ITEM SOURCES "${CMAKE_SOURCE_DIR}/src/driver_nopython.cpp")
+list(REMOVE_ITEM SOURCES "${CMAKE_SOURCE_DIR}/src/sigint_stub.cpp")
 file(GLOB DEFAULT_PLANNER_SOURCES "default_planner/*.cpp")
 
 
@@ -84,6 +85,7 @@ if(BUILD_TESTS)
     list(FILTER TEST_SOURCES EXCLUDE REGEX ".*driver\\.cpp")
     add_executable(python_interface_test
         tests/python_interface_test.cpp
+        src/sigint_stub.cpp
         ${PY_BRIDGE_SOURCES}
         ${TEST_SOURCES}
     )

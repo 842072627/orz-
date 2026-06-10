@@ -18,7 +18,7 @@
 
 // extern po::variables_map vm;
 // extern std::unique_ptr<BaseSystem> system_ptr;
-// extern void sigint_handler(int);
+extern void sigint_handler(int);
 
 namespace PIBT_Lock
 {
@@ -45,7 +45,7 @@ void TaskScheduler::initialize(int preprocess_time_limit)
     //     std::cout << "TaskScheduler only supports orz map in this build: rows="
     //               << (env == nullptr ? -1 : env->rows)
     //               << ", cols=" << (env == nullptr ? -1 : env->cols) << std::endl;
-    //     sigint_handler(1);
+            sigint_handler(1);
     //     return;
     // }
     if (!is_ORZ(env))

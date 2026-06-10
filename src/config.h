@@ -119,7 +119,7 @@ inline std::string get_orz_strategy() { return ORZ_SCHEDULER; }
 #define LANE_RELIEF_TRIGGER_MIN_RATIO 1.5f // 触发: ag/core最低要求
 
 #define LANE_RELIEF_KEEP_OCC       30   // 保持: core_occ > 此值(%)
-#define LANE_RELIEF_KEEP_RATIO     0.65f // 保持: ag/core > 此值
+#define LANE_RELIEF_KEEP_RATIO     1.0f  // 保持: shun_cnt/core > 此值
 
 
 
