@@ -12,7 +12,12 @@ include_directories("inc")
 # default planner
 include_directories("default_planner")
 
-file(GLOB SOURCES "src/*.cpp" "default_planner/*.cpp")
+# optsvr iron modules
+include_directories("optsvr")
+include_directories("optsvr/schedule/IronZoneSchedule")
+include_directories("optsvr/planner/FlowDecay")
+
+file(GLOB SOURCES "src/*.cpp" "default_planner/*.cpp" "optsvr/*.cpp" "optsvr/schedule/IronZoneSchedule/*.cpp" "optsvr/planner/FlowDecay/*.cpp")
 file(GLOB DEFAULT_PLANNER_SOURCES "default_planner/*.cpp")
 
 
