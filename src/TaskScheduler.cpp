@@ -7,6 +7,9 @@
 #include "HeuristicMatrix.h"
 #include "IronZoneScheduler.h"
 #include "PerfLogger.h"
+#include <cstdlib>
+
+void sigint_handler(int);
 
 static optsvr::IronZoneScheduler g_ironzone_scheduler;
 static bool g_config_loaded = false;
@@ -24,7 +27,13 @@ void TaskScheduler::initialize(int preprocess_time_limit)
     optsvr::map_profile() = optsvr::analyze_map(env);
     optsvr::apply_map_tuning(optsvr::map_profile(), env);
 
-    // BFS 预计算（云端64GB可跑，本地用env var关闭）
+    // 非 iron 地图直接退出（本地只调 iron）
+    if (optsvr::map_profile().type != optsvr::MapType::IRON_HARVEST_DOMAIN) {
+        sigint_handler(1);
+        return;
+    }
+
+    // BFS 预计算（云端64GB可跑，本地用 OPT_PRECOMPUTE_HEURISTIC=0 关闭）
     if (optsvr::cfg().precompute_heuristic && !optsvr::cfg().skip_test) {
         auto now = std::chrono::steady_clock::now();
         auto deadline = env->plan_start_time

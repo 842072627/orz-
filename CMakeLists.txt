@@ -18,6 +18,7 @@ include_directories("optsvr/schedule/IronZoneSchedule")
 include_directories("optsvr/planner/FlowDecay")
 
 file(GLOB SOURCES "src/*.cpp" "default_planner/*.cpp" "optsvr/*.cpp" "optsvr/schedule/IronZoneSchedule/*.cpp" "optsvr/planner/FlowDecay/*.cpp")
+list(REMOVE_ITEM SOURCES "${CMAKE_SOURCE_DIR}/src/sigint_stub.cpp")
 file(GLOB DEFAULT_PLANNER_SOURCES "default_planner/*.cpp")
 
 
