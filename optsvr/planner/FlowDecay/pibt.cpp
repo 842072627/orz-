@@ -3,6 +3,8 @@
 #include <cstdint>
 #include "RuntimeConfig.h"
 #include "HeuristicMatrix.h"
+#include "lane_data.h"
+#include "lane_traffic_light.h"
 
 
 
@@ -71,6 +73,19 @@ bool causalPIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
 	for (auto& neighbor: neighbors){
 
 		assert(validateMove(prev_loc, neighbor, lns.env));
+
+		// Iron lane traffic light: block counterflow entry
+		if (optsvr::cfg().iron_lane_enabled) {
+			if (!IronLane::is_lane_cell(prev_loc) && IronLane::is_lane_cell(neighbor)) {
+				int lock = IronLane::g_lane_lock_dir;
+				if (lock != 0) {
+					int comp = IronLane::get_component(prev_loc);
+					int dir = (comp == 2) ? -1 : (comp == 1) ? +1 : 0;
+					if (dir != 0 && dir != lock)
+						continue;  // counterflow → FORBID
+				}
+			}
+		}
 
 		int min_heuristic = get_gp_h(lns, curr_id, neighbor);
 

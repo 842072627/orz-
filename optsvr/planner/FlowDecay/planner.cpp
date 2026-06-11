@@ -7,7 +7,9 @@
 #include "RuntimeConfig.h"
 #include "HeuristicMatrix.h"
 #include "MapProfile.h"
-
+#include "RuntimeConfig.h"
+#include "lane_data.h"
+#include "lane_traffic_light.h"
 // OptPlan 命名空间下的副本（从 default_planner 复制，可自由修改）
 #include "heuristics.h"
 #include "flow.h"
@@ -634,6 +636,48 @@ void OptPlanner::plan(int time_limit, std::vector<std::vector<Action>>& actions,
 
     // commit cross-episode priority
     p_ = local_priority;
+
+    // Iron lane traffic light: ORZ-style vote
+    if (optsvr::cfg().iron_lane_enabled) {
+        int core_cnt = 0, cnt_12 = 0, cnt_21 = 0;
+        for (int a = 0; a < env->num_of_agents; a++) {
+            int tid = env->curr_task_schedule[a];
+            if (tid < 0) continue;
+            int loc = env->curr_states[a].location;
+            if (loc < 0) continue;
+            if (IronLane::is_core_cell(loc)) core_cnt++;
+            if (IronLane::is_lane_cell(loc)) {
+                // Direction: use task goal component
+                auto it = env->task_pool.find(tid);
+                if (it != env->task_pool.end() && !it->second.locations.empty()) {
+                    int goal = it->second.locations[0];
+                    int c = IronLane::get_component(goal);
+                    if (c == 1) cnt_21++;  // heading toward comp1
+                    else if (c == 2) cnt_12++;  // heading toward comp2
+                }
+            }
+        }
+        int prev_lock = IronLane::g_lane_lock_dir;
+        // ORZ lock rules
+        if (core_cnt > 4) {
+            // core人多 → 冻锁
+        } else if (cnt_12 == 0 && cnt_21 == 0) {
+            IronLane::g_lane_lock_dir = 0;
+        } else if (cnt_21 == 0) {
+            IronLane::g_lane_lock_dir = 1;
+        } else if (cnt_12 == 0) {
+            IronLane::g_lane_lock_dir = -1;
+        } else {
+            // 两边都有人 → 翻锁
+            IronLane::g_lane_lock_dir = -prev_lock;
+            if (IronLane::g_lane_lock_dir == 0)
+                IronLane::g_lane_lock_dir = 1;
+        }
+        if (optsvr::cfg().debug_level >= 1) {
+            std::fprintf(stderr, "[IronLane] tick=%d core=%d lane_12=%d lane_21=%d lock=%d\n",
+                env->system_timestep, core_cnt, cnt_12, cnt_21, IronLane::g_lane_lock_dir);
+        }
+    }
 
     const auto pibt_start = std::chrono::steady_clock::now();
     for (int step = 0; step < num_steps; step++) {

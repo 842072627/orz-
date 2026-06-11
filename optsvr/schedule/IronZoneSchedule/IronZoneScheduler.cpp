@@ -3,7 +3,6 @@
 #include "IronZoneScheduler.h"
 #include "HeuristicMatrix.h"
 #include "RuntimeConfig.h"
-#include "lane_data.h"
 
 #include <algorithm>
 #include <chrono>
@@ -35,72 +34,6 @@ int clamp_int(int v, int lo, int hi) {
 }
 
 } // namespace
-
-int IronZoneScheduler::lane_cross_dir(
-    int a_loc, const std::vector<int>& locs, int start_idx) const
-{
-    if (a_loc < 0 || a_loc >= map_size_) return 0;
-    int comp_a = IronLane::get_component(a_loc);
-    if (comp_a != 1 && comp_a != 2) return 0;
-    if (start_idx < 0) start_idx = 0;
-    for (int ei = start_idx; ei < static_cast<int>(locs.size()); ei++) {
-        int goal = locs[ei];
-        if (goal < 0 || goal >= map_size_) continue;
-        int comp_g = IronLane::get_component(goal);
-        if (comp_g == comp_a) continue;
-        if (comp_g == 1) return -1;  // comp2 → comp1
-        if (comp_g == 2) return +1;  // comp1 → comp2
-    }
-    return 0;
-}
-
-void IronZoneScheduler::count_lane_traffic() {
-    if (!cfg().iron_lane_enabled || !env_) return;
-    lane_proposal_12_ = 0;
-    lane_proposal_21_ = 0;
-    lane_assign_12_ = 0;
-    lane_assign_21_ = 0;
-    int core_cnt = 0;
-    int guard = cfg().iron_lane_guard_dist;
-    if (guard <= 0) guard = 20;
-    int flip_th = cfg().iron_lane_core_flip_th;
-    if (flip_th <= 0) flip_th = 10;
-    int n = static_cast<int>(schedule_snapshot_.size());
-    for (int a = 0; a < n; a++) {
-        int tid = schedule_snapshot_[a];
-        if (tid < 0) continue;
-        int a_loc = (a < static_cast<int>(curr_locations_snapshot_.size()))
-            ? curr_locations_snapshot_[a] : -1;
-        if (a_loc < 0) continue;
-        int x = a_loc % cols_;
-        int y = a_loc / cols_;
-        int md = IronLane::manhattan_to_lane(x, y);
-        if (md >= guard) continue;
-        auto it = task_pool_snapshot_.find(tid);
-        if (it == task_pool_snapshot_.end()) continue;
-        auto& task = it->second;
-        if (task.locations.empty()) continue;
-        int idx = task.idx_next_loc;
-        if (idx < 0 || idx >= static_cast<int>(task.locations.size())) continue;
-        int goal = task.locations[idx];
-        if (goal == a_loc) continue;
-        int dir = lane_cross_dir(a_loc, task.locations, idx);
-        if (dir > 0) lane_assign_12_++;
-        else if (dir < 0) lane_assign_21_++;
-        if (IronLane::is_core_cell(a_loc)) core_cnt++;
-    }
-    int new_lock = 0;
-    if (lane_assign_12_ > 0 && lane_assign_21_ == 0) new_lock = +1;
-    else if (lane_assign_21_ > 0 && lane_assign_12_ == 0) new_lock = -1;
-    else if (lane_assign_12_ > 0 && lane_assign_21_ > 0)
-        new_lock = (lane_assign_12_ >= lane_assign_21_) ? +1 : -1;
-    if (new_lock != lane_lock_dir_ && new_lock != 0 && core_cnt >= flip_th) {
-    } else {
-        lane_lock_dir_ = new_lock;
-    }
-    std::fprintf(stderr, "[IronLane] tick=%d assign_12=%d assign_21=%d core=%d lock=%d\n",
-        effective_tick(env_), lane_assign_12_, lane_assign_21_, core_cnt, lane_lock_dir_);
-}
 
 void IronZoneScheduler::initialize(SharedEnvironment* env, int /*preprocess_time_limit_ms*/) {
     env_ = env;
@@ -277,24 +210,6 @@ float IronZoneScheduler::score_candidate(
     const std::vector<int>& finish_zone_pressure,
     const std::vector<int>& zone_shortage) const
 {
-    // Lane traffic light check
-    bool lane_guide = false;
-    if (cfg().iron_lane_enabled && lane_lock_dir_ != 0) {
-        auto it = task_pool_snapshot_.find(task.tid);
-        if (it != task_pool_snapshot_.end() && !it->second.locations.empty()) {
-            int dir = lane_cross_dir(agent.loc, it->second.locations,
-                                     it->second.idx_next_loc);
-            if (dir != 0) {
-                int total_12 = lane_assign_12_ + lane_proposal_12_;
-                int total_21 = lane_assign_21_ + lane_proposal_21_;
-                if (dir == +1 && total_21 > 0) return 1e9f;
-                if (dir == -1 && total_12 > 0) return 1e9f;
-                if (total_12 > 0 && total_21 > 0) return 1e9f;
-                if (dir == lane_lock_dir_) lane_guide = true;
-            }
-        }
-    }
-
     int dist = distance_fast(env_, agent.loc, task.start);
 
     int zd = zone_distance(agent.zone, task.start_zone);
@@ -360,9 +275,6 @@ float IronZoneScheduler::score_candidate(
             : 1;
         int finish_excess = std::max(0, finish_zone_pressure[task.finish_zone] - avg_pressure);
         score += 10.0f * static_cast<float>(finish_excess);
-    }
-    if (cfg().iron_lane_enabled && lane_guide && cfg().iron_lane_idle_bonus > 0.0f) {
-        score -= cfg().iron_lane_idle_bonus;
     }
     return score;
 }
@@ -437,9 +349,6 @@ void IronZoneScheduler::schedule(int time_limit_ms,
         std::fprintf(stderr, "[IronZone] snapshot copy failed, skipping schedule round\n");
         return;
     }
-
-    // Lane traffic light: recount assignments
-    count_lane_traffic();
 
     RoundStats stats;
     stats.early_phase = early_phase_factor();
@@ -954,16 +863,6 @@ void IronZoneScheduler::schedule(int time_limit_ms,
         stats.migration_gain_sum += finish_shortage - agent_shortage;
         if (zd > 0) stats.cross_zone++;
         if (task.length >= cfg().iron_long_task_th) stats.long_tasks++;
-        // Lane traffic light: update proposal counters
-        if (cfg().iron_lane_enabled) {
-            auto tit = task_pool_snapshot_.find(task.tid);
-            if (tit != task_pool_snapshot_.end() && !tit->second.locations.empty()) {
-                int dir = lane_cross_dir(agent.loc, tit->second.locations,
-                                         tit->second.idx_next_loc);
-                if (dir > 0) lane_proposal_12_++;
-                else if (dir < 0) lane_proposal_21_++;
-            }
-        }
     };
 
     if (aggressive_assign) {
