@@ -3,6 +3,7 @@
 #pragma once
 
 #include "SharedEnv.h"
+#include "RuntimeConfig.h"
 #include <chrono>
 #include <vector>
 
@@ -101,6 +102,16 @@ private:
     std::vector<int> curr_locations_snapshot_;
     std::vector<int> schedule_snapshot_;
     TaskPool task_pool_snapshot_;
+
+    // Lane traffic light
+    int lane_assign_12_ = 0;
+    int lane_assign_21_ = 0;
+    int lane_proposal_12_ = 0;
+    int lane_proposal_21_ = 0;
+    int lane_lock_dir_ = 0;
+
+    void count_lane_traffic();
+    int lane_cross_dir(int a_loc, const std::vector<int>& locs, int start_idx) const;
 
     int zone_of_loc(int loc) const;
     int component_of_loc(int loc) const;

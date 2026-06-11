@@ -194,6 +194,12 @@ struct RuntimeConfig {
     int   iron_opportunity_completion;
     int   iron_opportunity_cross;
 
+    // Iron 红绿灯
+    int   iron_lane_enabled;
+    int   iron_lane_guard_dist;
+    int   iron_lane_core_flip_th;
+    float iron_lane_idle_bonus;
+
     // ---- FlowDecay ----
     float flow_decay;
     int   flow_decay_scale;
@@ -411,6 +417,12 @@ struct RuntimeConfig {
         iron_opportunity_completion =
             read_int("IRON_OPPORTUNITY_COMPLETION", IRON_OPPORTUNITY_COMPLETION);
         iron_opportunity_cross = read_int("IRON_OPPORTUNITY_CROSS", IRON_OPPORTUNITY_CROSS);
+
+        // Iron 红绿灯
+        iron_lane_enabled      = read_int  ("IRON_LANE_ENABLED",       IRON_LANE_ENABLED);
+        iron_lane_guard_dist   = read_int  ("IRON_LANE_GUARD_DIST",    IRON_LANE_GUARD_DIST);
+        iron_lane_core_flip_th = read_int  ("IRON_LANE_CORE_FLIP_TH",  IRON_LANE_CORE_FLIP_TH);
+        iron_lane_idle_bonus   = read_float("IRON_LANE_IDLE_BONUS",    IRON_LANE_IDLE_BONUS);
 
         // GameOpt 专属
         game_dist_weight = read_float("GAME_DIST_WEIGHT",   GAME_DIST_WEIGHT);
@@ -834,6 +846,11 @@ private:
         iron_opportunity_dist = IRON_OPPORTUNITY_DIST;
         iron_opportunity_completion = IRON_OPPORTUNITY_COMPLETION;
         iron_opportunity_cross = IRON_OPPORTUNITY_CROSS;
+
+        iron_lane_enabled      = IRON_LANE_ENABLED;
+        iron_lane_guard_dist   = IRON_LANE_GUARD_DIST;
+        iron_lane_core_flip_th = IRON_LANE_CORE_FLIP_TH;
+        iron_lane_idle_bonus   = IRON_LANE_IDLE_BONUS;
 
         // RoomPlanner / RoomExecutor 优化 (精简后仅保留有效参数)
         opt_room_flow_scale = OPT_ROOM_FLOW_SCALE;

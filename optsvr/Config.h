@@ -254,6 +254,14 @@ constexpr int   IRON_OPPORTUNITY_COMPLETION = 1350;
 constexpr int   IRON_OPPORTUNITY_CROSS = 0;
 
 // ═══════════════════════════════════════════════════════════════════
+// Iron 红绿灯（lane traffic light）
+// ═══════════════════════════════════════════════════════════════════
+constexpr int   IRON_LANE_ENABLED      = 0;       // 0=关闭, 1=开启红绿灯
+constexpr int   IRON_LANE_GUARD_DIST   = 20;      // 统计agent的曼哈顿距离阈值
+constexpr int   IRON_LANE_CORE_FLIP_TH = 10;      // core人数<此值才能翻转锁方向
+constexpr float IRON_LANE_IDLE_BONUS   = 0.5f;    // 空闲agent引导加分（score越小越好）
+
+// ═══════════════════════════════════════════════════════════════════
 // RoomPlanner / RoomExecutor 优化参数
 // 默认值全部为"关闭"状态，需通过MapTuner或环境变量显式开启
 // 关闭时: RoomExecutor(5)≡DHExecutor(3), RoomPlanner(6)≡OptPlanner(1)
