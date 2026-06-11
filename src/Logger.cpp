@@ -1,4 +1,3 @@
-#define BOOST_LOG_DYN_LINK  // undefine to force static
 #include "Logger.h"
 
 namespace logging = boost::log;
