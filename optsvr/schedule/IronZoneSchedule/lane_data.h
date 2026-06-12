@@ -15,10 +15,10 @@ extern const signed char g_core[];      // [MAP_SIZE] 0=not core, 1=core
 extern const signed char g_lane[];      // [MAP_SIZE] 0=not lane, 1=lane
 
 // Manhattan distance to lane (bounding box, 99=outside)
-constexpr int MD_OX = 1573;
-constexpr int MD_OY = 930;
-constexpr int MD_W = 99;
-constexpr int MD_H = 166;
+constexpr int MD_OX = 1568;
+constexpr int MD_OY = 931;
+constexpr int MD_W = 112;
+constexpr int MD_H = 168;
 extern const signed char g_md[];        // [MD_H * MD_W]
 
 // Fast inline lookups
