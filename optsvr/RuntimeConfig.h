@@ -198,6 +198,8 @@ struct RuntimeConfig {
     int   iron_lane_enabled;
     int   iron_lane_guard_dist;
     int   iron_lane_core_flip_th;
+    int   iron_lane_flow_ratio_flip;
+    int   iron_lane_vote_period;
     float iron_lane_idle_bonus;
 
     // ---- FlowDecay ----
@@ -422,6 +424,8 @@ struct RuntimeConfig {
         iron_lane_enabled      = read_int  ("IRON_LANE_ENABLED",       IRON_LANE_ENABLED);
         iron_lane_guard_dist   = read_int  ("IRON_LANE_GUARD_DIST",    IRON_LANE_GUARD_DIST);
         iron_lane_core_flip_th = read_int  ("IRON_LANE_CORE_FLIP_TH",  IRON_LANE_CORE_FLIP_TH);
+        iron_lane_flow_ratio_flip = read_int("IRON_LANE_FLOW_RATIO_FLIP", IRON_LANE_FLOW_RATIO_FLIP);
+        iron_lane_vote_period    = read_int("IRON_LANE_VOTE_PERIOD",    IRON_LANE_VOTE_PERIOD);
         iron_lane_idle_bonus   = read_float("IRON_LANE_IDLE_BONUS",    IRON_LANE_IDLE_BONUS);
 
         // GameOpt 专属
@@ -850,6 +854,8 @@ private:
         iron_lane_enabled      = IRON_LANE_ENABLED;
         iron_lane_guard_dist   = IRON_LANE_GUARD_DIST;
         iron_lane_core_flip_th = IRON_LANE_CORE_FLIP_TH;
+        iron_lane_flow_ratio_flip = IRON_LANE_FLOW_RATIO_FLIP;
+        iron_lane_vote_period    = IRON_LANE_VOTE_PERIOD;
         iron_lane_idle_bonus   = IRON_LANE_IDLE_BONUS;
 
         // RoomPlanner / RoomExecutor 优化 (精简后仅保留有效参数)

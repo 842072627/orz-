@@ -81,8 +81,13 @@ bool causalPIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
 				if (lock != 0) {
 					int comp = IronLane::get_component(prev_loc);
 					int dir = (comp == 2) ? -1 : (comp == 1) ? +1 : 0;
-					if (dir != 0 && dir != lock)
+					if (dir != 0 && dir != lock) {
+						if (dir > 0) IronLane::g_blocked_12++;
+						else IronLane::g_blocked_21++;
 						continue;  // counterflow → FORBID
+					}
+					if (dir > 0) IronLane::g_passed_12++;
+					else if (dir < 0) IronLane::g_passed_21++;
 				}
 			}
 		}
