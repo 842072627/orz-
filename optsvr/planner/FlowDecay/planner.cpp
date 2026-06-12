@@ -227,6 +227,45 @@ void OptPlanner::setup_multistep_episode_state(
             trajLNS_.tasks[i] = env->goal_locations[i].front().first;
         }
 
+        // Iron lane: redirect counterflow agents in lane to exit
+        // (runs BEFORE require_guide_path check so A* computes to exit)
+        if (optsvr::cfg().iron_lane_enabled) {
+            int loc = env->curr_states[i].location;
+            if (loc >= 0 && IronLane::is_lane_cell(loc)) {
+                int lock = IronLane::g_lane_lock_dir;
+                if (lock != 0) {
+                    int tid = env->curr_task_schedule[i];
+                    int exit = -1;
+                    if (tid >= 0) {
+                        int goal_comp = 0;
+                        auto it = env->task_pool.find(tid);
+                        if (it != env->task_pool.end() && !it->second.locations.empty()) {
+                            int idx = it->second.idx_next_loc;
+                            if (idx >= 0 && idx < (int)it->second.locations.size())
+                                goal_comp = IronLane::get_component(it->second.locations[idx]);
+                        }
+                        if (goal_comp != 0) {
+                            int dir = (goal_comp == 2) ? 1 : -1;
+                            if (dir != lock) {
+                                // Counterflow: redirect to opposite side
+                                exit = (goal_comp == 2)
+                                    ? (IronLane::g_exit_to_comp1 ? IronLane::g_exit_to_comp1[loc] : -1)
+                                    : (IronLane::g_exit_to_comp2 ? IronLane::g_exit_to_comp2[loc] : -1);
+                            }
+                        }
+                    } else {
+                        // Idle in lane: redirect per lock direction
+                        exit = (lock > 0)
+                            ? (IronLane::g_exit_to_comp2 ? IronLane::g_exit_to_comp2[loc] : -1)
+                            : (IronLane::g_exit_to_comp1 ? IronLane::g_exit_to_comp1[loc] : -1);
+                    }
+                    if (exit >= 0) {
+                        trajLNS_.tasks[i] = exit;
+                    }
+                }
+            }
+        }
+
         // 检测 guide-path mismatch / need replan
         require_guide_path_[i] = false;
         if (trajLNS_.trajs[i].empty()) {
@@ -896,11 +935,7 @@ void OptPlanner::plan(int time_limit, std::vector<std::vector<Action>>& actions,
                     }
                     if (exit >= 0) {
                         trajLNS_.tasks[a] = exit;
-                        // Clear dist table so get_gp_h falls to manhattan toward exit
-                        // (keep trajs — avoids A*; gradient is fine in single-cell corridor)
-                        trajLNS_.traj_dists[a].dist2path.clear();
-                        trajLNS_.traj_dists[a].open.clear();
-                        trajLNS_.traj_dists[a].label = 0;
+                        // Keep traj_dists — guide path was computed to exit by setup()+update_guide_paths
                     }
                 }
             }
@@ -957,12 +992,8 @@ void OptPlanner::plan(int time_limit, std::vector<std::vector<Action>>& actions,
                     : (IronLane::g_exit_to_comp1 ? IronLane::g_exit_to_comp1[loc] : -1);
             }
             if (exit >= 0) {
-                trajLNS_.tasks[a] = exit;
-                // Clear dist table so get_gp_h falls to manhattan toward exit
-                // (keep trajs — avoids A* waste)
-                trajLNS_.traj_dists[a].dist2path.clear();
-                trajLNS_.traj_dists[a].open.clear();
-                trajLNS_.traj_dists[a].label = 0;
+                trajLNS_.tasks[a] = exit;  // safety keep-alive
+                // Keep traj_dists — guide path was computed to exit by setup()+update_guide_paths
             }
         } // end for(a) between-votes
         // Removed per-tick CSV (was for diagnostics, adds significant overhead)
