@@ -723,50 +723,6 @@ void OptPlanner::plan(int time_limit, std::vector<std::vector<Action>>& actions,
     TimePoint hard_deadline = episode_start + std::chrono::milliseconds(
         std::max(0, time_limit - deadline_margin_ms));
 
-    // Iron lane: BEFORE guide path update, redirect counterflow agents in lane
-    // (so update_guide_paths computes their path to the exit, not through the lane)
-    if (optsvr::cfg().iron_lane_enabled && IronLane::g_lane_lock_dir != 0) {
-        int lock = IronLane::g_lane_lock_dir;
-        for (int a = 0; a < env->num_of_agents; a++) {
-            int loc = env->curr_states[a].location;
-            if (loc < 0) continue;
-            if (!IronLane::is_lane_cell(loc)) continue;
-            int tid = env->curr_task_schedule[a];
-            if (tid >= 0) {
-                // Agent has a real task — check direction against lock
-                auto it = env->task_pool.find(tid);
-                if (it == env->task_pool.end() || it->second.locations.empty()) continue;
-                int idx = it->second.idx_next_loc;
-                if (idx < 0 || idx >= (int)it->second.locations.size()) continue;
-                int goal = it->second.locations[idx];
-                int goal_comp = IronLane::get_component(goal);
-                int dir = 0;
-                if (goal_comp == 2) dir = 1;
-                else if (goal_comp == 1) dir = -1;
-                if (dir == 0 || dir == lock) continue;  // not counterflow → skip
-                // Counterflow: retreat to opposite side
-                int exit = (goal_comp == 2)
-                    ? (IronLane::g_exit_to_comp1 ? IronLane::g_exit_to_comp1[loc] : -1)
-                    : (IronLane::g_exit_to_comp2 ? IronLane::g_exit_to_comp2[loc] : -1);
-                if (exit >= 0) {
-                    trajLNS_.trajs[a].clear();
-                    trajLNS_.tasks[a] = exit;
-                }
-            } else {
-                // Idle agent in lane: redirect to same side as counterflow
-                // lock=+1 (comp1→comp2 open) → idle retreats to comp2 (exit_to_comp2)
-                // lock=-1 (comp2→comp1 open) → idle retreats to comp1 (exit_to_comp1)
-                int exit = (lock > 0)
-                    ? (IronLane::g_exit_to_comp2 ? IronLane::g_exit_to_comp2[loc] : -1)
-                    : (IronLane::g_exit_to_comp1 ? IronLane::g_exit_to_comp1[loc] : -1);
-                if (exit >= 0) {
-                    trajLNS_.trajs[a].clear();
-                    trajLNS_.tasks[a] = exit;
-                }
-            }
-        }
-    }
-
     update_guide_paths_once_for_multistep(env, flow_end_time);
 
     // commit cross-episode priority
@@ -860,37 +816,42 @@ void OptPlanner::plan(int time_limit, std::vector<std::vector<Action>>& actions,
                 //  ensures the counterflow re-sweep below starts from clean state)
                 IronLane::g_redirected_count = 0;  // clear redirect list
 
-                // Sweep lane: redirect counterflow agents to nearest exit
+                // Sweep lane: redirect counterflow agents (including idle) to exit
                 for (int a = 0; a < env->num_of_agents; a++) {
                     int loc = env->curr_states[a].location;
                     if (loc < 0) continue;
                     if (!IronLane::is_lane_cell(loc)) continue;
                     int tid = env->curr_task_schedule[a];
-                    if (tid < 0) continue;  // idle agents already have dummy_goal=exit
-                    // Get agent's intended direction
-                    auto it = env->task_pool.find(tid);
-                    if (it == env->task_pool.end() || it->second.locations.empty()) continue;
-                    int idx = it->second.idx_next_loc;
-                    if (idx < 0 || idx >= (int)it->second.locations.size()) continue;
-                    int goal = it->second.locations[idx];
-                    int goal_comp = IronLane::get_component(goal);
-                    int dir = 0;
-                    if (goal_comp == 2) dir = 1;    // heading to comp2
-                    else if (goal_comp == 1) dir = -1;  // heading to comp1
-                    // Counterflow in lane?
-                    if (dir != 0 && dir != new_lock) {
-                        // Counterflow: retreat to the side they came from
-                        int exit = (goal_comp == 2)
+                    int exit = -1;
+                    if (tid >= 0) {
+                        // Has task — check direction against lock
+                        auto it = env->task_pool.find(tid);
+                        if (it == env->task_pool.end() || it->second.locations.empty()) continue;
+                        int idx = it->second.idx_next_loc;
+                        if (idx < 0 || idx >= (int)it->second.locations.size()) continue;
+                        int goal = it->second.locations[idx];
+                        int goal_comp = IronLane::get_component(goal);
+                        int dir = 0;
+                        if (goal_comp == 2) dir = 1;
+                        else if (goal_comp == 1) dir = -1;
+                        if (dir == 0 || dir == new_lock) continue;  // not counterflow → skip
+                        // Counterflow: retreat to opposite side
+                        exit = (goal_comp == 2)
                             ? (IronLane::g_exit_to_comp1 ? IronLane::g_exit_to_comp1[loc] : -1)
                             : (IronLane::g_exit_to_comp2 ? IronLane::g_exit_to_comp2[loc] : -1);
-                        if (exit >= 0 && IronLane::g_redirected_count < IronLane::MAX_AGENTS) {
-                            IronLane::g_redirected_agents[IronLane::g_redirected_count++] = a;
+                    } else {
+                        // Idle agent: redirect to same side as counterflow
+                        exit = (new_lock > 0)
+                            ? (IronLane::g_exit_to_comp2 ? IronLane::g_exit_to_comp2[loc] : -1)
+                            : (IronLane::g_exit_to_comp1 ? IronLane::g_exit_to_comp1[loc] : -1);
+                    }
+                    if (exit >= 0 && IronLane::g_redirected_count < IronLane::MAX_AGENTS) {
+                        IronLane::g_redirected_agents[IronLane::g_redirected_count++] = a;
                             // Set task = nearest exit → PIBT routes agent to exit
                             // (guide path will be recomputed on next plan() since trajs was
                             //  already cleared by the early redirect above)
-                            std::fprintf(stderr, "[IronLane] redirect a=%d loc=%d g_comp=%d dir=%+d lock=%+d exit=%d\n",
-                                a, loc, goal_comp, dir, new_lock, exit);
-                        }
+                            std::fprintf(stderr, "[IronLane] redirect a=%d loc=%d lock=%+d exit=%d\n",
+                                a, loc, new_lock, exit);
                     }
                 }
             }
@@ -912,20 +873,27 @@ void OptPlanner::plan(int time_limit, std::vector<std::vector<Action>>& actions,
                 int loc = env->curr_states[a].location;
                 if (loc < 0) continue;
                 if (IronLane::is_lane_cell(loc)) {
-                    // Determine which side exit to use from original task
+                    // Determine which side exit to use
                     int tid = env->curr_task_schedule[a];
-                    int goal_comp = 0;
+                    int exit = -1;
                     if (tid >= 0) {
+                        int goal_comp = 0;
                         auto it = env->task_pool.find(tid);
                         if (it != env->task_pool.end() && !it->second.locations.empty()) {
                             int idx = it->second.idx_next_loc;
                             if (idx >= 0 && idx < (int)it->second.locations.size())
                                 goal_comp = IronLane::get_component(it->second.locations[idx]);
                         }
+                        exit = (goal_comp == 2)
+                            ? (IronLane::g_exit_to_comp1 ? IronLane::g_exit_to_comp1[loc] : -1)
+                            : (IronLane::g_exit_to_comp2 ? IronLane::g_exit_to_comp2[loc] : -1);
+                    } else {
+                        // Idle: follow lock direction
+                        int lock = IronLane::g_lane_lock_dir;
+                        exit = (lock > 0)
+                            ? (IronLane::g_exit_to_comp2 ? IronLane::g_exit_to_comp2[loc] : -1)
+                            : (IronLane::g_exit_to_comp1 ? IronLane::g_exit_to_comp1[loc] : -1);
                     }
-                    int exit = (goal_comp == 2)
-                        ? (IronLane::g_exit_to_comp1 ? IronLane::g_exit_to_comp1[loc] : -1)
-                        : (IronLane::g_exit_to_comp2 ? IronLane::g_exit_to_comp2[loc] : -1);
                     if (exit >= 0) {
                         trajLNS_.tasks[a] = exit;
                     }
@@ -951,20 +919,27 @@ void OptPlanner::plan(int time_limit, std::vector<std::vector<Action>>& actions,
             int loc = env->curr_states[a].location;
             if (loc < 0) continue;
             if (IronLane::is_lane_cell(loc)) {
-                // Determine which side exit to use from original task
+                // Determine which side exit to use
                 int tid = env->curr_task_schedule[a];
-                int goal_comp = 0;
+                int exit = -1;
                 if (tid >= 0) {
+                    int goal_comp = 0;
                     auto it = env->task_pool.find(tid);
                     if (it != env->task_pool.end() && !it->second.locations.empty()) {
                         int idx = it->second.idx_next_loc;
                         if (idx >= 0 && idx < (int)it->second.locations.size())
                             goal_comp = IronLane::get_component(it->second.locations[idx]);
                     }
+                    exit = (goal_comp == 2)
+                        ? (IronLane::g_exit_to_comp1 ? IronLane::g_exit_to_comp1[loc] : -1)
+                        : (IronLane::g_exit_to_comp2 ? IronLane::g_exit_to_comp2[loc] : -1);
+                } else {
+                    // Idle: follow lock direction
+                    int lock = IronLane::g_lane_lock_dir;
+                    exit = (lock > 0)
+                        ? (IronLane::g_exit_to_comp2 ? IronLane::g_exit_to_comp2[loc] : -1)
+                        : (IronLane::g_exit_to_comp1 ? IronLane::g_exit_to_comp1[loc] : -1);
                 }
-                int exit = (goal_comp == 2)
-                    ? (IronLane::g_exit_to_comp1 ? IronLane::g_exit_to_comp1[loc] : -1)
-                    : (IronLane::g_exit_to_comp2 ? IronLane::g_exit_to_comp2[loc] : -1);
                 if (exit >= 0) {
                     trajLNS_.tasks[a] = exit;
                 }
