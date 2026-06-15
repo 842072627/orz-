@@ -266,15 +266,15 @@ constexpr int   IRON_LANE_VOTE_PERIOD  = 80;      // 每N tick重新投票
 // ═══════════════════════════════════════════════════════════════════
 // Iron future flow（256×256 zone 级别流量预测）
 // ═══════════════════════════════════════════════════════════════════
-constexpr float IRON_FUTURE_FLOW_WEIGHT    = 0.0f;   // 0=关闭future flow
+constexpr float IRON_FUTURE_FLOW_WEIGHT    = 40.0f;   // 0=关闭future flow
 constexpr float IRON_FUTURE_FLOW_K         = 1.0f;   // base加流量
 constexpr float IRON_FUTURE_FLOW_DECAY     = 0.01f;  // 1/(1+d*decay)
 constexpr float IRON_FUTURE_FLOW_IDLE1     = 1.0f;   // idle→task_start段权重
 constexpr float IRON_FUTURE_FLOW_IDLE2     = 0.7f;   // task_start→finish段权重
 constexpr float IRON_FUTURE_FLOW_BUSY1     = 1.0f;   // busy agent→curr_finish
 constexpr int   IRON_FUTURE_FLOW_PREDICT   = 0;      // 预测task2延伸格数(0=关)
-constexpr int   IRON_FUTURE_FLOW_ZONE_ROWS = 256;    // ff内部zone网格行数
-constexpr int   IRON_FUTURE_FLOW_ZONE_COLS = 256;    // ff内部zone网格列数
+constexpr int   IRON_FUTURE_FLOW_ZONE_ROWS = 128;    // ff内部zone网格行数
+constexpr int   IRON_FUTURE_FLOW_ZONE_COLS = 128;    // ff内部zone网格列数
 constexpr float IRON_FUTURE_FLOW_REWARD_W  = 0.0f;   // 顺流奖励权重(0=关)
 // 默认值全部为"关闭"状态，需通过MapTuner或环境变量显式开启
 // 关闭时: RoomExecutor(5)≡DHExecutor(3), RoomPlanner(6)≡OptPlanner(1)

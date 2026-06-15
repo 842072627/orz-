@@ -40,6 +40,7 @@ private:
     std::vector<OptPlan::DCR> decided_;
     std::vector<bool> checked_;
     std::vector<bool> require_guide_path_;
+    std::vector<int> last_guide_tick_;  // 每个agent上次拿到guide path的tick (LRU)
     std::vector<int> dummy_goals_;
     OptPlan::TrajLNS trajLNS_;
     std::mt19937 mt1_;

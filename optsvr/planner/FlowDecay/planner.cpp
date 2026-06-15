@@ -78,6 +78,7 @@ void OptPlanner::initialize(int preprocess_time_limit, SharedEnvironment* env)
     checked_.resize(env->num_of_agents, false);
     ids_.resize(env->num_of_agents);
     require_guide_path_.resize(env->num_of_agents, false);
+    last_guide_tick_.resize(env->num_of_agents, -1);  // -1 = 从未拿到过路径
 
     for (int i = 0; i < (int)ids_.size(); i++) {
         ids_[i] = i;
@@ -227,6 +228,16 @@ void OptPlanner::setup_multistep_episode_state(
             trajLNS_.tasks[i] = env->goal_locations[i].front().first;
         }
 
+        // DIAG: log agent 8914 every tick for first 200 ticks
+        if (i == 8914 && env->curr_timestep < 200) {
+            int loc = env->curr_states[i].location;
+            int nb = (loc >= 0) ? static_cast<int>(trajLNS_.neighbors[loc].size()) : -1;
+            bool has_goal = !env->goal_locations[i].empty();
+            std::fprintf(stderr, "[Diag8914] tick=%d loc=%d pri=%.1f hasGoal=%d nb=%d trajSz=%zu\n",
+                env->curr_timestep, loc, local_priority[i], (int)has_goal, nb,
+                trajLNS_.trajs[i].size());
+        }
+
         // Iron lane: redirect counterflow agents in lane to exit
         // (runs BEFORE require_guide_path check so A* computes to exit)
         if (optsvr::cfg().iron_lane_enabled) {
@@ -261,7 +272,33 @@ void OptPlanner::setup_multistep_episode_state(
                     }
                     if (exit >= 0) {
                         trajLNS_.tasks[i] = exit;
+                    } else if (tid >= 0) {
+                        int rc_goal_comp = 0;
+                        auto rit = env->task_pool.find(tid);
+                        if (rit != env->task_pool.end() && !rit->second.locations.empty()) {
+                            int ridx = rit->second.idx_next_loc;
+                            if (ridx >= 0 && ridx < (int)rit->second.locations.size())
+                                rc_goal_comp = IronLane::get_component(rit->second.locations[ridx]);
+                        }
+                        int rdir = (rc_goal_comp == 2) ? 1 : (rc_goal_comp == 1) ? -1 : 0;
+                        std::fprintf(stderr, "[LaneFail] a=%d,loc=%d,lock=%+d,gc=%d,dir=%+d,exit=%d\\n",
+                            i, loc, lock, rc_goal_comp, rdir, exit);
                     }
+                } else {
+                    // Agent in lane cell but lock==0 — dump all
+                    int tid = env->curr_task_schedule[i];
+                    int gc2 = 0, dir2 = 0;
+                    if (tid >= 0) {
+                        auto it2 = env->task_pool.find(tid);
+                        if (it2 != env->task_pool.end() && !it2->second.locations.empty()) {
+                            int idx2 = it2->second.idx_next_loc;
+                            if (idx2 >= 0 && idx2 < (int)it2->second.locations.size())
+                                gc2 = IronLane::get_component(it2->second.locations[idx2]);
+                            dir2 = (gc2 == 2) ? 1 : (gc2 == 1) ? -1 : 0;
+                        }
+                    }
+                    std::fprintf(stderr, "[InLane] a=%d,loc=%d,lock=%+d,gc=%d,dir=%+d,tid=%d,task=%d\\n",
+                        i, loc, 0, gc2, dir2, tid, env->curr_task_schedule[i]);
                 }
             }
         }
@@ -316,19 +353,25 @@ void OptPlanner::update_guide_paths_once_for_multistep(SharedEnvironment* env, T
     const std::vector<std::vector<int>>* ew_ptr =
         (!extra_weights_.empty()) ? &extra_weights_ : nullptr;
 
-    // 串行 guide path（与 DefaultPlanner 完全一致）
+    // LRU排序：等最久的先算，而不是从index=0开始
+    std::vector<int> need_ids;
+    need_ids.reserve(env->num_of_agents);
     for (int i = 0; i < env->num_of_agents; i++) {
+        if (require_guide_path_[i])
+            need_ids.push_back(i);
+    }
+    std::sort(need_ids.begin(), need_ids.end(), [this](int a, int b) {
+        return last_guide_tick_[a] < last_guide_tick_[b];
+    });
+
+    for (int idx : need_ids) {
         if (std::chrono::steady_clock::now() > flow_end_time)
             break;
-        if (require_guide_path_[i]) {
-            if (!trajLNS_.trajs[i].empty())
-                remove_traj(trajLNS_, i);
-            // Keep guide-path generation semantics identical to the stable build:
-            // only the outer loop is deadline-limited. Passing the deadline into
-            // A* can turn a time cut into a "no path" result and trip old asserts.
-            if (update_traj(trajLNS_, i, nullptr, ew_ptr)) {
-                pressure_stats_.guide_replanned++;
-            }
+        if (!trajLNS_.trajs[idx].empty())
+            remove_traj(trajLNS_, idx);
+        if (update_traj(trajLNS_, idx, nullptr, ew_ptr)) {
+            pressure_stats_.guide_replanned++;
+            last_guide_tick_[idx] = pressure_stats_.tick;
         }
     }
     const auto fw_start = std::chrono::steady_clock::now();
@@ -763,6 +806,29 @@ void OptPlanner::plan(int time_limit, std::vector<std::vector<Action>>& actions,
         std::max(0, time_limit - deadline_margin_ms));
 
     update_guide_paths_once_for_multistep(env, flow_end_time);
+
+    // Guide path gap diagnostic
+    if (iron_map) {
+        int still_need = 0;
+        for (int i = 0; i < env->num_of_agents; i++)
+            if (require_guide_path_[i]) still_need++;
+        static int g_last_gap_tick = -1;
+        int cur = env->curr_timestep;
+        if (cur >= 0 && cur != g_last_gap_tick) {
+            g_last_gap_tick = cur;
+            std::fprintf(stderr, "[GuideGap] tick=%d need=%d guide=%d gap=%d remain=%d total=%d gapPct=%.1f%%\n",
+                cur,
+                pressure_stats_.guide_required,
+                pressure_stats_.guide_replanned,
+                pressure_stats_.guide_required - pressure_stats_.guide_replanned,
+                still_need,
+                env->num_of_agents,
+                pressure_stats_.guide_required > 0
+                    ? 100.0 * (pressure_stats_.guide_required - pressure_stats_.guide_replanned)
+                        / pressure_stats_.guide_required
+                    : 0.0);
+        }
+    }
 
     // commit cross-episode priority
     p_ = local_priority;
