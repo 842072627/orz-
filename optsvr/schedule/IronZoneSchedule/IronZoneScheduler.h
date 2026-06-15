@@ -102,6 +102,28 @@ private:
     std::vector<int> schedule_snapshot_;
     TaskPool task_pool_snapshot_;
 
+    // ---- future flow data ----
+    int ff_zone_rows_ = 1;
+    int ff_zone_cols_ = 1;
+    int ff_zone_count_ = 1;
+    std::vector<std::vector<int>> ff_zone_adj_;      // 预计算ff zone邻接表
+    std::vector<float> ff_dir_;                      // 方向flow, size=ff_zone_count_*4
+    std::vector<int> ff_dominant_;                   // 主方向 -1=无 0=E 1=S 2=W 3=N
+    std::vector<float> ff_tide_;                     // 潮汐强度 0~1
+    std::vector<int> ff_bfs_parent_;                 // BFS parent (tick内缓存)
+    std::vector<uint16_t> ff_bfs_dist_;              // BFS dist (tick内缓存)
+    int ff_bfs_cached_source_ = -1;                  // BFS缓存的source zone
+    
+    static constexpr int DIR_E = 0, DIR_S = 1, DIR_W = 2, DIR_N = 3;
+    int ff_dir_from_delta(int dr, int dc) const;
+    void ff_update_tide();
+    
+    int ff_zone_of_loc(int loc) const;
+    void ff_compute_zone_adjacency(SharedEnvironment* env);
+    std::vector<int> ff_get_zone_path(int z_from, int z_to);
+    void ff_add_future_flow_path(int z_from, int z_to, float weight, int cumul_offset);
+    int ff_cell_size() const { return std::max(1, rows_ / std::max(1, ff_zone_rows_)); }
+
     int zone_of_loc(int loc) const;
     int component_of_loc(int loc) const;
     void build_components(SharedEnvironment* env);
@@ -116,6 +138,8 @@ private:
     float score_candidate(const AgentMeta& agent, const TaskMeta& task,
                           const std::vector<int>& finish_zone_pressure,
                           const std::vector<int>& zone_shortage) const;
+    
+    // ---- future flow ----
     void print_round_stats(const RoundStats& stats, int tick) const;
 };
 

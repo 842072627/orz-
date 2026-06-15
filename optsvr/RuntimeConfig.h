@@ -202,6 +202,20 @@ struct RuntimeConfig {
     int   iron_lane_vote_period;
     float iron_lane_idle_bonus;
 
+    // Iron future flow
+    float iron_future_flow_weight;
+    float iron_future_flow_k;
+    float iron_future_flow_decay;
+    float iron_future_flow_idle1;
+    float iron_future_flow_idle2;
+    float iron_future_flow_busy1;
+    int   iron_future_flow_predict;
+    float iron_future_flow_reward_w;
+
+    // Iron future flow zone grid (independent from scheduler's zone grid)
+    int   iron_future_flow_zone_rows;
+    int   iron_future_flow_zone_cols;
+
     // ---- FlowDecay ----
     float flow_decay;
     int   flow_decay_scale;
@@ -427,6 +441,19 @@ struct RuntimeConfig {
         iron_lane_flow_ratio_flip = read_int("IRON_LANE_FLOW_RATIO_FLIP", IRON_LANE_FLOW_RATIO_FLIP);
         iron_lane_vote_period    = read_int("IRON_LANE_VOTE_PERIOD",    IRON_LANE_VOTE_PERIOD);
         iron_lane_idle_bonus   = read_float("IRON_LANE_IDLE_BONUS",    IRON_LANE_IDLE_BONUS);
+
+        // Iron future flow
+        iron_future_flow_weight = read_float("IRON_FUTURE_FLOW_WEIGHT", IRON_FUTURE_FLOW_WEIGHT);
+        iron_future_flow_k      = read_float("IRON_FUTURE_FLOW_K",      IRON_FUTURE_FLOW_K);
+        iron_future_flow_decay  = read_float("IRON_FUTURE_FLOW_DECAY",  IRON_FUTURE_FLOW_DECAY);
+        iron_future_flow_idle1  = read_float("IRON_FUTURE_FLOW_IDLE1",  IRON_FUTURE_FLOW_IDLE1);
+        iron_future_flow_idle2  = read_float("IRON_FUTURE_FLOW_IDLE2",  IRON_FUTURE_FLOW_IDLE2);
+        iron_future_flow_busy1  = read_float("IRON_FUTURE_FLOW_BUSY1",  IRON_FUTURE_FLOW_BUSY1);
+        iron_future_flow_predict= read_int  ("IRON_FUTURE_FLOW_PREDICT",IRON_FUTURE_FLOW_PREDICT);
+        iron_future_flow_reward_w = read_float("IRON_FUTURE_FLOW_REWARD_W", IRON_FUTURE_FLOW_REWARD_W);
+
+        iron_future_flow_zone_rows = read_int("IRON_FUTURE_FLOW_ZONE_ROWS", IRON_FUTURE_FLOW_ZONE_ROWS);
+        iron_future_flow_zone_cols = read_int("IRON_FUTURE_FLOW_ZONE_COLS", IRON_FUTURE_FLOW_ZONE_COLS);
 
         // GameOpt 专属
         game_dist_weight = read_float("GAME_DIST_WEIGHT",   GAME_DIST_WEIGHT);
