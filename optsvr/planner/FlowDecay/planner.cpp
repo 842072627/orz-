@@ -1124,15 +1124,13 @@ void OptPlanner::plan(int time_limit, std::vector<std::vector<Action>>& actions,
                 if (goal_comp != 0) {
                     dir = (goal_comp == 2) ? 1 : -1;
                     if (dir == lock) {
-                        // Correct flow: priority boost, no redirect
-                        local_priority[a] += 100;
+                        // Correct flow: no redirect
                         continue;
                     }
-                    // Counterflow: redirect to opposite side + penalty
+                    // Counterflow: redirect to opposite side
                     exit = (goal_comp == 2)
                         ? (IronLane::g_exit_to_comp1 ? IronLane::g_exit_to_comp1[loc] : -1)
                         : (IronLane::g_exit_to_comp2 ? IronLane::g_exit_to_comp2[loc] : -1);
-                    local_priority[a] -= 100;
                 }
             } else {
                 // Idle in lane → vacate, follow lock direction
@@ -1164,6 +1162,49 @@ void OptPlanner::plan(int time_limit, std::vector<std::vector<Action>>& actions,
             }
         }
         // Removed per-tick CSV (was for diagnostics, adds significant overhead)
+    }
+
+    // PIBT priority with direction boost (copy, doesn't pollute local_priority)
+    std::vector<double> pibt_priority = local_priority;
+    if (optsvr::cfg().iron_lane_enabled) {
+        int lock = IronLane::g_lane_lock_dir;
+        if (lock != 0 && !IronLane::g_clearance_mode) {
+            constexpr double DIR_DELTA = 1000.0;
+            int guard_dist = std::max(1, optsvr::cfg().iron_lane_guard_dist);
+            for (int a = 0; a < env->num_of_agents; a++) {
+                int loc = env->curr_states[a].location;
+                if (loc < 0) continue;
+                int tid = env->curr_task_schedule[a];
+                if (tid < 0) continue;
+                auto it = env->task_pool.find(tid);
+                if (it == env->task_pool.end() || it->second.locations.empty()) continue;
+                int idx = it->second.idx_next_loc;
+                if (idx < 0 || idx >= (int)it->second.locations.size()) continue;
+                int goal = it->second.locations[idx];
+                int goal_comp = IronLane::get_component(goal);
+                if (goal_comp != 1 && goal_comp != 2) continue;
+                int dir = (goal_comp == 2) ? 1 : -1;
+
+                if (IronLane::is_lane_cell(loc)) {
+                    // In lane: direction vs lock
+                    if (dir == lock)
+                        pibt_priority[a] += DIR_DELTA;
+                    else
+                        pibt_priority[a] -= DIR_DELTA;
+                } else {
+                    // Outside lane: only if approaching to cross
+                    int agent_comp = IronLane::get_component(loc);
+                    if (agent_comp == goal_comp) continue;  // same side, not crossing
+                    int x = loc % env->cols, y = loc / env->cols;
+                    int d = IronLane::manhattan_to_lane(x, y);
+                    if (d > guard_dist) continue;
+                    if (dir == lock)
+                        pibt_priority[a] += DIR_DELTA;
+                    else
+                        pibt_priority[a] -= DIR_DELTA;
+                }
+            }
+        }
     }
 
     const auto pibt_start = std::chrono::steady_clock::now();

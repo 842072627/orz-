@@ -260,7 +260,7 @@ constexpr int   IRON_LANE_ENABLED      = 0;       // 0=关闭, 1=开启红绿灯
 constexpr int   IRON_LANE_GUARD_DIST   = 20;      // 统计agent的曼哈顿距离阈值
 constexpr int   IRON_LANE_CORE_FLIP_TH = 10;      // core人数>此值冻锁不翻
 constexpr float IRON_LANE_IDLE_BONUS   = 0.5f;    // 空闲agent引导加分（score越小越好）
-constexpr int   IRON_LANE_FLOW_RATIO_FLIP = 3;    // 拦/放流比>=此值强制翻锁
+constexpr int   IRON_LANE_FLOW_RATIO_FLIP = 2.5;    // 拦/放流比>=此值强制翻锁
 constexpr int   IRON_LANE_VOTE_PERIOD  = 80;      // 每N tick重新投票
 constexpr int   IRON_LANE_DEBUG       = 0;       // 0=关闭所有红绿灯打印, 1=打开debug打印
 constexpr int   IRON_LANE_LRU_SORT    = 0;       // 0=顺序循环算guide path, 1=LRU排序
