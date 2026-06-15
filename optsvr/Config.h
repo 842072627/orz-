@@ -330,6 +330,8 @@ constexpr float FLOW_DECAY       = 0.9f;      // 边流量衰减系数
 constexpr int   FLOW_DECAY_SCALE = 100;        // 放大因子
 constexpr bool  WARE_DIRECT      = false;      // Warehouse 通道定向策略开关
 constexpr bool  OPT_PIBT_FORWARD_BREAK_TIE = true; // PIBT候选heuristic相等时优先FW
+constexpr int   GUIDE_FLOW_OPPOSITE_W = 1;    // 逆流惩罚倍数(1=原版行为)
+constexpr int   GUIDE_FLOW_SAME_W     = 0;    // 顺流奖励(0=关闭, >0时A*选人多方向)
 
 // ═══════════════════════════════════════════════════════════════════
 // 距离矩阵预计算（共用）

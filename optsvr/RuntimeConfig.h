@@ -223,6 +223,8 @@ struct RuntimeConfig {
     int   flow_decay_scale;
     bool  ware_direct;
     bool  pibt_forward_break_tie;
+    int   guide_flow_opposite_w;
+    int   guide_flow_same_w;
 
     // ---- RoomPlanner / RoomExecutor 优化 (精简后仅保留有效参数) ----
     int   opt_room_flow_scale;              // flow_scale覆盖
@@ -300,6 +302,8 @@ struct RuntimeConfig {
         ware_direct      = read_bool ("OPT_WARE_DIRECT",     WARE_DIRECT);
         pibt_forward_break_tie =
             read_bool("OPT_PIBT_FORWARD_BREAK_TIE", OPT_PIBT_FORWARD_BREAK_TIE);
+        guide_flow_opposite_w = read_int("GUIDE_FLOW_OPPOSITE_W", GUIDE_FLOW_OPPOSITE_W);
+        guide_flow_same_w     = read_int("GUIDE_FLOW_SAME_W",     GUIDE_FLOW_SAME_W);
 
         // RoomPlanner / RoomExecutor 优化 (精简后仅保留有效参数)
         opt_room_flow_scale          = read_int  ("OPT_ROOM_FLOW_SCALE",      OPT_ROOM_FLOW_SCALE);
@@ -738,6 +742,8 @@ private:
         flow_decay = FLOW_DECAY; flow_decay_scale = FLOW_DECAY_SCALE;
         ware_direct = WARE_DIRECT;
         pibt_forward_break_tie = OPT_PIBT_FORWARD_BREAK_TIE;
+        guide_flow_opposite_w = GUIDE_FLOW_OPPOSITE_W;
+        guide_flow_same_w     = GUIDE_FLOW_SAME_W;
 
         game_dist_weight = GAME_DIST_WEIGHT; game_rebuild_pct = GAME_REBUILD_PCT;
         game_lns_pct = GAME_LNS_PCT; game_sort_k = GAME_SORT_K;

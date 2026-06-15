@@ -2,6 +2,7 @@
 
 
 #include "search.h"
+#include <algorithm>
 #include "RuntimeConfig.h"
 #include "HeuristicMatrix.h"
 #include "../../schedule/GameBalanceOpt/PibtLock.h"
@@ -129,7 +130,16 @@ s_node astar(SharedEnvironment* env, std::vector<Int4>& flow,
             }
 
 
-            temp_op = ( (unscale_flow(flow[curr->id].d[d])+1) * unscale_flow(flow[next].d[(d+2)%4]));
+            int flow_same = unscale_flow(flow[curr->id].d[d]) + 1;
+            int flow_opposite = unscale_flow(flow[next].d[(d+2)%4]);
+            temp_op = flow_same * flow_opposite;
+            int same_w = optsvr::cfg().guide_flow_same_w;
+            int opp_w  = optsvr::cfg().guide_flow_opposite_w;
+            if (same_w > 0) {
+                int reward = std::min(flow_same * same_w, temp_op);
+                temp_op -= reward;
+            }
+            if (opp_w != 1) temp_op *= opp_w;
 
             //all vertex flow
             //the sum of all out going edge flow is the same as the total number of vertex visiting.
