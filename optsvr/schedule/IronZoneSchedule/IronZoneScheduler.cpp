@@ -419,27 +419,39 @@ float IronZoneScheduler::score_candidate(
     (void)finish_zone_pressure;
     (void)zone_shortage;
 
-    // 热力惩罚：ff_dir_四个方向总流量越高=越堵=加罚
+    // future flow：热力惩罚 + 方向奖励/惩罚（用flow量级，不用tide）
     if (cfg().iron_future_flow_weight != 0.0f && !ff_dir_.empty()) {
         int tz = ff_zone_of_loc(task.start);
-        if (tz >= 0 && tz < ff_zone_count_) {
-            float total = ff_dir_[tz * 4] + ff_dir_[tz * 4 + 1]
-                        + ff_dir_[tz * 4 + 2] + ff_dir_[tz * 4 + 3];
+        int az = ff_zone_of_loc(agent.loc);
+        if (tz >= 0 && tz < ff_zone_count_ && az >= 0 && az < ff_zone_count_) {
+            const float* d = &ff_dir_[tz * 4];
+            float total = d[0] + d[1] + d[2] + d[3];
+            
+            // Heat: 总流量热度（拥堵程度）
             float heat = total / (total + 10.0f);
             score += cfg().iron_future_flow_weight * heat;
-        }
-    }
-
-    // 顺流奖励：只有奖励没有惩罚（逆流不加不减）
-    if (cfg().iron_future_flow_reward_w != 0.0f && !ff_dir_.empty()) {
-        int tz = ff_zone_of_loc(task.start);
-        int az = ff_zone_of_loc(agent.loc);
-        if (tz >= 0 && tz < ff_zone_count_ && az >= 0 && ff_dominant_[tz] >= 0) {
-            int ar = az / ff_zone_cols_, ac = az % ff_zone_cols_;
-            int tr = tz / ff_zone_cols_, tc = tz % ff_zone_cols_;
-            int dir = ff_dir_from_delta(tr - ar, tc - ac);
-            if (dir == ff_dominant_[tz])
-                score -= cfg().iron_future_flow_reward_w * ff_tide_[tz];
+            
+            // Direction: agent走的方向 vs zone的flow分布
+            float rw = cfg().iron_future_flow_reward_w;
+            float pw = cfg().iron_future_flow_penalty_w;
+            if ((rw != 0.0f || pw != 0.0f) && total > 0.5f) {
+                int ar = az / ff_zone_cols_, ac = az % ff_zone_cols_;
+                int tr = tz / ff_zone_cols_, tc = tz % ff_zone_cols_;
+                int dir = ff_dir_from_delta(tr - ar, tc - ac);
+                if (dir >= 0) {
+                    int opp = (dir + 2) % 4;
+                    float flow_with = d[dir];   // 同向流量
+                    float flow_opp  = d[opp];   // 反向流量
+                    
+                    // 顺流奖励：和主流方向一致→减分（便宜）
+                    if (rw != 0.0f)
+                        score -= rw * (flow_with / (flow_with + 10.0f));
+                    
+                    // 逆流惩罚：和主流方向相反→加分（贵）
+                    if (pw != 0.0f)
+                        score += pw * (flow_opp / (flow_opp + 10.0f));
+                }
+            }
         }
     }
 
@@ -447,6 +459,24 @@ float IronZoneScheduler::score_candidate(
 }
 
 void IronZoneScheduler::print_round_stats(const RoundStats& s, int tick) const {
+    // CSV log
+    static FILE* csv = nullptr;
+    if (!csv) {
+        csv = std::fopen("ironzone_debug.csv", "w");
+        if (csv) std::fprintf(csv, "tick,assigned,busy,unmatched,cand,freeT,avgDist,avgLen,rounds,build_ms,solve_ms\n");
+    }
+    if (csv) {
+        double avg_cand = s.candidate_agents > 0
+            ? static_cast<double>(s.candidate_total) / s.candidate_agents : 0.0;
+        std::fprintf(csv, "%d,%d,%d,%d,%.1f,%d,%.1f,%.1f,%d,%.1f,%.1f\n",
+            tick, s.assigned, s.busy_before + s.assigned, s.unmatched_agents,
+            avg_cand, s.free_tasks,
+            s.assigned > 0 ? static_cast<double>(s.dist_sum) / s.assigned : 0.0,
+            s.assigned > 0 ? static_cast<double>(s.len_sum) / s.assigned : 0.0,
+            s.aggressive_rounds, s.build_ms, s.solve_ms);
+        std::fflush(csv);
+    }
+
     double avg_dist = s.assigned > 0 ? static_cast<double>(s.dist_sum) / s.assigned : 0.0;
     double avg_len = s.assigned > 0 ? static_cast<double>(s.len_sum) / s.assigned : 0.0;
     double avg_zd = s.assigned > 0 ? static_cast<double>(s.zone_dist_sum) / s.assigned : 0.0;

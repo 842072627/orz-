@@ -460,6 +460,26 @@ void OptPlanner::log_plan_pressure_if_needed(SharedEnvironment* env) const
        << ",load=" << avg_hot_agents
        << ",wait=" << pct(pressure_stats_.hot_wait_samples,
                            pressure_stats_.hot_agent_samples) << "%)";
+
+    // CSV log: guide path gap + time breakdown
+    static FILE* csv = nullptr;
+    if (!csv) {
+        csv = std::fopen("planner_debug.csv", "w");
+        if (csv) std::fprintf(csv, "tick,need,guide,gap,pibt_ms,guide_ms,total_ms\n");
+    }
+    if (csv) {
+        int gap = pressure_stats_.guide_required - pressure_stats_.guide_replanned;
+        std::fprintf(csv, "%d,%d,%d,%d,%.1f,%.1f,%.1f\n",
+            pressure_stats_.tick,
+            pressure_stats_.guide_required,
+            pressure_stats_.guide_replanned,
+            gap > 0 ? gap : 0,
+            pressure_stats_.pibt_ms,
+            pressure_stats_.guide_ms,
+            pressure_stats_.total_ms);
+        std::fflush(csv);
+    }
+
     std::cerr << os.str() << "\n";
 }
 

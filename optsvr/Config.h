@@ -222,7 +222,7 @@ constexpr float OPT_MAZE_PLANNER_ENTRY_DELTA = 6.0f;
 // ═══════════════════════════════════════════════════════════════════
 constexpr int   IRON_ZONE_ROWS       = 12;
 constexpr int   IRON_ZONE_COLS       = 12;
-constexpr int   IRON_ASSIGN_VARIANT  = 14;    // 0=continuous, 1=wave, 2=zone quota, 3=finish dispersion, 4=dynamic wave, 5=start-distance gate, 6=distance dominant, 7=fair zone quota, 8=completion-cost wave, 9=completion fixed70, 10=completion fixed75, 11=completion ramp70-80, 12=start fixed80, 13=base fixed70, 14=legacy early fixed70, 15=balanced fixed70, 16=opportunity reserve fixed70
+constexpr int   IRON_ASSIGN_VARIANT  = 0;     // 0=continuous, 1=wave, 2=zone quota, 3=finish dispersion, 4=dynamic wave, 5=start-distance gate, 6=distance dominant, 7=fair zone quota, 8=completion-cost wave, 9=completion fixed70, 10=completion fixed75, 11=completion ramp70-80, 12=start fixed80, 13=base fixed70, 14=legacy early fixed70, 15=balanced fixed70, 16=opportunity reserve fixed70
 constexpr int   IRON_LOCAL_RADIUS    = 1;
 constexpr int   IRON_MAX_RADIUS      = 3;
 constexpr int   IRON_CANDIDATE_TOPK  = 500;
@@ -268,16 +268,17 @@ constexpr int   IRON_LANE_LRU_SORT    = 1;       // 0=顺序循环算guide path,
 // ═══════════════════════════════════════════════════════════════════
 // Iron future flow（256×256 zone 级别流量预测）
 // ═══════════════════════════════════════════════════════════════════
-constexpr float IRON_FUTURE_FLOW_WEIGHT    = 0.0f;   // 0=关闭future flow
+constexpr float IRON_FUTURE_FLOW_WEIGHT    = 30.0f;   // 热力惩罚（拥堵程度）
 constexpr float IRON_FUTURE_FLOW_K         = 1.0f;   // base加流量
 constexpr float IRON_FUTURE_FLOW_DECAY     = 0.01f;  // 1/(1+d*decay)
 constexpr float IRON_FUTURE_FLOW_IDLE1     = 1.0f;   // idle→task_start段权重
 constexpr float IRON_FUTURE_FLOW_IDLE2     = 0.7f;   // task_start→finish段权重
 constexpr float IRON_FUTURE_FLOW_BUSY1     = 1.0f;   // busy agent→curr_finish
 constexpr int   IRON_FUTURE_FLOW_PREDICT   = 0;      // 预测task2延伸格数(0=关)
-constexpr int   IRON_FUTURE_FLOW_ZONE_ROWS = 256;    // ff内部zone网格行数
-constexpr int   IRON_FUTURE_FLOW_ZONE_COLS = 256;    // ff内部zone网格列数
-constexpr float IRON_FUTURE_FLOW_REWARD_W  = 0.0f;   // 顺流奖励权重(0=关)
+constexpr int   IRON_FUTURE_FLOW_ZONE_ROWS = 128;    // ff内部zone网格行数
+constexpr int   IRON_FUTURE_FLOW_ZONE_COLS = 128;    // ff内部zone网格列数
+constexpr float IRON_FUTURE_FLOW_REWARD_W  = 30.0f;  // 顺流奖励(=WEIGHT时取消热)
+constexpr float IRON_FUTURE_FLOW_PENALTY_W = 15.0f;  // 逆流惩罚(顺流半额)
 // 默认值全部为"关闭"状态，需通过MapTuner或环境变量显式开启
 // 关闭时: RoomExecutor(5)≡DHExecutor(3), RoomPlanner(6)≡OptPlanner(1)
 // ═══════════════════════════════════════════════════════════════════
@@ -331,7 +332,7 @@ constexpr int   FLOW_DECAY_SCALE = 100;        // 放大因子
 constexpr bool  WARE_DIRECT      = false;      // Warehouse 通道定向策略开关
 constexpr bool  OPT_PIBT_FORWARD_BREAK_TIE = true; // PIBT候选heuristic相等时优先FW
 constexpr int   GUIDE_FLOW_OPPOSITE_W = 1;    // 逆流惩罚倍数(1=原版行为)
-constexpr int   GUIDE_FLOW_SAME_W     = 0;    // 顺流奖励(0=关闭, >0时A*选人多方向)
+constexpr int   GUIDE_FLOW_SAME_W     = 3;    // 顺流奖励(0=关闭, >0时A*选人多方向)
 
 // ═══════════════════════════════════════════════════════════════════
 // 距离矩阵预计算（共用）
