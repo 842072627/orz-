@@ -968,14 +968,15 @@ void OptPlanner::plan(int time_limit, std::vector<std::vector<Action>>& actions,
                 // ── Case B/C: Not in clearance → normal vote ─────────────
 
                 // Decision
-                // Priority 1: Vote ratio ≥ 3:1 → flip
-                if (total_12 >= total_21 * 3) {
+                // Priority 1: Vote ratio ≥ threshold → flip
+                int ratio_th = std::max(1, optsvr::cfg().iron_lane_flow_ratio_flip);
+                if (total_12 >= total_21 * ratio_th) {
                     new_lock = 1;
-                } else if (total_21 >= total_12 * 3) {
+                } else if (total_21 >= total_12 * ratio_th) {
                     new_lock = -1;
                 }
-                // Priority 2: Core > 20 → freeze
-                else if (core_cnt > 20) {
+                // Priority 2: Core > threshold → freeze
+                else if (core_cnt > optsvr::cfg().iron_lane_core_flip_th) {
                     new_lock = prev_lock;
                 }
                 // Priority 3: Normal majority vote
@@ -1033,8 +1034,8 @@ void OptPlanner::plan(int time_limit, std::vector<std::vector<Action>>& actions,
                 if (new_lock != prev_lock) {
                     // Determine trigger type for diagnostics
                     int trigger = 0;  // 0=ratio
-                    if (!(total_12 >= total_21 * 3 || total_21 >= total_12 * 3)) {
-                        trigger = (core_cnt > 20) ? 1 : 2;  // 1=core overflow, 2=normal
+                    if (!(total_12 >= total_21 * ratio_th || total_21 >= total_12 * ratio_th)) {
+                        trigger = (core_cnt > optsvr::cfg().iron_lane_core_flip_th) ? 1 : 2;  // 1=core overflow, 2=normal
                     }
 
                     IronLane::g_clearance_mode = true;
