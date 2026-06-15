@@ -18,4 +18,10 @@ int g_redirected_count = 0;
 
 int g_prev_lock = 1;
 
+// ── Clearance mode ─────────────────────────────────────────────────────────
+bool g_clearance_mode = false;
+int  g_clearance_start_tick = -1;
+int  g_clearance_to_dir = 0;
+int  g_clearance_trigger = 0;
+
 } // namespace IronLane

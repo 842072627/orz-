@@ -30,4 +30,14 @@ extern int g_redirected_count;
 // Previous lock for detecting flips
 extern int g_prev_lock;
 
+// ── Clearance mode ─────────────────────────────────────────────────────────
+// When direction is about to flip, we set lock=0 (block both sides) and wait
+// for the core to completely empty before applying the new direction.
+// This prevents agents entering from the new direction while old-direction
+// agents are still in the lane.
+extern bool g_clearance_mode;        // true = in clearance
+extern int  g_clearance_start_tick;  // tick when clearance started
+extern int  g_clearance_to_dir;      // direction to set after clearance (+1/-1)
+extern int  g_clearance_trigger;     // what triggered it: 0=ratio, 1=core, 2=normal
+
 } // namespace IronLane

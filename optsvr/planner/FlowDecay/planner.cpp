@@ -229,7 +229,7 @@ void OptPlanner::setup_multistep_episode_state(
         }
 
         // DIAG: log agent 8914 every tick for first 200 ticks
-        if (i == 8914 && env->curr_timestep < 200) {
+        if (i == 8914 && env->curr_timestep < 200 && optsvr::cfg().iron_lane_debug) {
             int loc = env->curr_states[i].location;
             int nb = (loc >= 0) ? static_cast<int>(trajLNS_.neighbors[loc].size()) : -1;
             bool has_goal = !env->goal_locations[i].empty();
@@ -281,7 +281,8 @@ void OptPlanner::setup_multistep_episode_state(
                                 rc_goal_comp = IronLane::get_component(rit->second.locations[ridx]);
                         }
                         int rdir = (rc_goal_comp == 2) ? 1 : (rc_goal_comp == 1) ? -1 : 0;
-                        std::fprintf(stderr, "[LaneFail] a=%d,loc=%d,lock=%+d,gc=%d,dir=%+d,exit=%d\\n",
+                        if (optsvr::cfg().iron_lane_debug)
+                            std::fprintf(stderr, "[LaneFail] a=%d,loc=%d,lock=%+d,gc=%d,dir=%+d,exit=%d\\n",
                             i, loc, lock, rc_goal_comp, rdir, exit);
                     }
                 } else {
@@ -297,7 +298,8 @@ void OptPlanner::setup_multistep_episode_state(
                             dir2 = (gc2 == 2) ? 1 : (gc2 == 1) ? -1 : 0;
                         }
                     }
-                    std::fprintf(stderr, "[InLane] a=%d,loc=%d,lock=%+d,gc=%d,dir=%+d,tid=%d,task=%d\\n",
+                    if (optsvr::cfg().iron_lane_debug)
+                        std::fprintf(stderr, "[InLane] a=%d,loc=%d,lock=%+d,gc=%d,dir=%+d,tid=%d,task=%d\\n",
                         i, loc, 0, gc2, dir2, tid, env->curr_task_schedule[i]);
                 }
             }
@@ -353,16 +355,20 @@ void OptPlanner::update_guide_paths_once_for_multistep(SharedEnvironment* env, T
     const std::vector<std::vector<int>>* ew_ptr =
         (!extra_weights_.empty()) ? &extra_weights_ : nullptr;
 
-    // LRU排序：等最久的先算，而不是从index=0开始
+    // Guide path order: sequential by default, LRU if configured
     std::vector<int> need_ids;
     need_ids.reserve(env->num_of_agents);
     for (int i = 0; i < env->num_of_agents; i++) {
         if (require_guide_path_[i])
             need_ids.push_back(i);
     }
-    std::sort(need_ids.begin(), need_ids.end(), [this](int a, int b) {
-        return last_guide_tick_[a] < last_guide_tick_[b];
-    });
+    if (optsvr::cfg().iron_lane_lru_sort) {
+        // LRU排序：等最久的先算
+        std::sort(need_ids.begin(), need_ids.end(), [this](int a, int b) {
+            return last_guide_tick_[a] < last_guide_tick_[b];
+        });
+    }
+    // else: sequential order (as collected from 0 to num_of_agents)
 
     for (int idx : need_ids) {
         if (std::chrono::steady_clock::now() > flow_end_time)
@@ -808,7 +814,7 @@ void OptPlanner::plan(int time_limit, std::vector<std::vector<Action>>& actions,
     update_guide_paths_once_for_multistep(env, flow_end_time);
 
     // Guide path gap diagnostic
-    if (iron_map) {
+    if (iron_map && optsvr::cfg().iron_lane_debug) {
         int still_need = 0;
         for (int i = 0; i < env->num_of_agents; i++)
             if (require_guide_path_[i]) still_need++;
@@ -850,7 +856,7 @@ void OptPlanner::plan(int time_limit, std::vector<std::vector<Action>>& actions,
                 if (tid < 0) continue;
                 int loc = env->curr_states[a].location;
                 if (loc < 0) continue;
-                // Core occupancy (for freeze check)
+                // Core occupancy (for freeze/clearance check)
                 if (IronLane::is_core_cell(loc)) core_cnt++;
                 // Get task goal
                 auto it = env->task_pool.find(tid);
@@ -888,97 +894,174 @@ void OptPlanner::plan(int time_limit, std::vector<std::vector<Action>>& actions,
             int total_12 = in_12 + app_12;
             int total_21 = in_21 + app_21;
 
-            // Step 2: Decision
             int prev_lock = IronLane::g_lane_lock_dir;
             int new_lock = prev_lock;
 
-            // Priority 1: Vote ratio ≥ 3:1 → flip even if core>20
-            if (total_12 >= total_21 * 3) {
-                new_lock = 1;
-            } else if (total_21 >= total_12 * 3) {
-                new_lock = -1;
-            }
-            // Priority 2: Core > 20 → freeze (keep current direction)
-            else if (core_cnt > 20) {
-                new_lock = prev_lock;
-            }
-            // Priority 3: Normal majority vote
-            else if (total_12 > total_21) {
-                new_lock = 1;
-            } else if (total_21 > total_12) {
-                new_lock = -1;
-            }
-            // else tie → keep prev_lock
+            // ── Step 2: Clearance handling ────────────────────────────────
+            // Three mutually-exclusive cases:
+            //   A) Already in clearance → check if core empty to exit
+            //   B) Normal vote → may enter clearance on flip
+            //   C) Initial first-vote sweep (agents placed in lane by scenario)
 
-            // Step 3: On lock change → restore previous redirects + redirect counterflow
-            // Also do an initial sweep on the very first vote (agents placed in lane
-            // by scenario may be going the wrong direction)
             static bool g_initial_sweep_done = false;
-            if (new_lock != prev_lock || !g_initial_sweep_done) {
-                g_initial_sweep_done = true;
-                // Restore: previous redirected agents go back to their original task
-                // (their original task is restored by setup() next episode, but this
-                //  ensures the counterflow re-sweep below starts from clean state)
-                IronLane::g_redirected_count = 0;  // clear redirect list
 
-                // Sweep lane: redirect counterflow agents (including idle) to exit
-                for (int a = 0; a < env->num_of_agents; a++) {
-                    int loc = env->curr_states[a].location;
-                    if (loc < 0) continue;
-                    if (!IronLane::is_lane_cell(loc)) continue;
-                    int tid = env->curr_task_schedule[a];
-                    int exit = -1;
-                    if (tid >= 0) {
-                        // Has task — check direction against lock
-                        auto it = env->task_pool.find(tid);
-                        if (it == env->task_pool.end() || it->second.locations.empty()) continue;
-                        int idx = it->second.idx_next_loc;
-                        if (idx < 0 || idx >= (int)it->second.locations.size()) continue;
-                        int goal = it->second.locations[idx];
-                        int goal_comp = IronLane::get_component(goal);
-                        int dir = 0;
-                        if (goal_comp == 2) dir = 1;
-                        else if (goal_comp == 1) dir = -1;
-                        if (dir == 0 || dir == new_lock) continue;  // not counterflow → skip
-                        // Counterflow: retreat to opposite side
-                        exit = (goal_comp == 2)
-                            ? (IronLane::g_exit_to_comp1 ? IronLane::g_exit_to_comp1[loc] : -1)
-                            : (IronLane::g_exit_to_comp2 ? IronLane::g_exit_to_comp2[loc] : -1);
-                    } else {
-                        // Idle agent: redirect to same side as counterflow
-                        exit = (new_lock > 0)
-                            ? (IronLane::g_exit_to_comp2 ? IronLane::g_exit_to_comp2[loc] : -1)
-                            : (IronLane::g_exit_to_comp1 ? IronLane::g_exit_to_comp1[loc] : -1);
+            if (IronLane::g_clearance_mode) {
+                // ── Case A: In clearance → check completion ──────────────
+                if (core_cnt == 0) {
+                    // Core empty → exit clearance, apply pending direction
+                    int to_dir = IronLane::g_clearance_to_dir;
+                    new_lock = to_dir;
+
+                    // Clear redirect list
+                    IronLane::g_redirected_count = 0;
+
+                    // Sweep lane: redirect counterflow agents + idle agents
+                    for (int a = 0; a < env->num_of_agents; a++) {
+                        int loc = env->curr_states[a].location;
+                        if (loc < 0) continue;
+                        if (!IronLane::is_lane_cell(loc)) continue;
+                        int tid = env->curr_task_schedule[a];
+                        int exit = -1;
+                        if (tid >= 0) {
+                            auto it = env->task_pool.find(tid);
+                            if (it == env->task_pool.end() || it->second.locations.empty()) continue;
+                            int idx = it->second.idx_next_loc;
+                            if (idx < 0 || idx >= (int)it->second.locations.size()) continue;
+                            int goal = it->second.locations[idx];
+                            int goal_comp = IronLane::get_component(goal);
+                            int dir = 0;
+                            if (goal_comp == 2) dir = 1;
+                            else if (goal_comp == 1) dir = -1;
+                            if (dir == 0 || dir == to_dir) continue;  // not counterflow
+                            // Counterflow: retreat to opposite side
+                            exit = (goal_comp == 2)
+                                ? (IronLane::g_exit_to_comp1 ? IronLane::g_exit_to_comp1[loc] : -1)
+                                : (IronLane::g_exit_to_comp2 ? IronLane::g_exit_to_comp2[loc] : -1);
+                        } else {
+                            // Idle: redirect to new direction side
+                            exit = (to_dir > 0)
+                                ? (IronLane::g_exit_to_comp2 ? IronLane::g_exit_to_comp2[loc] : -1)
+                                : (IronLane::g_exit_to_comp1 ? IronLane::g_exit_to_comp1[loc] : -1);
+                        }
+                        if (exit >= 0 && IronLane::g_redirected_count < IronLane::MAX_AGENTS) {
+                            IronLane::g_redirected_agents[IronLane::g_redirected_count++] = a;
+                            if (optsvr::cfg().iron_lane_debug)
+                                std::fprintf(stderr, "[IronLane] clearance_redirect a=%d loc=%d to_dir=%+d exit=%d\n",
+                                a, loc, to_dir, exit);
+                        }
                     }
-                    if (exit >= 0 && IronLane::g_redirected_count < IronLane::MAX_AGENTS) {
-                        IronLane::g_redirected_agents[IronLane::g_redirected_count++] = a;
-                            // Set task = nearest exit → PIBT routes agent to exit
-                            // (guide path will be recomputed on next plan() since trajs was
-                            //  already cleared by the early redirect above)
-                            std::fprintf(stderr, "[IronLane] redirect a=%d loc=%d lock=%+d exit=%d\n",
+
+                    if (optsvr::cfg().iron_lane_debug)
+                        std::fprintf(stderr, "[IronLane] clearance_end tick=%d core=%d dir=%+d redirects=%d\n",
+                        ts, core_cnt, to_dir, IronLane::g_redirected_count);
+
+                    // Reset clearance state
+                    IronLane::g_clearance_mode = false;
+                    IronLane::g_clearance_start_tick = -1;
+                    IronLane::g_clearance_to_dir = 0;
+                    IronLane::g_clearance_trigger = 0;
+                } else {
+                    // Still clearing — keep lock=0 (block both sides)
+                    new_lock = 0;
+                }
+            } else {
+                // ── Case B/C: Not in clearance → normal vote ─────────────
+
+                // Decision
+                // Priority 1: Vote ratio ≥ 3:1 → flip
+                if (total_12 >= total_21 * 3) {
+                    new_lock = 1;
+                } else if (total_21 >= total_12 * 3) {
+                    new_lock = -1;
+                }
+                // Priority 2: Core > 20 → freeze
+                else if (core_cnt > 20) {
+                    new_lock = prev_lock;
+                }
+                // Priority 3: Normal majority vote
+                else if (total_12 > total_21) {
+                    new_lock = 1;
+                } else if (total_21 > total_12) {
+                    new_lock = -1;
+                }
+                // else tie → keep prev_lock
+
+                // ── Case C: First vote initial sweep ──────────────────────
+                // (agents placed in lane by scenario may be going wrong way)
+                if (!g_initial_sweep_done) {
+                    g_initial_sweep_done = true;
+                    // Redirect counterflow agents relative to current lock
+                    // (same-as-flip redirect but without changing the lock)
+                    IronLane::g_redirected_count = 0;
+                    for (int a = 0; a < env->num_of_agents; a++) {
+                        int loc = env->curr_states[a].location;
+                        if (loc < 0) continue;
+                        if (!IronLane::is_lane_cell(loc)) continue;
+                        int tid = env->curr_task_schedule[a];
+                        int exit = -1;
+                        if (tid >= 0) {
+                            auto it = env->task_pool.find(tid);
+                            if (it == env->task_pool.end() || it->second.locations.empty()) continue;
+                            int idx = it->second.idx_next_loc;
+                            if (idx < 0 || idx >= (int)it->second.locations.size()) continue;
+                            int goal = it->second.locations[idx];
+                            int goal_comp = IronLane::get_component(goal);
+                            int dir = 0;
+                            if (goal_comp == 2) dir = 1;
+                            else if (goal_comp == 1) dir = -1;
+                            if (dir == 0 || dir == new_lock) continue;  // not counterflow
+                            exit = (goal_comp == 2)
+                                ? (IronLane::g_exit_to_comp1 ? IronLane::g_exit_to_comp1[loc] : -1)
+                                : (IronLane::g_exit_to_comp2 ? IronLane::g_exit_to_comp2[loc] : -1);
+                        } else {
+                            exit = (new_lock > 0)
+                                ? (IronLane::g_exit_to_comp2 ? IronLane::g_exit_to_comp2[loc] : -1)
+                                : (IronLane::g_exit_to_comp1 ? IronLane::g_exit_to_comp1[loc] : -1);
+                        }
+                        if (exit >= 0 && IronLane::g_redirected_count < IronLane::MAX_AGENTS) {
+                            IronLane::g_redirected_agents[IronLane::g_redirected_count++] = a;
+                            if (optsvr::cfg().iron_lane_debug)
+                                std::fprintf(stderr, "[IronLane] init_sweep a=%d loc=%d lock=%+d exit=%d\n",
                                 a, loc, new_lock, exit);
+                        }
                     }
                 }
+
+                // ── If flip detected → enter clearance mode ──────────────
+                // Instead of immediately redirecting, block both sides and
+                // wait for core to clear before applying the new direction.
+                if (new_lock != prev_lock) {
+                    // Determine trigger type for diagnostics
+                    int trigger = 0;  // 0=ratio
+                    if (!(total_12 >= total_21 * 3 || total_21 >= total_12 * 3)) {
+                        trigger = (core_cnt > 20) ? 1 : 2;  // 1=core overflow, 2=normal
+                    }
+
+                    IronLane::g_clearance_mode = true;
+                    IronLane::g_clearance_start_tick = ts;
+                    IronLane::g_clearance_to_dir = new_lock;
+                    IronLane::g_clearance_trigger = trigger;
+
+                    if (optsvr::cfg().iron_lane_debug)
+                        std::fprintf(stderr, "[IronLane] clearance_start tick=%d core=%d from=%+d to=%+d trigger=%d in_12=%d in_21=%d\n",
+                        ts, core_cnt, prev_lock, new_lock, trigger,
+                        in_12, in_21);
+
+                    // Set lock=0 to block both sides during clearance
+                    new_lock = 0;
+                }
             }
+
             // Update stored lock
             IronLane::g_lane_lock_dir = new_lock;
             IronLane::g_prev_lock = prev_lock;
 
-            // Step 4: Every vote, re-apply redirect for counterflow agents in lane
-            // (Even if lock didn't change, agents might have entered during the period)
-            // Only do this if lock is active and we're not in a flip situation
-            // Actually this is already handled above: on flip we redirect, on no-change we don't
-            // But agents that entered during the period would have been blocked by forbid_move
-            // if they tried to enter counterflow. So no new counterflow agents appear mid-period.
-            // Only existing redirected agents continue their redirect (task already set).
-
-            // Apply redirect tasks for all currently redirected agents (vote-time)
+            // Step 3: Apply redirect tasks for redirected agents (vote-time)
             for (int ri = 0; ri < IronLane::g_redirected_count; ri++) {
                 int a = IronLane::g_redirected_agents[ri];
                 int loc = env->curr_states[a].location;
                 if (loc < 0) continue;
                 if (IronLane::is_lane_cell(loc)) {
-                    // Determine which side exit to use
                     int tid = env->curr_task_schedule[a];
                     int exit = -1;
                     if (tid >= 0) {
@@ -993,7 +1076,6 @@ void OptPlanner::plan(int time_limit, std::vector<std::vector<Action>>& actions,
                             ? (IronLane::g_exit_to_comp1 ? IronLane::g_exit_to_comp1[loc] : -1)
                             : (IronLane::g_exit_to_comp2 ? IronLane::g_exit_to_comp2[loc] : -1);
                     } else {
-                        // Idle: follow lock direction
                         int lock = IronLane::g_lane_lock_dir;
                         exit = (lock > 0)
                             ? (IronLane::g_exit_to_comp2 ? IronLane::g_exit_to_comp2[loc] : -1)
@@ -1001,27 +1083,28 @@ void OptPlanner::plan(int time_limit, std::vector<std::vector<Action>>& actions,
                     }
                     if (exit >= 0) {
                         trajLNS_.tasks[a] = exit;
-                        // Keep traj_dists — guide path was computed to exit by setup()+update_guide_paths
                     }
                 }
             }
 
-            // Reset counters and log
-            std::fprintf(stderr, "[IronLane] vote tick=%d core=%d in_12=%d in_21=%d app_12=%d app_21=%d tot_12=%d tot_21=%d blk=%d/%d pass=%d/%d prev=%d lock=%d\n",
+            // Log and reset counters
+            if (optsvr::cfg().iron_lane_debug)
+                std::fprintf(stderr, "[IronLane] vote tick=%d core=%d in_12=%d in_21=%d app_12=%d app_21=%d tot_12=%d tot_21=%d blk=%d/%d pass=%d/%d prev=%d lock=%d%s\n",
                 env->system_timestep, core_cnt,
                 in_12, in_21, app_12, app_21, total_12, total_21,
                 blk12, blk21, pass12, pass21,
-                prev_lock, new_lock);
+                prev_lock, new_lock,
+                IronLane::g_clearance_mode ? " CLEAR" : "");
             IronLane::g_blocked_12 = 0;
             IronLane::g_blocked_21 = 0;
             IronLane::g_passed_12 = 0;
             IronLane::g_passed_21 = 0;
         } // end if(ts >= g_next_vote)
 
-        // Between votes: check ALL agents in lane — agents may have been
-        // assigned a counterflow task mid-period (lock-change sweep only
-        // runs on vote ticks and misses these).
-        for (int a = 0; a < env->num_of_agents; a++) {
+        // Between votes: check agents in lane
+        if (!IronLane::g_clearance_mode) {
+            // Normal mode: existing priority boost + counterflow redirect
+            for (int a = 0; a < env->num_of_agents; a++) {
             int loc = env->curr_states[a].location;
             if (loc < 0) continue;
             if (!IronLane::is_lane_cell(loc)) continue;
@@ -1062,6 +1145,24 @@ void OptPlanner::plan(int time_limit, std::vector<std::vector<Action>>& actions,
                 // Keep traj_dists — guide path was computed to exit by setup()+update_guide_paths
             }
         } // end for(a) between-votes
+        } else {
+            // Clearance mode: redirect idle agents in lane to exit
+            int to_dir = IronLane::g_clearance_to_dir;
+            for (int a = 0; a < env->num_of_agents; a++) {
+                int loc = env->curr_states[a].location;
+                if (loc < 0) continue;
+                if (!IronLane::is_lane_cell(loc)) continue;
+                int tid = env->curr_task_schedule[a];
+                if (tid >= 0) continue;  // has task, continue naturally
+                // Idle in lane during clearance → redirect out
+                int exit = (to_dir > 0)
+                    ? (IronLane::g_exit_to_comp2 ? IronLane::g_exit_to_comp2[loc] : -1)
+                    : (IronLane::g_exit_to_comp1 ? IronLane::g_exit_to_comp1[loc] : -1);
+                if (exit >= 0) {
+                    trajLNS_.tasks[a] = exit;
+                }
+            }
+        }
         // Removed per-tick CSV (was for diagnostics, adds significant overhead)
     }
 

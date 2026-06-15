@@ -88,6 +88,9 @@ bool causalPIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
 					}
 					if (dir > 0) IronLane::g_passed_12++;
 					else if (dir < 0) IronLane::g_passed_21++;
+				} else if (IronLane::g_clearance_mode) {
+					// Clearance: block ALL entry, don't increment stats
+					continue;
 				}
 			}
 		}
