@@ -214,6 +214,8 @@ struct RuntimeConfig {
     int   iron_future_flow_predict;
     float iron_future_flow_reward_w;
     float iron_future_flow_penalty_w;
+    float iron_future_flow_lock_w;
+    float iron_future_flow_lock_th;
 
     // Iron future flow zone grid (independent from scheduler's zone grid)
     int   iron_future_flow_zone_rows;
@@ -461,6 +463,8 @@ struct RuntimeConfig {
         iron_future_flow_predict= read_int  ("IRON_FUTURE_FLOW_PREDICT",IRON_FUTURE_FLOW_PREDICT);
         iron_future_flow_reward_w = read_float("IRON_FUTURE_FLOW_REWARD_W", IRON_FUTURE_FLOW_REWARD_W);
         iron_future_flow_penalty_w = read_float("IRON_FUTURE_FLOW_PENALTY_W", IRON_FUTURE_FLOW_PENALTY_W);
+        iron_future_flow_lock_w    = read_float("IRON_FUTURE_FLOW_LOCK_W",    IRON_FUTURE_FLOW_LOCK_W);
+        iron_future_flow_lock_th   = read_float("IRON_FUTURE_FLOW_LOCK_TH",   IRON_FUTURE_FLOW_LOCK_TH);
 
         iron_future_flow_zone_rows = read_int("IRON_FUTURE_FLOW_ZONE_ROWS", IRON_FUTURE_FLOW_ZONE_ROWS);
         iron_future_flow_zone_cols = read_int("IRON_FUTURE_FLOW_ZONE_COLS", IRON_FUTURE_FLOW_ZONE_COLS);

@@ -122,8 +122,10 @@ void IronZoneScheduler::ff_compute_zone_adjacency(SharedEnvironment* env) {
                         env->map[loc_left] == 0 && env->map[loc_right] == 0)
                         connected = true;
                 }
-                if (connected)
+                if (connected) {
                     ff_zone_adj_[z].push_back(zr * ff_zone_cols_ + (zc + 1));
+                    ff_zone_adj_[zr * ff_zone_cols_ + (zc + 1)].push_back(z);
+                }
             }
             // Down neighbor
             if (zr + 1 < ff_zone_rows_) {
@@ -140,8 +142,10 @@ void IronZoneScheduler::ff_compute_zone_adjacency(SharedEnvironment* env) {
                         env->map[loc_top] == 0 && env->map[loc_bottom] == 0)
                         connected = true;
                 }
-                if (connected)
+                if (connected) {
                     ff_zone_adj_[z].push_back((zr + 1) * ff_zone_cols_ + zc);
+                    ff_zone_adj_[(zr + 1) * ff_zone_cols_ + zc].push_back(z);
+                }
             }
         }
     }
@@ -427,14 +431,17 @@ float IronZoneScheduler::score_candidate(
             const float* d = &ff_dir_[tz * 4];
             float total = d[0] + d[1] + d[2] + d[3];
             
-            // Heat: 总流量热度（拥堵程度）
-            float heat = total / (total + 10.0f);
+            // Heat: 逆流热度（对撞程度）
+            float counterflow = std::min(d[0], d[2]) + std::min(d[1], d[3]);
+            float heat = counterflow / (counterflow + 10.0f);
             score += cfg().iron_future_flow_weight * heat;
             
             // Direction: agent走的方向 vs zone的flow分布
             float rw = cfg().iron_future_flow_reward_w;
             float pw = cfg().iron_future_flow_penalty_w;
-            if ((rw != 0.0f || pw != 0.0f) && total > 0.5f) {
+            float lw = cfg().iron_future_flow_lock_w;
+            float lth = cfg().iron_future_flow_lock_th;
+            if ((rw != 0.0f || pw != 0.0f || lw != 0.0f) && total > 0.5f) {
                 int ar = az / ff_zone_cols_, ac = az % ff_zone_cols_;
                 int tr = tz / ff_zone_cols_, tc = tz % ff_zone_cols_;
                 int dir = ff_dir_from_delta(tr - ar, tc - ac);
@@ -450,6 +457,10 @@ float IronZoneScheduler::score_candidate(
                     // 逆流惩罚：和主流方向相反→加分（贵）
                     if (pw != 0.0f)
                         score += pw * (flow_opp / (flow_opp + 10.0f));
+                    
+                    // 方向锁：对向flow超过阈值→硬block（禁止逆流分配）
+                    if (lw != 0.0f && lth > 0.0f && flow_opp >= lth)
+                        return 1e9f;
                 }
             }
         }
@@ -463,7 +474,7 @@ void IronZoneScheduler::print_round_stats(const RoundStats& s, int tick) const {
     static FILE* csv = nullptr;
     if (!csv) {
         csv = std::fopen("ironzone_debug.csv", "w");
-        if (csv) std::fprintf(csv, "tick,assigned,busy,unmatched,cand,freeT,avgDist,avgLen,rounds,build_ms,solve_ms\n");
+        if (csv) std::fprintf(csv, "tick,assigned,busy,unmatched,cand,freeT,avgDist,avgLen,rounds,build_ms,solve_ms,1dir,2opp,2adj,3dir,4dir,active,avgHeat,maxHeat,maxFlow,maxWith,maxOpp,nN,nS,nE,nW,anyN,anyS,anyE,anyW,avgN,avgS,avgE,avgW\n");
     }
     if (csv) {
         double avg_cand = s.candidate_agents > 0
@@ -519,26 +530,68 @@ void IronZoneScheduler::print_round_stats(const RoundStats& s, int tick) const {
     
     // FF stats
     if (!ff_dir_.empty() && ff_zone_count_ > 0) {
-        int active_zones = 0, dom_zones = 0, strong_zones = 0;
+        int active_zones = 0;
         double avg_heat = 0.0, max_heat = 0.0;
+        float max_flow = 0.0f, max_flow_with = 0.0f, max_flow_opp = 0.0f;
+        int one_dir = 0, two_opp = 0, two_adj = 0, three_dir = 0, four_dir = 0;
+        int nN = 0, nS = 0, nE = 0, nW = 0;
+        int anyN = 0, anyS = 0, anyE = 0, anyW = 0;
+        double sumN = 0, sumS = 0, sumE = 0, sumW = 0;
         for (int z = 0; z < ff_zone_count_; z++) {
-            float total = ff_dir_[z * 4] + ff_dir_[z * 4 + 1]
-                        + ff_dir_[z * 4 + 2] + ff_dir_[z * 4 + 3];
+            float d0 = ff_dir_[z * 4], d1 = ff_dir_[z * 4 + 1];
+            float d2 = ff_dir_[z * 4 + 2], d3 = ff_dir_[z * 4 + 3];
+            float total = d0 + d1 + d2 + d3;
             if (total > 0.5f) {
                 active_zones++;
                 float heat = total / (total + 10.0f);
                 avg_heat += heat;
                 if (heat > max_heat) max_heat = heat;
+                if (total > max_flow) max_flow = total;
+                // Count non-zero directions
+                int ndir = (d0 > 0.5f) + (d1 > 0.5f) + (d2 > 0.5f) + (d3 > 0.5f);
+                if (ndir == 1) one_dir++;
+                else if (ndir == 2) {
+                    if ((d0 > 0.5f && d2 > 0.5f) || (d1 > 0.5f && d3 > 0.5f))
+                        two_opp++;
+                    else
+                        two_adj++;
+                } else if (ndir == 3) three_dir++;
+                else if (ndir >= 4) four_dir++;
+                if (d0 > 0.5f && d2 > 0.5f) {
+                    float with = std::max(d0, d2);
+                    float opp = std::min(d0, d2);
+                    if (with > max_flow_with) max_flow_with = with;
+                    if (opp > max_flow_opp) max_flow_opp = opp;
+                }
+                if (d1 > 0.5f && d3 > 0.5f) {
+                    float with = std::max(d1, d3);
+                    float opp = std::min(d1, d3);
+                    if (with > max_flow_with) max_flow_with = with;
+                    if (opp > max_flow_opp) max_flow_opp = opp;
+                }
             }
-            if (ff_dominant_[z] >= 0) {
-                dom_zones++;
-                if (ff_tide_[z] > 0.1f) strong_zones++;
-            }
+            // Per-direction counts (any flow > 0.01, strong flow > 0.5)
+            if (d0 > 0.01f) { anyE++; sumE += d0; if (d0 > 0.5f) nE++; }
+            if (d1 > 0.01f) { anyS++; sumS += d1; if (d1 > 0.5f) nS++; }
+            if (d2 > 0.01f) { anyW++; sumW += d2; if (d2 > 0.5f) nW++; }
+            if (d3 > 0.01f) { anyN++; sumN += d3; if (d3 > 0.5f) nN++; }
         }
         if (active_zones > 0) avg_heat /= active_zones;
+        if (csv) {
+            std::fprintf(csv, ",%d,%d,%d,%d,%d,%d,%.3f,%.3f,%.1f,%.1f,%.1f,%d,%d,%d,%d,%d,%d,%d,%d,%.2f,%.2f,%.2f,%.2f\n",
+                one_dir, two_opp, two_adj, three_dir, four_dir,
+                active_zones, avg_heat, max_heat,
+                max_flow, max_flow_with, max_flow_opp,
+                nN, nS, nE, nW,
+                anyN, anyS, anyE, anyW,
+                nN>0?sumN/nN:0, nS>0?sumS/nS:0, nE>0?sumE/nE:0, nW>0?sumW/nW:0);
+            std::fflush(csv);
+        }
         std::fprintf(stderr,
-            " [FF] active=%d avgHeat=%.3f maxHeat=%.3f dom=%d strong=%d\\n",
-            active_zones, avg_heat, max_heat, dom_zones, strong_zones);
+            " [FF] active=%d avgHeat=%.3f maxHeat=%.3f 1dir=%d 2opp=%d 2adj=%d 3dir=%d 4dir=%d | N=%d S=%d E=%d W=%d any(N=%d S=%d E=%d W=%d)\n",
+            active_zones, avg_heat, max_heat,
+            one_dir, two_opp, two_adj, three_dir, four_dir,
+            nN, nS, nE, nW, anyN, anyS, anyE, anyW);
     }
 }
 

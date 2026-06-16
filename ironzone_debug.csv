@@ -1,0 +1,2 @@
+tick,assigned,busy,unmatched,cand,freeT,avgDist,avgLen,rounds,build_ms,solve_ms,1dir,2opp,2adj,3dir,4dir,active,avgHeat,maxHeat,maxFlow,maxWith,maxOpp,nN,nS,nE,nW,anyN,anyS,anyE,anyW,avgN,avgS,avgE,avgW
+0,8240,8240,1760,422.2,10000,18.7,866.0,6,68.0,299.2

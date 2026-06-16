@@ -268,7 +268,7 @@ constexpr int   IRON_LANE_LRU_SORT    = 1;       // 0=顺序循环算guide path,
 // ═══════════════════════════════════════════════════════════════════
 // Iron future flow（256×256 zone 级别流量预测）
 // ═══════════════════════════════════════════════════════════════════
-constexpr float IRON_FUTURE_FLOW_WEIGHT    = 30.0f;   // 热力惩罚（拥堵程度）
+constexpr float IRON_FUTURE_FLOW_WEIGHT    = 0.0f;   // 热力惩罚（拥堵程度）
 constexpr float IRON_FUTURE_FLOW_K         = 1.0f;   // base加流量
 constexpr float IRON_FUTURE_FLOW_DECAY     = 0.01f;  // 1/(1+d*decay)
 constexpr float IRON_FUTURE_FLOW_IDLE1     = 1.0f;   // idle→task_start段权重
@@ -278,7 +278,9 @@ constexpr int   IRON_FUTURE_FLOW_PREDICT   = 0;      // 预测task2延伸格数(
 constexpr int   IRON_FUTURE_FLOW_ZONE_ROWS = 128;    // ff内部zone网格行数
 constexpr int   IRON_FUTURE_FLOW_ZONE_COLS = 128;    // ff内部zone网格列数
 constexpr float IRON_FUTURE_FLOW_REWARD_W  = 30.0f;  // 顺流奖励(=WEIGHT时取消热)
-constexpr float IRON_FUTURE_FLOW_PENALTY_W = 15.0f;  // 逆流惩罚(顺流半额)
+constexpr float IRON_FUTURE_FLOW_PENALTY_W = 0.0f;  // 逆流惩罚(顺流半额)
+constexpr float IRON_FUTURE_FLOW_LOCK_TH   = 3.0f;
+constexpr float IRON_FUTURE_FLOW_LOCK_W    = 50.0f;   // 方向锁惩罚权重(0=关)
 // 默认值全部为"关闭"状态，需通过MapTuner或环境变量显式开启
 // 关闭时: RoomExecutor(5)≡DHExecutor(3), RoomPlanner(6)≡OptPlanner(1)
 // ═══════════════════════════════════════════════════════════════════
