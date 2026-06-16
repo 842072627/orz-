@@ -71,7 +71,7 @@ void IronZoneScheduler::initialize(SharedEnvironment* env, int /*preprocess_time
         cfg().iron_assign_ratio);
     
     // Precompute future flow zone adjacency (256×256 independent grid)
-    if (cfg().iron_future_flow_weight != 0.0f && env) {
+    if ((cfg().iron_future_flow_weight != 0.0f || cfg().iron_future_flow_lock_w != 0.0f) && env) {
         ff_zone_rows_ = std::max(1, cfg().iron_future_flow_zone_rows);
         ff_zone_cols_ = std::max(1, cfg().iron_future_flow_zone_cols);
         ff_zone_count_ = ff_zone_rows_ * ff_zone_cols_;
@@ -424,7 +424,7 @@ float IronZoneScheduler::score_candidate(
     (void)zone_shortage;
 
     // future flow：热力惩罚 + 方向奖励/惩罚（用flow量级，不用tide）
-    if (cfg().iron_future_flow_weight != 0.0f && !ff_dir_.empty()) {
+    if ((cfg().iron_future_flow_weight != 0.0f || cfg().iron_future_flow_lock_w != 0.0f) && !ff_dir_.empty()) {
         int tz = ff_zone_of_loc(task.start);
         int az = ff_zone_of_loc(agent.loc);
         if (tz >= 0 && tz < ff_zone_count_ && az >= 0 && az < ff_zone_count_) {
@@ -458,7 +458,7 @@ float IronZoneScheduler::score_candidate(
                     if (pw != 0.0f)
                         score += pw * (flow_opp / (flow_opp + 10.0f));
                     
-                    // 方向锁：对向flow超过阈值→硬block（禁止逆流分配）
+                    // 方向锁：对向flow超过阈值→硬block
                     if (lw != 0.0f && lth > 0.0f && flow_opp >= lth)
                         return 1e9f;
                 }
@@ -711,7 +711,7 @@ void IronZoneScheduler::schedule(int time_limit_ms,
     // ---- pretick: reset future flow + add flow from busy agents ----
     std::vector<std::vector<int>> agents_by_zone;  // only built when ff enabled
     float ff_weight = cfg().iron_future_flow_weight;
-    bool ff_enabled = (ff_weight != 0.0f && !ff_dir_.empty());
+    bool ff_enabled = ((ff_weight != 0.0f || cfg().iron_future_flow_lock_w != 0.0f) && !ff_dir_.empty());
     
     if (ff_enabled) {
         ff_dir_.assign(ff_zone_count_ * 4, 0.0f);
