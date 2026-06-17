@@ -206,19 +206,11 @@ struct RuntimeConfig {
     int   iron_lane_lru_sort;
 
     // Iron future flow
-    float iron_future_flow_weight;
+    float iron_future_flow_w;
     float iron_future_flow_k;
     float iron_future_flow_decay;
-    float iron_future_flow_idle1;
-    float iron_future_flow_idle2;
-    float iron_future_flow_busy1;
-    int   iron_future_flow_predict;
-    float iron_future_flow_reward_w;
-    float iron_future_flow_penalty_w;
-    float iron_future_flow_lock_w;
     float iron_future_flow_lock_th;
-
-    // Iron future flow zone grid (independent from scheduler's zone grid)
+    float iron_future_flow_congest_cap;
     int   iron_future_flow_zone_rows;
     int   iron_future_flow_zone_cols;
 
@@ -456,18 +448,11 @@ struct RuntimeConfig {
         iron_lane_lru_sort     = read_int  ("IRON_LANE_LRU_SORT",      IRON_LANE_LRU_SORT);
 
         // Iron future flow
-        iron_future_flow_weight = read_float("IRON_FUTURE_FLOW_WEIGHT", IRON_FUTURE_FLOW_WEIGHT);
-        iron_future_flow_k      = read_float("IRON_FUTURE_FLOW_K",      IRON_FUTURE_FLOW_K);
-        iron_future_flow_decay  = read_float("IRON_FUTURE_FLOW_DECAY",  IRON_FUTURE_FLOW_DECAY);
-        iron_future_flow_idle1  = read_float("IRON_FUTURE_FLOW_IDLE1",  IRON_FUTURE_FLOW_IDLE1);
-        iron_future_flow_idle2  = read_float("IRON_FUTURE_FLOW_IDLE2",  IRON_FUTURE_FLOW_IDLE2);
-        iron_future_flow_busy1  = read_float("IRON_FUTURE_FLOW_BUSY1",  IRON_FUTURE_FLOW_BUSY1);
-        iron_future_flow_predict= read_int  ("IRON_FUTURE_FLOW_PREDICT",IRON_FUTURE_FLOW_PREDICT);
-        iron_future_flow_reward_w = read_float("IRON_FUTURE_FLOW_REWARD_W", IRON_FUTURE_FLOW_REWARD_W);
-        iron_future_flow_penalty_w = read_float("IRON_FUTURE_FLOW_PENALTY_W", IRON_FUTURE_FLOW_PENALTY_W);
-        iron_future_flow_lock_w    = read_float("IRON_FUTURE_FLOW_LOCK_W",    IRON_FUTURE_FLOW_LOCK_W);
-        iron_future_flow_lock_th   = read_float("IRON_FUTURE_FLOW_LOCK_TH",   IRON_FUTURE_FLOW_LOCK_TH);
-
+        iron_future_flow_w       = read_float("IRON_FUTURE_FLOW_W",       IRON_FUTURE_FLOW_W);
+        iron_future_flow_k       = read_float("IRON_FUTURE_FLOW_K",       IRON_FUTURE_FLOW_K);
+        iron_future_flow_decay   = read_float("IRON_FUTURE_FLOW_DECAY",   IRON_FUTURE_FLOW_DECAY);
+        iron_future_flow_lock_th = read_float("IRON_FUTURE_FLOW_LOCK_TH", IRON_FUTURE_FLOW_LOCK_TH);
+        iron_future_flow_congest_cap = read_float("IRON_FUTURE_FLOW_CONGEST_CAP", IRON_FUTURE_FLOW_CONGEST_CAP);
         iron_future_flow_zone_rows = read_int("IRON_FUTURE_FLOW_ZONE_ROWS", IRON_FUTURE_FLOW_ZONE_ROWS);
         iron_future_flow_zone_cols = read_int("IRON_FUTURE_FLOW_ZONE_COLS", IRON_FUTURE_FLOW_ZONE_COLS);
 
@@ -895,6 +880,14 @@ private:
         iron_opportunity_dist = IRON_OPPORTUNITY_DIST;
         iron_opportunity_completion = IRON_OPPORTUNITY_COMPLETION;
         iron_opportunity_cross = IRON_OPPORTUNITY_CROSS;
+
+        iron_future_flow_w       = IRON_FUTURE_FLOW_W;
+        iron_future_flow_k       = IRON_FUTURE_FLOW_K;
+        iron_future_flow_decay   = IRON_FUTURE_FLOW_DECAY;
+        iron_future_flow_lock_th = IRON_FUTURE_FLOW_LOCK_TH;
+        iron_future_flow_congest_cap = IRON_FUTURE_FLOW_CONGEST_CAP;
+        iron_future_flow_zone_rows = IRON_FUTURE_FLOW_ZONE_ROWS;
+        iron_future_flow_zone_cols = IRON_FUTURE_FLOW_ZONE_COLS;
 
         iron_lane_enabled      = IRON_LANE_ENABLED;
         iron_lane_guard_dist   = IRON_LANE_GUARD_DIST;

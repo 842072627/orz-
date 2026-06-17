@@ -226,7 +226,7 @@ constexpr int   IRON_ASSIGN_VARIANT  = 0;     // 0=continuous, 1=wave, 2=zone qu
 constexpr int   IRON_LOCAL_RADIUS    = 1;
 constexpr int   IRON_MAX_RADIUS      = 1;
 constexpr int   IRON_CANDIDATE_TOPK  = 500;
-constexpr float IRON_DIST_WEIGHT     = 3.0f;
+constexpr float IRON_DIST_WEIGHT     = 1.8f;
 constexpr float IRON_TASK_LEN_WEIGHT = 1.25f;
 constexpr float IRON_CROSS_ZONE_W    = 60.0f;
 constexpr float IRON_ENDPOINT_W      = 0.0f;
@@ -267,23 +267,15 @@ constexpr int   IRON_LANE_DEBUG       = 0;       // 0=关闭所有红绿灯打�
 constexpr int   IRON_LANE_LRU_SORT    = 1;       // 0=顺序循环算guide path, 1=LRU排序
 
 // ═══════════════════════════════════════════════════════════════════
-// Iron future flow（256×256 zone 级别流量预测）
+// Iron future flow（64×64 zone 级别流量预测）
 // ═══════════════════════════════════════════════════════════════════
-constexpr float IRON_FUTURE_FLOW_WEIGHT    = 0.0f;   // 热力惩罚（拥堵程度）
-constexpr float IRON_FUTURE_FLOW_K         = 1.0f;   // base加流量
-constexpr float IRON_FUTURE_FLOW_DECAY     = 0.01f;  // 1/(1+d*decay)
-constexpr float IRON_FUTURE_FLOW_IDLE1     = 1.0f;   // idle→task_start段权重
-constexpr float IRON_FUTURE_FLOW_IDLE2     = 0.7f;   // task_start→finish段权重
-constexpr float IRON_FUTURE_FLOW_BUSY1     = 1.0f;   // busy agent→curr_finish
-constexpr int   IRON_FUTURE_FLOW_PREDICT   = 0;      // 预测task2延伸格数(0=关)
+constexpr float IRON_FUTURE_FLOW_W        = 1.0f;   // 加流权重(所有段等权)
+constexpr float IRON_FUTURE_FLOW_K        = 1.0f;   // 流量基数乘子
+constexpr float IRON_FUTURE_FLOW_DECAY    = 0.01f;  // 1/(1+d*decay)
 constexpr int   IRON_FUTURE_FLOW_ZONE_ROWS = 64;    // ff内部zone网格行数
 constexpr int   IRON_FUTURE_FLOW_ZONE_COLS = 64;    // ff内部zone网格列数
-constexpr float IRON_FUTURE_FLOW_REWARD_W  = 30.0f;  // 顺流奖励
-constexpr float IRON_FUTURE_FLOW_PENALTY_W = 5.0f;   // 垂直方向惩罚
-constexpr float IRON_FUTURE_FLOW_LOCK_TH   = 30.0f;
-constexpr float IRON_FUTURE_FLOW_LOCK_W    = 50.0f;   // 方向锁惩罚权重(0=关)
-// 默认值全部为"关闭"状态，需通过MapTuner或环境变量显式开启
-// 关闭时: RoomExecutor(5)≡DHExecutor(3), RoomPlanner(6)≡OptPlanner(1)
+constexpr float IRON_FUTURE_FLOW_LOCK_TH  = 65.0f;  // 方向锁阈值(0=关): 逆流流量>=此值则拦
+constexpr float IRON_FUTURE_FLOW_CONGEST_CAP = 300.0f; // 拥塞上限: zone总流>=此值则穿过的任务无论方向一律拦
 // ═══════════════════════════════════════════════════════════════════
 // ---- Planner: flow_scale覆盖(仅room) ----
 constexpr int   OPT_ROOM_FLOW_SCALE = 0;           // 0=关闭(使用全局FLOW_DECAY_SCALE)
