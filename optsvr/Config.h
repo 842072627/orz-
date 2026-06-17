@@ -279,7 +279,7 @@ constexpr int   IRON_FUTURE_FLOW_ZONE_ROWS = 64;    // ff内部zone网格行数
 constexpr int   IRON_FUTURE_FLOW_ZONE_COLS = 64;    // ff内部zone网格列数
 constexpr float IRON_FUTURE_FLOW_REWARD_W  = 30.0f;  // 顺流奖励
 constexpr float IRON_FUTURE_FLOW_PENALTY_W = 5.0f;   // 垂直方向惩罚
-constexpr float IRON_FUTURE_FLOW_LOCK_TH   = 0.05f;
+constexpr float IRON_FUTURE_FLOW_LOCK_TH   = 100.0f;
 constexpr float IRON_FUTURE_FLOW_LOCK_W    = 50.0f;   // 方向锁惩罚权重(0=关)
 // 默认值全部为"关闭"状态，需通过MapTuner或环境变量显式开启
 // 关闭时: RoomExecutor(5)≡DHExecutor(3), RoomPlanner(6)≡OptPlanner(1)

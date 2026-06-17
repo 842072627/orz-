@@ -156,10 +156,6 @@ private:
     
     // Lock debug counter (reset each tick)
     mutable int ff_locked_candidates_ = 0;
-    
-    // Precomputed per-zone flow stats (refreshed each tick)
-    std::vector<float> ff_zone_total_;
-    std::vector<int> ff_zone_dominant_;
 };
 
 } // namespace optsvr

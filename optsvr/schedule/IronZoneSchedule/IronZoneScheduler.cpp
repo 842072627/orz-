@@ -556,34 +556,32 @@ float IronZoneScheduler::score_candidate(
     (void)finish_zone_pressure;
     (void)zone_shortage;
 
-    // future flow：热力惩罚 + 方向奖励/惩罚
+    // future flow：热力惩罚 + 全路径方向锁
     if ((cfg().iron_future_flow_weight != 0.0f || cfg().iron_future_flow_lock_w != 0.0f) && !ff_dir_.empty()) {
         int tz = ff_zone_of_loc(task.start);
         int az = ff_zone_of_loc(agent.loc);
         if (tz >= 0 && tz < ff_zone_count_ && az >= 0 && az < ff_zone_count_) {
-            float total = ff_zone_total_[tz];
-            // Heat: 逆流热度
-            float counterflow = std::min(ff_dir_[tz*4], ff_dir_[tz*4+2])
-                              + std::min(ff_dir_[tz*4+1], ff_dir_[tz*4+3]);
+            const float* d = &ff_dir_[tz * 4];
+            float total = d[0] + d[1] + d[2] + d[3];
+            // Heat
+            float counterflow = std::min(d[0], d[2]) + std::min(d[1], d[3]);
             float heat = counterflow / (counterflow + 10.0f);
             score += cfg().iron_future_flow_weight * heat;
             
-            // Direction: 全路径锁检查 + task start zone奖励/惩罚
             float rw = cfg().iron_future_flow_reward_w;
             float pw = cfg().iron_future_flow_penalty_w;
             float lw = cfg().iron_future_flow_lock_w;
             float lth = cfg().iron_future_flow_lock_th;
             if (rw != 0.0f || pw != 0.0f || lw != 0.0f) {
-                // 全路径锁检查（直接读预计算值）
+                // 全路径锁（agent→所有waypoint的每个zone）
                 if (lw != 0.0f && lth > 0.0f && ff_path_ready_) {
                     int z_prev = az;
                     auto it = task_pool_snapshot_.find(task.tid);
                     if (it != task_pool_snapshot_.end() && it->second.locations.size() >= 2) {
                         auto& locs = it->second.locations;
                         int sidx = -1;
-                        for (int i = 0; i < static_cast<int>(locs.size()); i++) {
+                        for (int i = 0; i < static_cast<int>(locs.size()); i++)
                             if (locs[i] == task.start) { sidx = i; break; }
-                        }
                         if (sidx < 0) sidx = 0;
                         for (int i = sidx; i < static_cast<int>(locs.size()); i++) {
                             int z_tgt = ff_zone_of_loc(locs[i]);
@@ -592,11 +590,17 @@ float IronZoneScheduler::score_candidate(
                             while (cur != z_tgt) {
                                 int next = ff_path_next_[cur * ff_zone_count_ + z_tgt];
                                 if (next >= ff_zone_count_) break;
-                                int zr = cur / ff_zone_cols_, zc2 = cur % ff_zone_cols_;
-                                int nr = next / ff_zone_cols_, nc = next % ff_zone_cols_;
-                                int dir_z = ff_dir_from_delta(nr - zr, nc - zc2);
-                                if (dir_z >= 0 && ff_zone_total_[cur] >= lth) {
-                                    if (dir_z == ((ff_zone_dominant_[cur] + 2) % 4)) {
+                                const float* zd = &ff_dir_[cur * 4];
+                                float zt = zd[0]+zd[1]+zd[2]+zd[3];
+                                if (zt >= lth) {
+                                    int dom = 0;
+                                    if (zd[1] > zd[0]) dom = 1;
+                                    if (zd[2] > zd[0] && zd[2] > zd[1]) dom = 2;
+                                    if (zd[3] > zd[0] && zd[3] > zd[1] && zd[3] > zd[2]) dom = 3;
+                                    int zr = cur / ff_zone_cols_, zc2 = cur % ff_zone_cols_;
+                                    int nr = next / ff_zone_cols_, nc = next % ff_zone_cols_;
+                                    int dir_z = ff_dir_from_delta(nr - zr, nc - zc2);
+                                    if (dir_z >= 0 && dir_z == ((dom + 2) % 4)) {
                                         ff_locked_candidates_++;
                                         return 1e9f;
                                     }
@@ -607,15 +611,17 @@ float IronZoneScheduler::score_candidate(
                         }
                     }
                 }
-                
                 // task start zone的顺流奖励/垂直惩罚
+                int dominant_tz = 0;
+                if (d[1] > d[0]) dominant_tz = 1;
+                if (d[2] > d[0] && d[2] > d[1]) dominant_tz = 2;
+                if (d[3] > d[0] && d[3] > d[1] && d[3] > d[2]) dominant_tz = 3;
                 int ar = az / ff_zone_cols_, ac = az % ff_zone_cols_;
                 int tr = tz / ff_zone_cols_, tc = tz % ff_zone_cols_;
                 int dir = ff_dir_from_delta(tr - ar, tc - ac);
                 if (dir >= 0 && total >= lth) {
-                    int dominant_tz = ff_zone_dominant_[tz];
                     if (dir == dominant_tz && rw != 0.0f)
-                        score -= rw * (ff_dir_[tz*4 + dir] / (ff_dir_[tz*4 + dir] + 10.0f));
+                        score -= rw * (d[dir] / (d[dir] + 10.0f));
                     else if (dir != ((dominant_tz + 2) % 4) && pw != 0.0f)
                         score += pw * (total / (total + 10.0f));
                 }
@@ -920,19 +926,16 @@ void IronZoneScheduler::schedule(int time_limit_ms,
                 z_prev = z_curr;
             }
         }
-        // Precompute per-zone flow stats for fast path checking
-        ff_zone_total_.assign(ff_zone_count_, 0.0f);
-        ff_zone_dominant_.assign(ff_zone_count_, 0);
+        // Precompute per-zone flow stats (info only)
+        int n_active_zone = 0;
         for (int z = 0; z < ff_zone_count_; z++) {
             float e = ff_dir_[z*4], s = ff_dir_[z*4+1];
             float w = ff_dir_[z*4+2], n = ff_dir_[z*4+3];
-            ff_zone_total_[z] = e + s + w + n;
-            int dom = 0;
-            if (s > e && s > w && s > n) dom = 1;
-            else if (w > e && w > s && w > n) dom = 2;
-            else if (n > e && n > s && n > w) dom = 3;
-            ff_zone_dominant_[z] = dom;
+            float t = e + s + w + n;
+            if (t >= 0.5f) n_active_zone++;
         }
+        std::fprintf(stderr, "[IronZone] pretick: zones=%d active=%d ff_path_ready_=%d\\n",
+            ff_zone_count_, n_active_zone, ff_path_ready_ ? 1 : 0);
     }
     
     std::vector<int> zone_shortage(zone_count_, 0);
@@ -1510,12 +1513,17 @@ void IronZoneScheduler::schedule(int time_limit_ms,
             }
 
             {
-                // 方向锁检查：locked的agent跳过，尝试下一个candidate
+                // 方向锁检查：locked跳过，本地扫描找下一个非锁（避免heap抖动）
                 float _lc = optimization_score(free_agents[ai], tasks[ti]);
                 if (_lc >= H_CAP) {
                     int nci = ci + 1;
-                    if (nci < static_cast<int>(candidates[ai].size())) {
-                        heap.push({candidates[ai][nci].first, ai, nci});
+                    while (nci < static_cast<int>(candidates[ai].size())) {
+                        float cs = optimization_score(free_agents[ai], tasks[candidates[ai][nci].second]);
+                        if (cs < H_CAP) {
+                            heap.push({cs, ai, nci});
+                            break;
+                        }
+                        nci++;
                     }
                     continue;
                 }
