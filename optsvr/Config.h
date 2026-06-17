@@ -220,11 +220,11 @@ constexpr float OPT_MAZE_PLANNER_ENTRY_DELTA = 6.0f;
 // IronZone 专属（SCHEDULE_MODE=10）
 // 大图低密度物流调度：按粗 zone 控制本地候选，减少跨图追任务。
 // ═══════════════════════════════════════════════════════════════════
-constexpr int   IRON_ZONE_ROWS       = 12;
-constexpr int   IRON_ZONE_COLS       = 12;
+constexpr int   IRON_ZONE_ROWS       = 19;
+constexpr int   IRON_ZONE_COLS       = 18;
 constexpr int   IRON_ASSIGN_VARIANT  = 0;     // 0=continuous, 1=wave, 2=zone quota, 3=finish dispersion, 4=dynamic wave, 5=start-distance gate, 6=distance dominant, 7=fair zone quota, 8=completion-cost wave, 9=completion fixed70, 10=completion fixed75, 11=completion ramp70-80, 12=start fixed80, 13=base fixed70, 14=legacy early fixed70, 15=balanced fixed70, 16=opportunity reserve fixed70
 constexpr int   IRON_LOCAL_RADIUS    = 1;
-constexpr int   IRON_MAX_RADIUS      = 3;
+constexpr int   IRON_MAX_RADIUS      = 1;
 constexpr int   IRON_CANDIDATE_TOPK  = 500;
 constexpr float IRON_DIST_WEIGHT     = 3.0f;
 constexpr float IRON_TASK_LEN_WEIGHT = 1.25f;
@@ -232,6 +232,7 @@ constexpr float IRON_CROSS_ZONE_W    = 60.0f;
 constexpr float IRON_ENDPOINT_W      = 0.0f;
 constexpr float IRON_AGE_WEIGHT      = 0.0f;
 constexpr float IRON_ASSIGN_RATIO    = 1.0f;
+constexpr int   IRON_ASSIGN_MAX_DIST = 0;   // agent→task1距离过滤(0=关闭)
 constexpr float IRON_BALANCE_W       = 4.0f;
 constexpr float IRON_MIGRATION_W     = 2.0f;
 constexpr int   IRON_BALANCE_CAP     = 32;
@@ -279,7 +280,7 @@ constexpr int   IRON_FUTURE_FLOW_ZONE_ROWS = 64;    // ff内部zone网格行数
 constexpr int   IRON_FUTURE_FLOW_ZONE_COLS = 64;    // ff内部zone网格列数
 constexpr float IRON_FUTURE_FLOW_REWARD_W  = 30.0f;  // 顺流奖励
 constexpr float IRON_FUTURE_FLOW_PENALTY_W = 5.0f;   // 垂直方向惩罚
-constexpr float IRON_FUTURE_FLOW_LOCK_TH   = 100.0f;
+constexpr float IRON_FUTURE_FLOW_LOCK_TH   = 26.0f;
 constexpr float IRON_FUTURE_FLOW_LOCK_W    = 50.0f;   // 方向锁惩罚权重(0=关)
 // 默认值全部为"关闭"状态，需通过MapTuner或环境变量显式开启
 // 关闭时: RoomExecutor(5)≡DHExecutor(3), RoomPlanner(6)≡OptPlanner(1)

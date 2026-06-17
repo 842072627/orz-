@@ -31,6 +31,7 @@ private:
         int component = -1;
         int length = 0;
         int age = 0;
+        bool ff_blocked = false;  // 全局预过滤标记：task1→task2→...路径被方向锁阻塞
     };
 
     struct RoundStats {

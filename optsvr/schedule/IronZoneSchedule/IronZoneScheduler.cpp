@@ -573,43 +573,10 @@ float IronZoneScheduler::score_candidate(
             float lw = cfg().iron_future_flow_lock_w;
             float lth = cfg().iron_future_flow_lock_th;
             if (rw != 0.0f || pw != 0.0f || lw != 0.0f) {
-                // 全路径锁（agent→所有waypoint的每个zone）
-                if (lw != 0.0f && lth > 0.0f && ff_path_ready_) {
-                    int z_prev = az;
-                    auto it = task_pool_snapshot_.find(task.tid);
-                    if (it != task_pool_snapshot_.end() && it->second.locations.size() >= 2) {
-                        auto& locs = it->second.locations;
-                        int sidx = -1;
-                        for (int i = 0; i < static_cast<int>(locs.size()); i++)
-                            if (locs[i] == task.start) { sidx = i; break; }
-                        if (sidx < 0) sidx = 0;
-                        for (int i = sidx; i < static_cast<int>(locs.size()); i++) {
-                            int z_tgt = ff_zone_of_loc(locs[i]);
-                            if (z_tgt < 0 || z_tgt >= ff_zone_count_ || z_tgt == z_prev) { z_prev = z_tgt; continue; }
-                            int cur = z_prev;
-                            while (cur != z_tgt) {
-                                int next = ff_path_next_[cur * ff_zone_count_ + z_tgt];
-                                if (next >= ff_zone_count_) break;
-                                const float* zd = &ff_dir_[cur * 4];
-                                float zt = zd[0]+zd[1]+zd[2]+zd[3];
-                                if (zt >= lth) {
-                                    int dom = 0;
-                                    if (zd[1] > zd[0]) dom = 1;
-                                    if (zd[2] > zd[0] && zd[2] > zd[1]) dom = 2;
-                                    if (zd[3] > zd[0] && zd[3] > zd[1] && zd[3] > zd[2]) dom = 3;
-                                    int zr = cur / ff_zone_cols_, zc2 = cur % ff_zone_cols_;
-                                    int nr = next / ff_zone_cols_, nc = next % ff_zone_cols_;
-                                    int dir_z = ff_dir_from_delta(nr - zr, nc - zc2);
-                                    if (dir_z >= 0 && dir_z == ((dom + 2) % 4)) {
-                                        ff_locked_candidates_++;
-                                        return 1e9f;
-                                    }
-                                }
-                                cur = next;
-                            }
-                            z_prev = z_tgt;
-                        }
-                    }
+                // 全路径阻塞：task1→task2→...已在全局预过滤中检查
+                if (task.ff_blocked) {
+                    ff_locked_candidates_++;
+                    return 1e9f;
                 }
                 // task start zone的顺流奖励/垂直惩罚
                 int dominant_tz = 0;
@@ -938,6 +905,52 @@ void IronZoneScheduler::schedule(int time_limit_ms,
             ff_zone_count_, n_active_zone, ff_path_ready_ ? 1 : 0);
     }
     
+    // ---- 全局预过滤：对所有task的task1→task2→... 做方向锁检查 ----
+    if (ff_enabled && cfg().iron_future_flow_lock_w != 0.0f && ff_path_ready_) {
+        float lth = cfg().iron_future_flow_lock_th;
+        for (int ti = 0; ti < static_cast<int>(tasks.size()); ti++) {
+            TaskMeta& t = tasks[ti];
+            auto it = task_pool_snapshot_.find(t.tid);
+            if (it == task_pool_snapshot_.end() || it->second.locations.size() < 2) continue;
+            auto& locs = it->second.locations;
+            int sidx = -1;
+            for (int i = 0; i < static_cast<int>(locs.size()); i++)
+                if (locs[i] == t.start) { sidx = i; break; }
+            if (sidx < 0) sidx = 0;
+            int z_prev = ff_zone_of_loc(locs[sidx]);
+            if (z_prev < 0 || z_prev >= ff_zone_count_) continue;
+            bool blocked = false;
+            for (int i = sidx + 1; i < static_cast<int>(locs.size()) && !blocked; i++) {
+                int z_tgt = ff_zone_of_loc(locs[i]);
+                if (z_tgt < 0 || z_tgt >= ff_zone_count_ || z_tgt == z_prev) { z_prev = z_tgt; continue; }
+                int cur = z_prev;
+                while (cur != z_tgt && !blocked) {
+                    int next = ff_path_next_[cur * ff_zone_count_ + z_tgt];
+                    if (next >= ff_zone_count_) break;
+                    const float* zd = &ff_dir_[cur * 4];
+                    float zt = zd[0]+zd[1]+zd[2]+zd[3];
+                    if (zt >= lth) {
+                        int dom = 0;
+                        if (zd[1] > zd[0]) dom = 1;
+                        if (zd[2] > zd[0] && zd[2] > zd[1]) dom = 2;
+                        if (zd[3] > zd[0] && zd[3] > zd[1] && zd[3] > zd[2]) dom = 3;
+                        int zr = cur / ff_zone_cols_, zc2 = cur % ff_zone_cols_;
+                        int nr = next / ff_zone_cols_, nc = next % ff_zone_cols_;
+                        int dir_z = ff_dir_from_delta(nr - zr, nc - zc2);
+                        if (dir_z >= 0 && dir_z == ((dom + 2) % 4)) {
+                            blocked = true;
+                        }
+                    }
+                    cur = next;
+                }
+                z_prev = z_tgt;
+            }
+            if (blocked) {
+                t.ff_blocked = true;
+            }
+        }
+    }
+    
     std::vector<int> zone_shortage(zone_count_, 0);
     int shortage_cap = std::max(1, cfg().iron_balance_cap);
     int starved_threshold = std::max(1, cfg().iron_starved_zone_threshold);
@@ -1142,6 +1155,11 @@ void IronZoneScheduler::schedule(int time_limit_ms,
                 if (zone_distance(agent.zone, z) > chosen_radius) continue;
                 for (int ti : tasks_by_zone[z]) {
                     if (tasks[ti].component != agent.component) continue;
+                    if (tasks[ti].ff_blocked) continue;
+                    if (cfg().iron_assign_max_dist > 0) {
+                        int d = distance_fast(env, agent.loc, tasks[ti].start);
+                        if (d > cfg().iron_assign_max_dist) continue;
+                    }
                     float score = candidate_score(agent, tasks[ti]);
                     cand.push_back({score, ti});
                 }
@@ -1150,6 +1168,11 @@ void IronZoneScheduler::schedule(int time_limit_ms,
             cand.reserve(std::min<int>(tasks.size(), topk));
             for (int ti = 0; ti < static_cast<int>(tasks.size()); ti++) {
                 if (tasks[ti].component != agent.component) continue;
+                if (tasks[ti].ff_blocked) continue;
+                if (cfg().iron_assign_max_dist > 0) {
+                    int d = distance_fast(env, agent.loc, tasks[ti].start);
+                    if (d > cfg().iron_assign_max_dist) continue;
+                }
                 float score = candidate_score(agent, tasks[ti]);
                 cand.push_back({score, ti});
             }
@@ -1167,6 +1190,11 @@ void IronZoneScheduler::schedule(int time_limit_ms,
             for (int ti : pool) {
                 if (ti < 0 || ti >= static_cast<int>(tasks.size())) continue;
                 if (tasks[ti].component != agent.component) continue;
+                if (tasks[ti].ff_blocked) continue;
+                if (cfg().iron_assign_max_dist > 0) {
+                    int d = distance_fast(env, agent.loc, tasks[ti].start);
+                    if (d > cfg().iron_assign_max_dist) continue;
+                }
                 float score = candidate_score(agent, tasks[ti]);
                 pool_cand.push_back({score, ti});
             }
@@ -1224,610 +1252,158 @@ void IronZoneScheduler::schedule(int time_limit_ms,
         }
     }
 
-    for (const auto& cand : candidates) {
-        if (!cand.empty()) {
-            stats.candidate_agents++;
-            stats.candidate_total += static_cast<int>(cand.size());
-        } else {
-            stats.candidate_empty_agents++;
-        }
-    }
-    auto build_end = std::chrono::steady_clock::now();
-    stats.build_ms = elapsed_ms(build_start, build_end);
-
-    using HeapItem = std::tuple<float, int, int>; // score, agent-index, candidate-index
-    std::priority_queue<HeapItem, std::vector<HeapItem>, std::greater<HeapItem>> heap;
-    for (int ai = 0; ai < static_cast<int>(candidates.size()); ai++) {
-        if (!candidates[ai].empty()) {
-            float base = candidates[ai][0].first;
-            heap.push({base, ai, 0});
-        }
-    }
-
     std::vector<unsigned char> task_used(tasks.size(), 0);
     std::vector<unsigned char> agent_used(free_agents.size(), 0);
     std::vector<int> local_schedule = schedule_snapshot_;
-    std::vector<int> zone_assign_cap(zone_count_, max_new_assign);
-    std::vector<int> zone_assign_used(zone_count_, 0);
-    if (cfg().iron_assign_variant == 2) {
-        for (int z = 0; z < zone_count_; z++) {
-            int local_anchor = zone_free_agents[z] + std::max(6, zone_free_agents[z] / 5);
-            int demand_floor = std::max(4, zone_free_tasks[z] / 4);
-            zone_assign_cap[z] = std::min(zone_free_tasks[z],
-                                          std::max(local_anchor, demand_floor));
-        }
-    } else if (cfg().iron_assign_variant == 7) {
-        int task_total = std::max(1, stats.free_tasks);
-        for (int z = 0; z < zone_count_; z++) {
-            int fair_share = static_cast<int>(
-                (static_cast<long long>(max_new_assign) * zone_free_tasks[z]) / task_total);
-            int local_bonus = std::min(zone_free_agents[z] / 4,
-                                       std::max(2, zone_free_tasks[z] / 8));
-            zone_assign_cap[z] = std::min(zone_free_tasks[z],
-                                          std::max(2, fair_share + local_bonus));
-        }
-    }
+    auto solve_start = std::chrono::steady_clock::now();
+    auto build_end = std::chrono::steady_clock::now();
+    stats.build_ms = elapsed_ms(build_start, build_end);
 
-    auto can_commit_task = [&](int ti) {
-        if (ti < 0 || ti >= static_cast<int>(tasks.size())) return false;
-        if (cfg().iron_assign_variant != 2 && cfg().iron_assign_variant != 7) return true;
-        int z = tasks[ti].start_zone;
-        if (z < 0 || z >= static_cast<int>(zone_assign_cap.size())) return true;
-        return zone_assign_used[z] < zone_assign_cap[z];
-    };
-
-    int start_dist_gate = H_CAP;
-    if (cfg().iron_assign_variant == 5) {
-        int t = std::max(0, cur_tick);
-        if (t < 2500) {
-            start_dist_gate = 50 + t / 50;      // 50 -> 100
-        } else if (t < 6000) {
-            start_dist_gate = 100 + (t - 2500) / 35; // 100 -> 200
-        } else {
-            start_dist_gate = H_CAP;
-        }
-    }
-
-    auto start_gate_allows = [&](int ai, int ti) {
-        if (start_dist_gate >= H_CAP) return true;
-        if (ai < 0 || ai >= static_cast<int>(free_agents.size())) return false;
-        if (ti < 0 || ti >= static_cast<int>(tasks.size())) return false;
-        int dist = distance_fast(env, free_agents[ai].loc, tasks[ti].start);
-        return dist <= start_dist_gate;
-    };
-
-    auto is_opportunity_assignment = [&](int ai, int ti) {
-        if (ai < 0 || ai >= static_cast<int>(free_agents.size())) return false;
-        if (ti < 0 || ti >= static_cast<int>(tasks.size())) return false;
-
-        const AgentMeta& agent = free_agents[ai];
-        const TaskMeta& task = tasks[ti];
-        if (task.component != agent.component) return false;
-
-        int dist = distance_fast(env, agent.loc, task.start);
-        if (dist > std::max(0, cfg().iron_opportunity_dist)) return false;
-        if (dist + task.length > std::max(0, cfg().iron_opportunity_completion)) return false;
-        if (zone_distance(agent.zone, task.start_zone) >
-            std::max(0, cfg().iron_opportunity_cross)) {
-            return false;
+    // ---- 实时全路径FF检查（agent→task1→task2→...→finish） ----
+    auto realtime_ff_allows = [&](const AgentMeta& agent, const TaskMeta& task) -> bool {
+        if (!ff_enabled || cfg().iron_future_flow_lock_w == 0.0f || !ff_path_ready_) return true;
+        float lth = cfg().iron_future_flow_lock_th;
+        if (lth <= 0.0f) return true;
+        int az = ff_zone_of_loc(agent.loc);
+        if (az < 0 || az >= ff_zone_count_) return true;
+        auto it = task_pool_snapshot_.find(task.tid);
+        if (it == task_pool_snapshot_.end() || it->second.locations.size() < 2) return true;
+        auto& locs = it->second.locations;
+        int sidx = -1;
+        for (int i = 0; i < static_cast<int>(locs.size()); i++)
+            if (locs[i] == task.start) { sidx = i; break; }
+        if (sidx < 0) sidx = 0;
+        int z_prev = az;
+        for (int i = sidx; i < static_cast<int>(locs.size()); i++) {
+            int z_tgt = ff_zone_of_loc(locs[i]);
+            if (z_tgt < 0 || z_tgt >= ff_zone_count_ || z_tgt == z_prev) { z_prev = z_tgt; continue; }
+            int cur = z_prev;
+            while (cur != z_tgt) {
+                int next = ff_path_next_[cur * ff_zone_count_ + z_tgt];
+                if (next >= ff_zone_count_) break;
+                const float* zd = &ff_dir_[cur * 4];
+                float zt = zd[0]+zd[1]+zd[2]+zd[3];
+                if (zt >= lth) {
+                    int dom = 0;
+                    if (zd[1] > zd[0]) dom = 1;
+                    if (zd[2] > zd[0] && zd[2] > zd[1]) dom = 2;
+                    if (zd[3] > zd[0] && zd[3] > zd[1] && zd[3] > zd[2]) dom = 3;
+                    int zr = cur / ff_zone_cols_, zc2 = cur % ff_zone_cols_;
+                    int nr = next / ff_zone_cols_, nc = next % ff_zone_cols_;
+                    int dir_z = ff_dir_from_delta(nr - zr, nc - zc2);
+                    if (dir_z >= 0 && dir_z == ((dom + 2) % 4)) {
+                        ff_locked_candidates_++;
+                        return false;
+                    }
+                }
+                cur = next;
+            }
+            z_prev = z_tgt;
         }
         return true;
     };
 
-    auto assignment_window_allows = [&](int ai, int ti) {
-        if (cfg().iron_assign_variant != 16) return true;
-        if (stats.assigned < base_new_assign) return true;
-        if (is_opportunity_assignment(ai, ti)) return true;
-        stats.opportunity_rejected++;
-        return false;
-    };
-
-    auto solve_start = std::chrono::steady_clock::now();
-
-    auto commit_assignment = [&](int ai, int ti) {
-        const bool opportunity_extra =
-            cfg().iron_assign_variant == 16 && stats.assigned >= base_new_assign;
+    // ---- 分配 -> 即时加流 ----
+    auto assign_and_add_ff = [&](int ai, int ti) {
         const AgentMeta& agent = free_agents[ai];
         const TaskMeta& task = tasks[ti];
         local_schedule[agent.aid] = task.tid;
         task_used[ti] = 1;
         agent_used[ai] = 1;
-        if ((cfg().iron_assign_variant == 2 || cfg().iron_assign_variant == 7) &&
-            task.start_zone >= 0 &&
-            task.start_zone < static_cast<int>(zone_assign_used.size())) {
-            zone_assign_used[task.start_zone]++;
-        }
         finish_zone_pressure[task.finish_zone]++;
         stats.assigned++;
-        if (opportunity_extra) stats.opportunity_assigned++;
-
         int dist = distance_fast(env, agent.loc, task.start);
         int zd = zone_distance(agent.zone, task.start_zone);
         stats.dist_sum += dist;
         stats.len_sum += task.length;
         stats.completion_cost_sum += dist + task.length;
         stats.zone_dist_sum += zd;
-        if (task.length <= 500) stats.assign_len_short++;
-        else if (task.length <= 1000) stats.assign_len_mid++;
-        else if (task.length <= 1500) stats.assign_len_long++;
-        else stats.assign_len_huge++;
         if (dist <= 50) stats.assign_dist_near++;
         else if (dist <= 150) stats.assign_dist_mid++;
         else stats.assign_dist_far++;
-        int agent_shortage = (agent.zone >= 0 && agent.zone < static_cast<int>(zone_shortage.size()))
-            ? zone_shortage[agent.zone]
-            : 0;
-        int start_shortage = (task.start_zone >= 0 && task.start_zone < static_cast<int>(zone_shortage.size()))
-            ? zone_shortage[task.start_zone]
-            : 0;
-        int finish_shortage = (task.finish_zone >= 0 && task.finish_zone < static_cast<int>(zone_shortage.size()))
-            ? zone_shortage[task.finish_zone]
-            : 0;
-        stats.start_shortage_sum += start_shortage;
-        stats.finish_shortage_sum += finish_shortage;
-        stats.migration_gain_sum += finish_shortage - agent_shortage;
-        if (zd > 0) stats.cross_zone++;
         if (task.length >= cfg().iron_long_task_th) stats.long_tasks++;
+        // 即时加流ff_dir_
+        if (ff_enabled) {
+            int z_prev = ff_zone_of_loc(agent.loc);
+            int cumul = 0;
+            int seg = 0;
+            auto it = task_pool_snapshot_.find(task.tid);
+            if (it != task_pool_snapshot_.end() && it->second.locations.size() >= 2) {
+                auto& locs = it->second.locations;
+                int sidx = -1;
+                for (int i = 0; i < static_cast<int>(locs.size()); i++)
+                    if (locs[i] == task.start) { sidx = i; break; }
+                if (sidx < 0) sidx = 0;
+                for (int i = sidx; i < static_cast<int>(locs.size()); i++) {
+                    int zc = ff_zone_of_loc(locs[i]);
+                    float w = (seg == 0) ? cfg().iron_future_flow_idle1 : cfg().iron_future_flow_idle2;
+                    ff_add_future_flow_path(z_prev, zc, w, cumul);
+                    cumul += static_cast<int>(ff_get_zone_path(z_prev, zc).size());
+                    z_prev = zc; seg++;
+                }
+            }
+        }
     };
 
-    // ---- future flow: add flow + rescore after commit ----
-    auto commit_ff_and_rescore = [&](int ai, int ti) {
-        if (!ff_enabled) return;
+    // ---- 纯贪心：同zone优先 + 邻zone + 实时FF ----
+    for (int ai = 0; ai < static_cast<int>(free_agents.size()) && stats.assigned < max_new_assign; ai++) {
+        if ((ai & 255) == 0 && std::chrono::steady_clock::now() >= deadline) break;
         const AgentMeta& agent = free_agents[ai];
-        const TaskMeta& task = tasks[ti];
+        int chosen_ti = -1;
         
-        // 用完整task路径（多段errand=2）
-        int z_prev = ff_zone_of_loc(agent.loc);
-        int cumul = 0;
-        int seg = 0;  // 0=agent→task1, 1+=task内各段
-        
-        auto it = task_pool_snapshot_.find(task.tid);
-        const auto* locs = (it != task_pool_snapshot_.end()) ? &it->second.locations : nullptr;
-        
-        if (locs && locs->size() >= 2) {
-            // 找到task.start在locations中的索引（第一个未访问点）
-            int start_idx = -1;
-            for (int i = 0; i < static_cast<int>(locs->size()); i++) {
-                if ((*locs)[i] == task.start) { start_idx = i; break; }
-            }
-            if (start_idx < 0) start_idx = 0;
-            
-            // 从start_idx开始遍历所有剩余waypoint
-            for (int i = start_idx; i < static_cast<int>(locs->size()); i++) {
-                int z_curr = ff_zone_of_loc((*locs)[i]);
-                float w = (seg == 0) ? cfg().iron_future_flow_idle1 : cfg().iron_future_flow_idle2;
-                ff_add_future_flow_path(z_prev, z_curr, w, cumul);
-                cumul += static_cast<int>(ff_get_zone_path(z_prev, z_curr).size());
-                z_prev = z_curr;
-                seg++;
-            }
-        } else {
-            // fallback: 只有start/finish
-            int z_start = ff_zone_of_loc(task.start);
-            int z_finish = ff_zone_of_loc(task.finish);
-            ff_add_future_flow_path(z_prev, z_start, cfg().iron_future_flow_idle1, cumul);
-            cumul += static_cast<int>(ff_get_zone_path(z_prev, z_start).size());
-            ff_add_future_flow_path(z_start, z_finish, cfg().iron_future_flow_idle2, cumul);
-        }
-        
-        // Rescore all agents whose FF zone is on the path
-        z_prev = ff_zone_of_loc(agent.loc);
-        std::vector<int> all_path_zones;
-        if (locs && locs->size() >= 2) {
-            int start_idx = -1;
-            for (int i = 0; i < static_cast<int>(locs->size()); i++) {
-                if ((*locs)[i] == task.start) { start_idx = i; break; }
-            }
-            if (start_idx < 0) start_idx = 0;
-            for (int i = start_idx; i < static_cast<int>(locs->size()); i++) {
-                int z_curr = ff_zone_of_loc((*locs)[i]);
-                auto p = ff_get_zone_path(z_prev, z_curr);
-                all_path_zones.insert(all_path_zones.end(), p.begin(), p.end());
-                z_prev = z_curr;
-            }
-        } else {
-            int zs = ff_zone_of_loc(task.start);
-            int zf = ff_zone_of_loc(task.finish);
-            auto p1 = ff_get_zone_path(ff_zone_of_loc(agent.loc), zs);
-            auto p2 = ff_get_zone_path(zs, zf);
-            all_path_zones.insert(all_path_zones.end(), p1.begin(), p1.end());
-            all_path_zones.insert(all_path_zones.end(), p2.begin(), p2.end());
-        }
-        
-        for (int z : all_path_zones) {
-            if (z < 0 || z >= ff_zone_count_) continue;
-            for (int aj : agents_by_zone[z]) {
-                if (agent_used[aj]) continue;
-                auto& cand = candidates[aj];
-                if (cand.empty()) continue;
-                float best = std::numeric_limits<float>::infinity();
-                int best_j = -1;
-                for (int j = 0; j < static_cast<int>(cand.size()); j++) {
-                    int tj = cand[j].second;
-                    if (task_used[tj]) continue;
-                    float total = score_candidate(free_agents[aj], tasks[tj],
-                                                   finish_zone_pressure, zone_shortage);
-                    if (total < best) { best = total; best_j = j; }
+        // 同zone优先
+        if (agent.zone >= 0 && agent.zone < static_cast<int>(tasks_by_zone.size())) {
+            for (int ti : tasks_by_zone[agent.zone]) {
+                if (task_used[ti]) continue;
+                if (tasks[ti].component != agent.component) continue;
+                if (cfg().iron_assign_max_dist > 0) {
+                    int d = distance_fast(env, agent.loc, tasks[ti].start);
+                    if (d > cfg().iron_assign_max_dist) continue;
                 }
-                if (best_j >= 0 && best_j != 0) {
-                    heap.push({best, aj, best_j});
-                }
-            }
-        }
-    };
-
-    if (aggressive_assign) {
-        const int rounds = std::max(1, cfg().iron_aggressive_iters);
-        const int probe_limit = std::max(1, cfg().iron_aggressive_probe);
-        const float replace_margin = std::max(0.0f, cfg().iron_aggressive_replace_margin);
-
-        std::vector<int> agent_task(free_agents.size(), -1);
-        std::vector<int> task_agent(tasks.size(), -1);
-        std::vector<float> agent_cost(free_agents.size(),
-                                      std::numeric_limits<float>::infinity());
-        std::vector<float> task_cost(tasks.size(),
-                                     std::numeric_limits<float>::infinity());
-        int assigned_iter = 0;
-
-        auto set_iter_assignment = [&](int ai, int ti) {
-            float score = optimization_score(free_agents[ai], tasks[ti]);
-            agent_task[ai] = ti;
-            agent_cost[ai] = score;
-            task_agent[ti] = ai;
-            task_cost[ti] = score;
-        };
-
-        while (!heap.empty() && assigned_iter < max_new_assign) {
-            if ((stats.heap_pops & 255) == 0 &&
-                std::chrono::steady_clock::now() >= deadline) {
-                break;
-            }
-            auto [score, ai, ci] = heap.top();
-            (void)score;
-            heap.pop();
-            stats.heap_pops++;
-
-            if (ai < 0 || ai >= static_cast<int>(free_agents.size())) continue;
-            if (agent_task[ai] >= 0) continue;
-            if (ci < 0 || ci >= static_cast<int>(candidates[ai].size())) continue;
-
-            int ti = candidates[ai][ci].second;
-            if (ti < 0 || ti >= static_cast<int>(tasks.size())) continue;
-
-            if (!start_gate_allows(ai, ti)) {
-                stats.gate_skips++;
-                int next_ci = ci + 1;
-                if (next_ci < static_cast<int>(candidates[ai].size())) {
-                    heap.push({candidates[ai][next_ci].first, ai, next_ci});
-                }
-                continue;
-            }
-
-            if (task_agent[ti] >= 0) {
-                stats.lazy_skips++;
-                int next_ci = ci + 1;
-                if (next_ci < static_cast<int>(candidates[ai].size())) {
-                    heap.push({candidates[ai][next_ci].first, ai, next_ci});
-                }
-                continue;
-            }
-
-            {
-                // 方向锁检查：locked跳过，本地扫描找下一个非锁（避免heap抖动）
-                float _lc = optimization_score(free_agents[ai], tasks[ti]);
-                if (_lc >= H_CAP) {
-                    int nci = ci + 1;
-                    while (nci < static_cast<int>(candidates[ai].size())) {
-                        float cs = optimization_score(free_agents[ai], tasks[candidates[ai][nci].second]);
-                        if (cs < H_CAP) {
-                            heap.push({cs, ai, nci});
-                            break;
-                        }
-                        nci++;
-                    }
-                    continue;
-                }
-            }
-            set_iter_assignment(ai, ti);
-            assigned_iter++;
-            
-            // 即时加流：每个seed分配完立即更新ff_dir_，影响后续agent
-            if (ff_enabled) {
-                int z_prev = ff_zone_of_loc(free_agents[ai].loc);
-                int cumul = 0;
-                int seg = 0;
-                int ti_seed = tasks[ti].tid;
-                auto it_seed = task_pool_snapshot_.find(ti_seed);
-                if (it_seed != task_pool_snapshot_.end() && it_seed->second.locations.size() >= 2) {
-                    auto& locs_seed = it_seed->second.locations;
-                    int sidx = -1;
-                    for (int i = 0; i < static_cast<int>(locs_seed.size()); i++) {
-                        if (locs_seed[i] == tasks[ti].start) { sidx = i; break; }
-                    }
-                    if (sidx < 0) sidx = 0;
-                    for (int i = sidx; i < static_cast<int>(locs_seed.size()); i++) {
-                        int zc = ff_zone_of_loc(locs_seed[i]);
-                        float w = (seg == 0) ? cfg().iron_future_flow_idle1 : cfg().iron_future_flow_idle2;
-                        ff_add_future_flow_path(z_prev, zc, w, cumul);
-                        cumul += static_cast<int>(ff_get_zone_path(z_prev, zc).size());
-                        z_prev = zc; seg++;
-                    }
-                }
-            }
-        }
-        stats.aggressive_seeded = assigned_iter;
-
-        for (int ai = 0; ai < static_cast<int>(candidates.size()); ai++) {
-            auto& cand = candidates[ai];
-            if (cand.empty()) continue;
-            for (auto& item : cand) {
-                        int ti = item.second;
-                        if (ti >= 0 && ti < static_cast<int>(tasks.size())) {
-                            item.first = optimization_score(free_agents[ai], tasks[ti]);
-                }
-            }
-            std::sort(cand.begin(), cand.end());
-        }
-
-        for (int round = 0; round < rounds; round++) {
-            if (std::chrono::steady_clock::now() >= deadline) break;
-            int changes = 0;
-            stats.aggressive_rounds = round + 1;
-
-            for (int ai = 0; ai < static_cast<int>(free_agents.size()); ai++) {
-                if ((ai & 63) == 0 && std::chrono::steady_clock::now() >= deadline) {
+                if (realtime_ff_allows(agent, tasks[ti])) {
+                    chosen_ti = ti;
                     break;
                 }
-                const auto& cand = candidates[ai];
-                if (cand.empty()) continue;
-
-                if (agent_task[ai] < 0) {
-                    int probes = 0;
-                    for (const auto& [score, ti] : cand) {
-                        if (probes++ >= probe_limit) break;
-                        if (ti < 0 || ti >= static_cast<int>(tasks.size())) continue;
-                        if (tasks[ti].component != free_agents[ai].component) continue;
-                        if (!start_gate_allows(ai, ti)) {
-                            stats.gate_skips++;
-                            continue;
-                        }
-
-                        int owner = task_agent[ti];
-                        if (owner < 0) {
-                            if (assigned_iter >= max_new_assign) continue;
-                            if (score >= H_CAP) continue;  // 方向锁：locked跳过
-                            set_iter_assignment(ai, ti);
-                            assigned_iter++;
-                            changes++;
-                            break;
-                        }
-
-                        if (score + replace_margin < task_cost[ti]) {
-                            agent_task[owner] = -1;
-                            agent_cost[owner] = std::numeric_limits<float>::infinity();
-                            set_iter_assignment(ai, ti);
-                            stats.aggressive_replacements++;
-                            changes++;
-                            break;
-                        }
-                    }
-                    continue;
-                }
-
-                int current_ti = agent_task[ai];
-                if (current_ti < 0 || current_ti >= static_cast<int>(tasks.size())) continue;
-                float current_cost = agent_cost[ai];
-                int probes = 0;
-                for (const auto& [score, ti] : cand) {
-                    if (probes++ >= probe_limit) break;
-                    if (ti == current_ti) break;
-                    if (score + replace_margin >= current_cost) break;
-                    if (ti < 0 || ti >= static_cast<int>(tasks.size())) continue;
-                    if (tasks[ti].component != free_agents[ai].component) continue;
-                    if (!start_gate_allows(ai, ti)) {
-                        stats.gate_skips++;
-                        continue;
-                    }
-
-                    int owner = task_agent[ti];
-                    if (owner < 0) {
-                        task_agent[current_ti] = -1;
-                        task_cost[current_ti] = std::numeric_limits<float>::infinity();
-                        set_iter_assignment(ai, ti);
-                        stats.aggressive_swaps++;
-                        changes++;
-                        break;
-                    }
-                    if (owner == ai) continue;
-
-                    int owner_ti = agent_task[owner];
-                    if (owner_ti < 0 || owner_ti >= static_cast<int>(tasks.size())) continue;
-                    if (tasks[current_ti].component != free_agents[owner].component) continue;
-
-                    float owner_new = optimization_score(free_agents[owner],
-                                                         tasks[current_ti]);
-                    if (owner_new >= H_CAP) continue;
-                    float old_total = current_cost + agent_cost[owner];
-                    float new_total = score + owner_new;
-                    if (new_total + replace_margin < old_total) {
-                        task_agent[current_ti] = owner;
-                        task_cost[current_ti] = owner_new;
-                        agent_task[owner] = current_ti;
-                        agent_cost[owner] = owner_new;
-
-                        task_agent[ti] = ai;
-                        task_cost[ti] = score;
-                        agent_task[ai] = ti;
-                        agent_cost[ai] = score;
-
-                        stats.aggressive_swaps++;
-                        changes++;
-                        break;
-                    }
-                }
             }
-
-            if (changes == 0) break;
         }
-
-        for (int ai = 0;
-             ai < static_cast<int>(agent_task.size()) && stats.assigned < max_new_assign;
-             ai++) {
-            int ti = agent_task[ai];
-            if (ti < 0 || ti >= static_cast<int>(tasks.size())) continue;
-            if (task_used[ti] || agent_used[ai]) continue;
-            if (!start_gate_allows(ai, ti)) {
-                stats.gate_skips++;
-                continue;
-            }
-            if (!assignment_window_allows(ai, ti)) {
-                continue;
-            }
-            if (!can_commit_task(ti)) {
-                stats.quota_skips++;
-                continue;
-            }
-            commit_assignment(ai, ti);
-            commit_ff_and_rescore(ai, ti);
-        }
-    }
-
-    while (!aggressive_assign && !heap.empty() && stats.assigned < max_new_assign) {
-        if ((stats.heap_pops & 255) == 0 && std::chrono::steady_clock::now() >= deadline) break;
-        auto [score, ai, ci] = heap.top();
-        (void)score;
-        heap.pop();
-        stats.heap_pops++;
-
-        if (ai < 0 || ai >= static_cast<int>(free_agents.size())) continue;
-        if (agent_used[ai]) continue;
-        if (ci < 0 || ci >= static_cast<int>(candidates[ai].size())) continue;
-
-        int ti = candidates[ai][ci].second;
-        if (ti < 0 || ti >= static_cast<int>(tasks.size())) continue;
-
-        if (!start_gate_allows(ai, ti)) {
-            stats.gate_skips++;
-            int next_ci = ci + 1;
-            if (next_ci < static_cast<int>(candidates[ai].size())) {
-                heap.push({candidates[ai][next_ci].first, ai, next_ci});
-            }
-            continue;
-        }
-
-        if (task_used[ti]) {
-            stats.lazy_skips++;
-            int next_ci = ci + 1;
-            if (next_ci < static_cast<int>(candidates[ai].size())) {
-                heap.push({candidates[ai][next_ci].first, ai, next_ci});
-            }
-            continue;
-        }
-        if (!can_commit_task(ti)) {
-            stats.quota_skips++;
-            int next_ci = ci + 1;
-            if (next_ci < static_cast<int>(candidates[ai].size())) {
-                heap.push({candidates[ai][next_ci].first, ai, next_ci});
-            }
-            continue;
-        }
-        if (!assignment_window_allows(ai, ti)) {
-            int next_ci = ci + 1;
-            if (next_ci < static_cast<int>(candidates[ai].size())) {
-                heap.push({candidates[ai][next_ci].first, ai, next_ci});
-            }
-            continue;
-        }
-
-        const AgentMeta& agent = free_agents[ai];
-        const TaskMeta& task = tasks[ti];
-        (void)agent;
-        (void)task;
-        commit_assignment(ai, ti);
-        commit_ff_and_rescore(ai, ti);
-    }
-
-    const int fallback_limit = std::max(256, max_new_assign / 10);
-    for (int ai = 0;
-         ai < static_cast<int>(free_agents.size()) && stats.assigned < max_new_assign;
-         ai++) {
-        if (stats.fallback_assigned >= fallback_limit) break;
-        if ((ai & 15) == 0 && std::chrono::steady_clock::now() >= deadline) break;
-        if (agent_used[ai]) continue;
-
-        const AgentMeta& agent = free_agents[ai];
-        int best_ti = -1;
-        float best_score = std::numeric_limits<float>::infinity();
-        for (int radius = local_radius; radius <= max_radius && best_ti < 0; radius++) {
-            for (int z = 0; z < zone_count_; z++) {
-                if (zone_distance(agent.zone, z) > radius) continue;
+        
+        // 邻zone扫描（同zone没找到）
+        if (chosen_ti < 0) {
+            for (int z = 0; z < static_cast<int>(tasks_by_zone.size()); z++) {
+                if (z == agent.zone) continue;
+                int zd = zone_distance(agent.zone, z);
+                if (zd <= 0 || zd > max_radius) continue;
                 for (int ti : tasks_by_zone[z]) {
-                    if (ti < 0 || ti >= static_cast<int>(tasks.size()) || task_used[ti]) continue;
+                    if (task_used[ti]) continue;
                     if (tasks[ti].component != agent.component) continue;
-                    if (!start_gate_allows(ai, ti)) {
-                        stats.gate_skips++;
-                        continue;
+                    if (cfg().iron_assign_max_dist > 0) {
+                        int d = distance_fast(env, agent.loc, tasks[ti].start);
+                        if (d > cfg().iron_assign_max_dist) continue;
                     }
-                    if (!assignment_window_allows(ai, ti)) continue;
-                    if (!can_commit_task(ti)) continue;
-                    float score = candidate_score(agent, tasks[ti]);
-                    if (score < best_score) {
-                        best_score = score;
-                        best_ti = ti;
+                    if (realtime_ff_allows(agent, tasks[ti])) {
+                        chosen_ti = ti;
+                        break;
                     }
                 }
+                if (chosen_ti >= 0) break;
             }
         }
-        if (best_ti >= 0) {
-            commit_assignment(ai, best_ti);
-            commit_ff_and_rescore(ai, best_ti);
-            stats.fallback_assigned++;
-        } else if (cfg().iron_assign_variant == 2) {
-            stats.quota_skips++;
+        if (chosen_ti >= 0) {
+            assign_and_add_ff(ai, chosen_ti);
+        } else {
+            stats.unmatched_agents++;
         }
     }
 
-    const int global_pool_limit = std::max(256, max_new_assign / 10);
-    std::vector<int> global_pool = short_task_pool;
-    global_pool.insert(global_pool.end(), starved_task_pool.begin(), starved_task_pool.end());
-    std::sort(global_pool.begin(), global_pool.end());
-    global_pool.erase(std::unique(global_pool.begin(), global_pool.end()), global_pool.end());
-
-    for (int ai = 0;
-         ai < static_cast<int>(free_agents.size()) && stats.assigned < max_new_assign;
-         ai++) {
-        if (stats.global_pool_assigned >= global_pool_limit) break;
-        if ((ai & 7) == 0 && std::chrono::steady_clock::now() >= deadline) break;
-        if (agent_used[ai]) continue;
-
-        const AgentMeta& agent = free_agents[ai];
-        int best_ti = -1;
-        float best_score = std::numeric_limits<float>::infinity();
-        for (int ti : global_pool) {
-            if (ti < 0 || ti >= static_cast<int>(tasks.size()) || task_used[ti]) continue;
-            if (tasks[ti].component != agent.component) continue;
-            if (!start_gate_allows(ai, ti)) {
-                stats.gate_skips++;
-                continue;
-            }
-            if (!assignment_window_allows(ai, ti)) continue;
-            if (!can_commit_task(ti)) continue;
-            float score = candidate_score(agent, tasks[ti]);
-            if (score < best_score) {
-                best_score = score;
-                best_ti = ti;
-            }
-        }
-        if (best_ti >= 0) {
-            commit_assignment(ai, best_ti);
-            commit_ff_and_rescore(ai, best_ti);
-            stats.global_pool_assigned++;
-        } else if (cfg().iron_assign_variant == 2) {
-            stats.quota_skips++;
-        }
-    }
     auto solve_end = std::chrono::steady_clock::now();
     stats.solve_ms = elapsed_ms(solve_start, solve_end);
+    double total_ms = elapsed_ms(start_time, solve_end);
+    if (total_ms > 500.0)
+        std::fprintf(stderr, " [TIMING] tick=%d build=%.0fms solve=%.0fms total=%.0fms pops=%d seed=%d rounds=%d swaps=%d locked=%d\n",
+            cur_tick, stats.build_ms, stats.solve_ms, total_ms,
+            stats.heap_pops, stats.aggressive_seeded, stats.aggressive_rounds, stats.aggressive_swaps, ff_locked_candidates_);
+    
+    // Update tidal dominant directions
     stats.unmatched_agents = std::max(0, stats.free_agents - stats.assigned);
 
     for (const AgentMeta& agent : free_agents) {

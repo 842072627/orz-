@@ -173,6 +173,7 @@ struct RuntimeConfig {
     float iron_endpoint_w;
     float iron_age_weight;
     float iron_assign_ratio;
+    int   iron_assign_max_dist;  // 距离过滤(0=关闭)
     float iron_balance_w;
     float iron_migration_w;
     int   iron_balance_cap;
@@ -420,6 +421,7 @@ struct RuntimeConfig {
         iron_endpoint_w      = read_float("IRON_ENDPOINT_W",      IRON_ENDPOINT_W);
         iron_age_weight      = read_float("IRON_AGE_WEIGHT",      IRON_AGE_WEIGHT);
         iron_assign_ratio    = read_float("IRON_ASSIGN_RATIO",    IRON_ASSIGN_RATIO);
+        iron_assign_max_dist = read_int  ("IRON_ASSIGN_MAX_DIST", IRON_ASSIGN_MAX_DIST);
         iron_balance_w       = read_float("IRON_BALANCE_W",       IRON_BALANCE_W);
         iron_migration_w     = read_float("IRON_MIGRATION_W",     IRON_MIGRATION_W);
         iron_balance_cap     = read_int  ("IRON_BALANCE_CAP",     IRON_BALANCE_CAP);
