@@ -27,6 +27,9 @@ extern bool g_exit_target_initialized;
 extern int g_redirected_agents[MAX_AGENTS];
 extern int g_redirected_count;
 
+// Exempt agents: path stays within one side of lane, no crossing needed
+extern int g_exempt_from_traffic_light[MAX_AGENTS];
+
 // Previous lock for detecting flips
 extern int g_prev_lock;
 

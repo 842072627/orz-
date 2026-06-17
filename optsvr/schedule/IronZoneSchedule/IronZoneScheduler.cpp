@@ -3,6 +3,8 @@
 #include "IronZoneScheduler.h"
 #include "HeuristicMatrix.h"
 #include "RuntimeConfig.h"
+#include "lane_data.h"
+#include "lane_traffic_light.h"
 
 #include <algorithm>
 #include <chrono>
@@ -771,7 +773,11 @@ void IronZoneScheduler::schedule(int time_limit_ms,
     stats.early_phase = early_phase_factor();
     stats.assign_variant = cfg().iron_assign_variant;
     stats.free_agents = 0;
-
+    
+    // 每tick清零红绿灯免名单
+    if (cfg().iron_lane_enabled)
+        std::fill(IronLane::g_exempt_from_traffic_light, IronLane::g_exempt_from_traffic_light + n_agents, 0);
+    
     std::vector<int> zone_agent_supply(zone_count_, 0);
     for (int a = 0; a < n_agents; a++) {
         int z = zone_of_loc(curr_locations_snapshot_[a]);
@@ -1259,13 +1265,18 @@ void IronZoneScheduler::schedule(int time_limit_ms,
     auto build_end = std::chrono::steady_clock::now();
     stats.build_ms = elapsed_ms(build_start, build_end);
 
-    // ---- 实时全路径FF检查（agent→task1→task2→...→finish） ----
-    auto realtime_ff_allows = [&](const AgentMeta& agent, const TaskMeta& task) -> bool {
+    // ---- 实时全路径FF检查（可选跳过agent→task1段） ----
+    auto realtime_ff_allows = [&](const AgentMeta& agent, const TaskMeta& task, bool from_agent) -> bool {
         if (!ff_enabled || cfg().iron_future_flow_lock_w == 0.0f || !ff_path_ready_) return true;
         float lth = cfg().iron_future_flow_lock_th;
         if (lth <= 0.0f) return true;
-        int az = ff_zone_of_loc(agent.loc);
-        if (az < 0 || az >= ff_zone_count_) return true;
+        int z_start;
+        if (from_agent) {
+            z_start = ff_zone_of_loc(agent.loc);
+        } else {
+            z_start = ff_zone_of_loc(task.start);
+        }
+        if (z_start < 0 || z_start >= ff_zone_count_) return true;
         auto it = task_pool_snapshot_.find(task.tid);
         if (it == task_pool_snapshot_.end() || it->second.locations.size() < 2) return true;
         auto& locs = it->second.locations;
@@ -1273,7 +1284,7 @@ void IronZoneScheduler::schedule(int time_limit_ms,
         for (int i = 0; i < static_cast<int>(locs.size()); i++)
             if (locs[i] == task.start) { sidx = i; break; }
         if (sidx < 0) sidx = 0;
-        int z_prev = az;
+        int z_prev = z_start;
         for (int i = sidx; i < static_cast<int>(locs.size()); i++) {
             int z_tgt = ff_zone_of_loc(locs[i]);
             if (z_tgt < 0 || z_tgt >= ff_zone_count_ || z_tgt == z_prev) { z_prev = z_tgt; continue; }
@@ -1322,6 +1333,12 @@ void IronZoneScheduler::schedule(int time_limit_ms,
         else if (dist <= 150) stats.assign_dist_mid++;
         else stats.assign_dist_far++;
         if (task.length >= cfg().iron_long_task_th) stats.long_tasks++;
+        // 红绿灯免名单：agent全程在lan同一侧，不穿lane
+        if (cfg().iron_lane_enabled) {
+            int a_comp = IronLane::get_component(agent.loc);
+            int t_comp = IronLane::get_component(task.start);
+            IronLane::g_exempt_from_traffic_light[agent.aid] = (a_comp == t_comp && a_comp != 0) ? 1 : 0;
+        }
         // 即时加流ff_dir_
         if (ff_enabled) {
             int z_prev = ff_zone_of_loc(agent.loc);
@@ -1345,29 +1362,30 @@ void IronZoneScheduler::schedule(int time_limit_ms,
         }
     };
 
-    // ---- 纯贪心：同zone优先 + 邻zone + 实时FF ----
+    // ---- 纯贪心：同zone优先（跳过agent→task1的FF）+ 邻zone（全路径FF） ----
     for (int ai = 0; ai < static_cast<int>(free_agents.size()) && stats.assigned < max_new_assign; ai++) {
         if ((ai & 255) == 0 && std::chrono::steady_clock::now() >= deadline) break;
         const AgentMeta& agent = free_agents[ai];
         int chosen_ti = -1;
+        int best_dist = std::numeric_limits<int>::max();
         
-        // 同zone优先
+        // 同zone：扫全部，选最短加权距离，FF从task1开始
         if (agent.zone >= 0 && agent.zone < static_cast<int>(tasks_by_zone.size())) {
             for (int ti : tasks_by_zone[agent.zone]) {
                 if (task_used[ti]) continue;
                 if (tasks[ti].component != agent.component) continue;
-                if (cfg().iron_assign_max_dist > 0) {
-                    int d = distance_fast(env, agent.loc, tasks[ti].start);
-                    if (d > cfg().iron_assign_max_dist) continue;
-                }
-                if (realtime_ff_allows(agent, tasks[ti])) {
+                int d = distance_fast(env, agent.loc, tasks[ti].start);
+                if (cfg().iron_assign_max_dist > 0 && d > cfg().iron_assign_max_dist) continue;
+                int wdist = d * 3 + tasks[ti].length * 125 / 100;  // DIST_WEIGHT=3, LEN_WEIGHT=1.25
+                if (wdist >= best_dist) continue;
+                if (realtime_ff_allows(agent, tasks[ti], false)) {
                     chosen_ti = ti;
-                    break;
+                    best_dist = wdist;
                 }
             }
         }
         
-        // 邻zone扫描（同zone没找到）
+        // 邻zone（同zone没找到）：全路径FF
         if (chosen_ti < 0) {
             for (int z = 0; z < static_cast<int>(tasks_by_zone.size()); z++) {
                 if (z == agent.zone) continue;
@@ -1376,13 +1394,13 @@ void IronZoneScheduler::schedule(int time_limit_ms,
                 for (int ti : tasks_by_zone[z]) {
                     if (task_used[ti]) continue;
                     if (tasks[ti].component != agent.component) continue;
-                    if (cfg().iron_assign_max_dist > 0) {
-                        int d = distance_fast(env, agent.loc, tasks[ti].start);
-                        if (d > cfg().iron_assign_max_dist) continue;
-                    }
-                    if (realtime_ff_allows(agent, tasks[ti])) {
+                    int d = distance_fast(env, agent.loc, tasks[ti].start);
+                    if (cfg().iron_assign_max_dist > 0 && d > cfg().iron_assign_max_dist) continue;
+                    int wdist = d * 3 + tasks[ti].length * 125 / 100;
+                    if (wdist >= best_dist) continue;
+                    if (realtime_ff_allows(agent, tasks[ti], true)) {
                         chosen_ti = ti;
-                        break;
+                        best_dist = wdist;
                     }
                 }
                 if (chosen_ti >= 0) break;

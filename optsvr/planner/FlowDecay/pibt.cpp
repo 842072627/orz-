@@ -76,7 +76,8 @@ bool causalPIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
 
 		// Iron lane traffic light: block counterflow entry
 		if (optsvr::cfg().iron_lane_enabled) {
-			if (!IronLane::is_lane_cell(prev_loc) && IronLane::is_lane_cell(neighbor)) {
+			if (!IronLane::is_lane_cell(prev_loc) && IronLane::is_lane_cell(neighbor)
+			    && !IronLane::g_exempt_from_traffic_light[curr_id]) {
 				int lock = IronLane::g_lane_lock_dir;
 				if (lock != 0) {
 					int comp = IronLane::get_component(prev_loc);

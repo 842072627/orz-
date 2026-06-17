@@ -16,6 +16,8 @@ bool g_exit_target_initialized = false;
 int g_redirected_agents[MAX_AGENTS] = {0};
 int g_redirected_count = 0;
 
+int g_exempt_from_traffic_light[MAX_AGENTS] = {0};
+
 int g_prev_lock = 1;
 
 // ── Clearance mode ─────────────────────────────────────────────────────────
