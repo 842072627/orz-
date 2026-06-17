@@ -36,7 +36,7 @@ int main(int argc, char **argv)
     // Declare the supported options.
     po::options_description desc("Allowed options");
     desc.add_options()("help", "produce help message")
-        ("actionMoveTimeLimit,a", po::value<int>()->default_value(1000), "the  time limit for move one action in milliseconds")
+        ("actionMoveTimeLimit,a", po::value<int>()->default_value(100), "the  time limit for move one action in milliseconds")
         ("outputScreen,c", po::value<int>()->default_value(1), "the level of details in the output file, 1--showing all the output, 2--only actual plans, task completion and summary, 3--only summary")
         ("logDetailLevel,d", po::value<int>()->default_value(1), "the minimum severity level of log messages to display, 1--showing all the messages, 2--showing warnings and fatal errors, 3--showing fatal errors only")
         ("fileStoragePath,f", po::value<std::string>()->default_value(""), "the large file storage path")

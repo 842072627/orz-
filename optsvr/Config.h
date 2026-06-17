@@ -239,7 +239,7 @@ constexpr int   IRON_SHORT_TASK_TOPK = 512;
 constexpr int   IRON_STARVED_TASK_TOPK = 128;
 constexpr int   IRON_STARVED_ZONE_THRESHOLD = 10;
 constexpr int   IRON_LONG_TASK_TH    = 1250;
-constexpr int   IRON_STATS_INTERVAL  = 500;
+constexpr int   IRON_STATS_INTERVAL  = 10;
 constexpr int   IRON_EARLY_PHASE_TICKS = 6000;
 constexpr float IRON_EARLY_DIST_W      = 0.60f;
 constexpr float IRON_EARLY_CROSS_W     = 24.0f;
@@ -277,9 +277,9 @@ constexpr float IRON_FUTURE_FLOW_BUSY1     = 1.0f;   // busy agent→curr_finish
 constexpr int   IRON_FUTURE_FLOW_PREDICT   = 0;      // 预测task2延伸格数(0=关)
 constexpr int   IRON_FUTURE_FLOW_ZONE_ROWS = 64;    // ff内部zone网格行数
 constexpr int   IRON_FUTURE_FLOW_ZONE_COLS = 64;    // ff内部zone网格列数
-constexpr float IRON_FUTURE_FLOW_REWARD_W  = 30.0f;  // 顺流奖励(=WEIGHT时取消热)
-constexpr float IRON_FUTURE_FLOW_PENALTY_W = 0.0f;  // 逆流惩罚(顺流半额)
-constexpr float IRON_FUTURE_FLOW_LOCK_TH   = 8.0f;
+constexpr float IRON_FUTURE_FLOW_REWARD_W  = 30.0f;  // 顺流奖励
+constexpr float IRON_FUTURE_FLOW_PENALTY_W = 5.0f;   // 垂直方向惩罚
+constexpr float IRON_FUTURE_FLOW_LOCK_TH   = 0.05f;
 constexpr float IRON_FUTURE_FLOW_LOCK_W    = 50.0f;   // 方向锁惩罚权重(0=关)
 // 默认值全部为"关闭"状态，需通过MapTuner或环境变量显式开启
 // 关闭时: RoomExecutor(5)≡DHExecutor(3), RoomPlanner(6)≡OptPlanner(1)

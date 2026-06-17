@@ -110,8 +110,13 @@ private:
     std::vector<float> ff_dir_;                      // 方向flow, size=ff_zone_count_*4
     std::vector<int> ff_dominant_;                   // 主方向 -1=无 0=E 1=S 2=W 3=N
     std::vector<float> ff_tide_;                     // 潮汐强度 0~1
-    std::vector<int> ff_bfs_parent_;                 // BFS parent (tick内缓存)
-    std::vector<uint16_t> ff_bfs_dist_;              // BFS dist (tick内缓存)
+    // Precomputed all-pairs zone paths (cell-level BFS, persisted to file)
+    std::vector<uint16_t> ff_path_next_;             // next_hop[src*dst], size=zone_count^2
+    std::vector<uint16_t> ff_path_dist_;             // dist[src*dst], size=zone_count^2
+    bool ff_path_ready_ = false;                     // true if precomputed table loaded
+    
+    std::vector<int> ff_bfs_parent_;                 // BFS parent (初始化时用)
+    std::vector<uint16_t> ff_bfs_dist_;              // BFS dist (初始化时用)
     int ff_bfs_cached_source_ = -1;                  // BFS缓存的source zone
     
     static constexpr int DIR_E = 0, DIR_S = 1, DIR_W = 2, DIR_N = 3;
@@ -120,6 +125,13 @@ private:
     
     int ff_zone_of_loc(int loc) const;
     void ff_compute_zone_adjacency(SharedEnvironment* env);
+    // All-pairs cell-level BFS precomputation
+    void ff_precompute_all_pairs(SharedEnvironment* env);
+    void ff_save_cache(const char* path) const;
+    bool ff_load_cache(const char* path);
+    // Path via precomputed next_hop table (O(path_length), no BFS)
+    std::vector<int> ff_get_zone_path_fast(int z_from, int z_to) const;
+    // Fallback: zone-level BFS (slow)
     std::vector<int> ff_get_zone_path(int z_from, int z_to);
     void ff_add_future_flow_path(int z_from, int z_to, float weight, int cumul_offset);
     int ff_cell_size() const { return std::max(1, rows_ / std::max(1, ff_zone_rows_)); }
@@ -141,6 +153,13 @@ private:
     
     // future flow
     void print_round_stats(const RoundStats& stats, int tick) const;
+    
+    // Lock debug counter (reset each tick)
+    mutable int ff_locked_candidates_ = 0;
+    
+    // Precomputed per-zone flow stats (refreshed each tick)
+    std::vector<float> ff_zone_total_;
+    std::vector<int> ff_zone_dominant_;
 };
 
 } // namespace optsvr
