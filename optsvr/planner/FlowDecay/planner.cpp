@@ -8,6 +8,10 @@
 #include "HeuristicMatrix.h"
 #include "MapProfile.h"
 #include "RuntimeConfig.h"
+
+// wait 原因追踪
+extern int g_wait_no_successor;
+extern int g_wait_cycle;
 #include "lane_data.h"
 #include "lane_traffic_light.h"
 // OptPlan 命名空间下的副本（从 default_planner 复制，可自由修改）
@@ -451,6 +455,10 @@ void OptPlanner::log_plan_pressure_if_needed(SharedEnvironment* env) const
        << ",turn=" << pct(pressure_stats_.turn_samples, pressure_stats_.busy_samples) << "%"
        << ",wait=" << pct(pressure_stats_.wait_samples, pressure_stats_.busy_samples) << "%"
        << ",actW=" << pct(pressure_stats_.active_wait_samples, pressure_stats_.active_samples) << "%"
+       << ",wNoSuc=" << pct(pressure_stats_.wait_no_successor, pressure_stats_.busy_samples) << "%"
+       << ",wCyc=" << pct(pressure_stats_.wait_cycle, pressure_stats_.busy_samples) << "%"
+       << ",wIdle=" << pct(pressure_stats_.wait_idle, pressure_stats_.busy_samples) << "%"
+       << ",wGoal=" << pct(pressure_stats_.wait_at_goal, pressure_stats_.busy_samples) << "%"
        << ",prog=" << pct(pressure_stats_.progress_samples, pressure_stats_.h_samples) << "%"
        << ",noProg=" << pct(pressure_stats_.no_progress_samples, pressure_stats_.h_samples) << "%"
        << ",reg=" << pct(pressure_stats_.regress_samples, pressure_stats_.h_samples) << "%"
@@ -733,6 +741,8 @@ void OptPlanner::plan(int time_limit, std::vector<std::vector<Action>>& actions,
     pressure_stats_ = PlanPressureStats();
     pressure_stats_.tick = env->system_timestep;
     pressure_stats_.requested_steps = num_steps;
+    g_wait_no_successor = 0;
+    g_wait_cycle = 0;
 
     // 时间预算分配先用保守基线。IRON 会在 setup 后根据 guide backlog
     // 和最近 PIBT 实测耗时动态调整，避免前期过早挤压 guide path 计算。
@@ -889,9 +899,13 @@ void OptPlanner::plan(int time_limit, std::vector<std::vector<Action>>& actions,
                 int dir = (goal_comp == 2) ? 1 : -1;  // +1 = toward comp2, -1 = toward comp1
 
                 if (IronLane::is_lane_cell(loc)) {
-                    // Agent already in the lane — count by direction
-                    if (dir > 0) in_12++;
-                    else in_21++;
+                    // Agent already in the lane
+                    if (optsvr::cfg().iron_lane_outside_vote) {
+                        // Only outside agents vote — skip in-lane
+                    } else {
+                        if (dir > 0) in_12++;
+                        else in_21++;
+                    }
                 } else {
                     // Agent outside the lane — check if approaching to cross
                     int agent_comp = IronLane::get_component(loc);
@@ -1270,6 +1284,23 @@ void OptPlanner::plan(int time_limit, std::vector<std::vector<Action>>& actions,
     env->curr_states = original_states;
     env->curr_timestep = original_timestep;
     decided_ = original_decided;
+
+    // WAIT 原因统计
+    {
+        pressure_stats_.wait_no_successor = g_wait_no_successor;
+        pressure_stats_.wait_cycle = g_wait_cycle;
+        int total_w = 0;
+        for (int i = 0; i < env->num_of_agents; i++) {
+            if (env->goal_locations[i].empty()) {
+                pressure_stats_.wait_idle++;
+                total_w++;
+            } else if (env->curr_states[i].location == env->goal_locations[i].front().first) {
+                pressure_stats_.wait_at_goal++;
+                total_w++;
+            }
+        }
+        // 兜底：wait_samples 减去已分类的，剩下的来源不明确
+    }
 
     log_plan_pressure_if_needed(env);
 }

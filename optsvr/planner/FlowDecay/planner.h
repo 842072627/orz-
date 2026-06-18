@@ -81,6 +81,11 @@ private:
         int hot_cell_samples = 0;
         int hot_agent_samples = 0;
         int hot_wait_samples = 0;
+        // WAIT 原因分解
+        int wait_no_successor = 0;  // causalPIBT 所有候选被占
+        int wait_cycle = 0;          // moveCheck 循环检测
+        int wait_idle = 0;           // 空闲无任务
+        int wait_at_goal = 0;        // 已在目标位置
     };
     PlanPressureStats pressure_stats_;
     double pibt_ms_ema_ = 0.0;

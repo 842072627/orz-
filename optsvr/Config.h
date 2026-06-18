@@ -257,7 +257,7 @@ constexpr int   IRON_OPPORTUNITY_CROSS = 0;
 // ═══════════════════════════════════════════════════════════════════
 // Iron 红绿灯（lane traffic light）
 // ═══════════════════════════════════════════════════════════════════
-constexpr int   IRON_LANE_ENABLED      = 0;       // 0=关闭, 1=开启红绿灯
+constexpr int   IRON_LANE_ENABLED      = 1;       // 0=关闭, 1=开启红绿灯
 constexpr int   IRON_LANE_GUARD_DIST   = 20;      // 统计agent的曼哈顿距离阈值
 constexpr int   IRON_LANE_CORE_FLIP_TH = 10;      // core人数>此值冻锁不翻
 constexpr float IRON_LANE_IDLE_BONUS   = 0.5f;    // 空闲agent引导加分（score越小越好）
@@ -265,6 +265,7 @@ constexpr int   IRON_LANE_FLOW_RATIO_FLIP = 2.5;    // 拦/放流比>=此值强�
 constexpr int   IRON_LANE_VOTE_PERIOD  = 80;      // 每N tick重新投票
 constexpr int   IRON_LANE_DEBUG       = 0;       // 0=关闭所有红绿灯打印, 1=打开debug打印
 constexpr int   IRON_LANE_LRU_SORT    = 1;       // 0=顺序循环算guide path, 1=LRU排序
+constexpr int   IRON_LANE_OUTSIDE_VOTE = 1;      // 0=全员投票(lane内+外来), 1=只有lane外agent投票
 
 // ═══════════════════════════════════════════════════════════════════
 // Iron future flow（64×64 zone 级别流量预测）
@@ -274,7 +275,7 @@ constexpr float IRON_FUTURE_FLOW_K        = 1.0f;   // 流量基数乘子
 constexpr float IRON_FUTURE_FLOW_DECAY    = 0.01f;  // 1/(1+d*decay)
 constexpr int   IRON_FUTURE_FLOW_ZONE_ROWS = 64;    // ff内部zone网格行数
 constexpr int   IRON_FUTURE_FLOW_ZONE_COLS = 64;    // ff内部zone网格列数
-constexpr float IRON_FUTURE_FLOW_LOCK_TH  = 65.0f;  // 方向锁阈值(0=关): 逆流流量>=此值则拦
+constexpr float IRON_FUTURE_FLOW_LOCK_TH  = 35.0f;  // 方向锁阈值(0=关): 逆流流量>=此值则拦
 constexpr float IRON_FUTURE_FLOW_CONGEST_CAP = 300.0f; // 拥塞上限: zone总流>=此值则穿过的任务无论方向一律拦
 // ═══════════════════════════════════════════════════════════════════
 // ---- Planner: flow_scale覆盖(仅room) ----

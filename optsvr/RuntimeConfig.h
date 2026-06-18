@@ -204,6 +204,7 @@ struct RuntimeConfig {
     float iron_lane_idle_bonus;
     int   iron_lane_debug;
     int   iron_lane_lru_sort;
+    int   iron_lane_outside_vote;
 
     // Iron future flow
     float iron_future_flow_w;
@@ -446,6 +447,7 @@ struct RuntimeConfig {
         iron_lane_idle_bonus   = read_float("IRON_LANE_IDLE_BONUS",    IRON_LANE_IDLE_BONUS);
         iron_lane_debug        = read_int  ("IRON_LANE_DEBUG",         IRON_LANE_DEBUG);
         iron_lane_lru_sort     = read_int  ("IRON_LANE_LRU_SORT",      IRON_LANE_LRU_SORT);
+        iron_lane_outside_vote = read_int  ("IRON_LANE_OUTSIDE_VOTE",   IRON_LANE_OUTSIDE_VOTE);
 
         // Iron future flow
         iron_future_flow_w       = read_float("IRON_FUTURE_FLOW_W",       IRON_FUTURE_FLOW_W);
@@ -897,6 +899,7 @@ private:
         iron_lane_idle_bonus   = IRON_LANE_IDLE_BONUS;
         iron_lane_debug        = IRON_LANE_DEBUG;
         iron_lane_lru_sort     = IRON_LANE_LRU_SORT;
+        iron_lane_outside_vote = IRON_LANE_OUTSIDE_VOTE;
 
         // RoomPlanner / RoomExecutor 优化 (精简后仅保留有效参数)
         opt_room_flow_scale = OPT_ROOM_FLOW_SCALE;

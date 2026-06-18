@@ -6,7 +6,9 @@
 #include "lane_data.h"
 #include "lane_traffic_light.h"
 
-
+// wait 原因追踪
+int g_wait_no_successor = 0;
+int g_wait_cycle = 0;
 
 
 
@@ -150,7 +152,8 @@ bool causalPIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
     }
 
     next_states.at(curr_id) = State(prev_loc,-1 ,-1);;
-    decision.at(prev_loc) = curr_id;     
+    decision.at(prev_loc) = curr_id;
+    g_wait_no_successor++;
     return false;
 }
 
@@ -226,12 +229,14 @@ bool moveCheck(int id, std::vector<bool>& checked,
 	if (moveCheck(na,checked,decided,actions,prev_decision))
 		return true;
 	actions.at(id) = Action::W;
+	g_wait_cycle++;
 	return false;
 	
 
 	
 
 	
+
 	
 }
 
