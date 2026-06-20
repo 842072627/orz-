@@ -101,9 +101,13 @@ private:
     // 上一轮最后一步的 agent 状态
     std::vector<State> last_step_states_;
 
+    // Lane exit buffer zone: non-lane cells within EXIT_BUFFER_RADIUS of any lane cell
+    std::vector<bool> lane_exit_buffer_;
+
     // ---- Warehouse 通道定向 (WARE_DIRECT, DHFULL版: 80%阈值 + 软惩罚) ----
     std::vector<std::vector<int>> extra_weights_;  // [loc][direction] penalty
     void build_row_column_highway(SharedEnvironment* env);
+    void build_iron_highway(SharedEnvironment* env);
 
     // ============ 内部子步骤（与 DefaultPlanner::planner.cpp 对应） ============
     static State rollout_next_state(const State& state, Action action, const SharedEnvironment* env);

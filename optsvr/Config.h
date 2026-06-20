@@ -255,9 +255,14 @@ constexpr int   IRON_OPPORTUNITY_COMPLETION = 1350;
 constexpr int   IRON_OPPORTUNITY_CROSS = 0;
 
 // ═══════════════════════════════════════════════════════════════════
-// Iron 红绿灯（lane traffic light）
+// Iron highway direction constraints（manual annotation based）
 // ═══════════════════════════════════════════════════════════════════
-constexpr int   IRON_LANE_ENABLED      = 1;       // 0=关闭, 1=开启红绿灯
+constexpr int   IRON_HIGHWAY_ENABLED       = 1;       // 0=关闭, 1=开启
+constexpr int   IRON_HIGHWAY_FORBID_COST   = 100000;  // 禁止方向A*代价
+constexpr float IRON_HIGHWAY_PIBT_BOOST    = 500.0f;  // highway上agent移动优先级提升(0=关)
+constexpr int   IRON_HIGHWAY_DEBUG         = 0;       // 0=静默, 1=打印
+// ═══════════════════════════════════════════════════════════════════
+constexpr int   IRON_LANE_ENABLED      = 0;       // 0=关闭, 1=开启红绿灯
 constexpr int   IRON_LANE_GUARD_DIST   = 20;      // 统计agent的曼哈顿距离阈值
 constexpr int   IRON_LANE_CORE_FLIP_TH = 10;      // core人数>此值冻锁不翻
 constexpr float IRON_LANE_IDLE_BONUS   = 0.5f;    // 空闲agent引导加分（score越小越好）
@@ -266,6 +271,9 @@ constexpr int   IRON_LANE_VOTE_PERIOD  = 80;      // 每N tick重新投票
 constexpr int   IRON_LANE_DEBUG       = 0;       // 0=关闭所有红绿灯打印, 1=打开debug打印
 constexpr int   IRON_LANE_LRU_SORT    = 1;       // 0=顺序循环算guide path, 1=LRU排序
 constexpr int   IRON_LANE_OUTSIDE_VOTE = 1;      // 0=全员投票(lane内+外来), 1=只有lane外agent投票
+constexpr int   IRON_LANE_EXIT_BUFFER_RADIUS = 3;  // lane出口缓冲区半径(格)
+constexpr float IRON_LANE_EXIT_PRIORITY    = 1000.0f; // lane内出去的agent排序+1000
+constexpr float IRON_LANE_BUFFER_PENALTY   = 1000.0f; // buffer内挡路agent排序-1000
 
 // ═══════════════════════════════════════════════════════════════════
 // Iron future flow（64×64 zone 级别流量预测）

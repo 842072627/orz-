@@ -5,6 +5,7 @@
 #include "HeuristicMatrix.h"
 #include "lane_data.h"
 #include "lane_traffic_light.h"
+#include "iron_highway.h"
 
 // wait 原因追踪
 int g_wait_no_successor = 0;
@@ -95,6 +96,23 @@ bool causalPIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
 					// Clearance: block ALL entry, don't increment stats
 					continue;
 				}
+			}
+		}
+
+		// Iron highway: check direction constraint on current cell
+		{
+			uint8_t forbid = IronHighway::get_forbid_mask(prev_loc);
+			if (forbid != 0) {
+				int delta = neighbor - prev_loc;
+				// dir: 0=E, 1=S, 2=W, 3=N
+				int dir = (delta == 1) ? 0 : (delta == -1) ? 2 : (delta == lns.env->cols) ? 1 : 3;
+				// forbid mask bits: 1=W, 2=E, 4=N, 8=S
+				bool blocked = false;
+				if (dir == 0 && (forbid & 2)) blocked = true;   // E blocked
+				if (dir == 1 && (forbid & 8)) blocked = true;   // S blocked
+				if (dir == 2 && (forbid & 1)) blocked = true;   // W blocked
+				if (dir == 3 && (forbid & 4)) blocked = true;   // N blocked
+				if (blocked) continue;
 			}
 		}
 

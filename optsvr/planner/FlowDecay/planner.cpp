@@ -14,6 +14,7 @@ extern int g_wait_no_successor;
 extern int g_wait_cycle;
 #include "lane_data.h"
 #include "lane_traffic_light.h"
+#include "iron_highway.h"
 // OptPlan 命名空间下的副本（从 default_planner 复制，可自由修改）
 #include "heuristics.h"
 #include "flow.h"
@@ -111,6 +112,35 @@ void OptPlanner::initialize(int preprocess_time_limit, SharedEnvironment* env)
     // Warehouse 通道定向策略
     if (cfg().ware_direct && map_profile().type == MapType::WAREHOUSE_DOMAIN) {
         build_row_column_highway(env);
+    }
+
+    // Iron harvest highway direction constraints
+    if (optsvr::cfg().iron_highway_enabled) {
+        build_iron_highway(env);
+    }
+
+    // Precompute lane exit buffer zone
+    lane_exit_buffer_.assign(env->map.size(), false);
+    if (cfg().iron_lane_enabled && cfg().iron_lane_exit_buffer_radius > 0) {
+        int radius = cfg().iron_lane_exit_buffer_radius;
+        int cols = env->cols;
+        for (int loc = 0; loc < (int)env->map.size(); loc++) {
+            if (!IronLane::is_lane_cell(loc)) continue;
+            int cx = loc % cols, cy = loc / cols;
+            for (int dy = -radius; dy <= radius; dy++) {
+                for (int dx = -radius; dx <= radius; dx++) {
+                    if (dx == 0 && dy == 0) continue;
+                    if (dx*dx + dy*dy > radius*radius) continue;
+                    int nx = cx + dx, ny = cy + dy;
+                    if (nx < 0 || nx >= cols || ny < 0 || ny >= env->rows) continue;
+                    int nl = ny * cols + nx;
+                    if (nl < 0 || nl >= (int)env->map.size()) continue;
+                    if (!IronLane::is_lane_cell(nl) && env->map[nl] == 0) {
+                        lane_exit_buffer_[nl] = true;
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -563,7 +593,37 @@ void OptPlanner::run_multistep_pibt_once(
     std::vector<Action>& one_step_actions)
 {
     std::sort(ids_.begin(), ids_.end(), [&](int a, int b) {
-        return local_priority.at(a) > local_priority.at(b);
+        double pa = local_priority.at(a);
+        double pb = local_priority.at(b);
+        int lock = IronLane::g_lane_lock_dir;
+        double exit_bonus = cfg().iron_lane_exit_priority;
+        double buf_penalty = cfg().iron_lane_buffer_penalty;
+        // Lane exit: agent in lane, goal not in lane → +exit_bonus
+        if (!env->goal_locations[a].empty() &&
+            IronLane::is_lane_cell(env->curr_states[a].location) &&
+            !IronLane::is_lane_cell(env->goal_locations[a].front().first))
+            pa += exit_bonus;
+        if (!env->goal_locations[b].empty() &&
+            IronLane::is_lane_cell(env->curr_states[b].location) &&
+            !IronLane::is_lane_cell(env->goal_locations[b].front().first))
+            pb += exit_bonus;
+        // Buffer penalty: agent in buffer zone, going counterflow → -buf_penalty
+        if (lock != 0) {
+            for (auto* p : {&pa, &pb}) {
+                int id = (p == &pa) ? a : b;
+                if (env->goal_locations[id].empty()) continue;
+                int loc = env->curr_states[id].location;
+                if (loc < 0 || loc >= (int)lane_exit_buffer_.size()) continue;
+                if (!lane_exit_buffer_[loc]) continue;
+                int ga = env->goal_locations[id].front().first;
+                int gc = IronLane::get_component(ga);
+                int ac = IronLane::get_component(loc);
+                if (ac == gc) continue;  // same side, no crossing
+                int dir = (gc == 2) ? 1 : -1;
+                if (dir != lock) *p -= buf_penalty;  // counterflow → penalize
+            }
+        }
+        return pa > pb;
     });
 
     std::fill(occupied_.begin(), occupied_.end(), false);
@@ -1242,6 +1302,20 @@ void OptPlanner::plan(int time_limit, std::vector<std::vector<Action>>& actions,
         }
     }
 
+    // Iron highway PIBT boost: agents on highway cells get priority boost
+    // (copy, doesn't pollute local_priority — fresh each tick)
+    if (optsvr::cfg().iron_highway_enabled && optsvr::cfg().iron_highway_pibt_boost > 0.0f) {
+        double boost = static_cast<double>(optsvr::cfg().iron_highway_pibt_boost);
+        for (int a = 0; a < env->num_of_agents; a++) {
+            int loc = env->curr_states[a].location;
+            if (loc < 0) continue;
+            uint8_t forbid = IronHighway::get_forbid_mask(loc);
+            if (forbid == 0) continue;    // not on a highway cell
+            if (forbid == 15) continue;    // all 4 blocked (shouldn't happen)
+            pibt_priority[a] += boost;
+        }
+    }
+
     const auto pibt_start = std::chrono::steady_clock::now();
     for (int step = 0; step < num_steps; step++) {
         // 超时保护：如果接近硬截止时间，提前终止 PIBT 循环
@@ -1399,6 +1473,41 @@ void OptPlanner::build_row_column_highway(SharedEnvironment* env)
                   << ", row_penalty=" << ROW_PENALTY
                   << ", col_penalty=" << COL_PENALTY << "\n";
     }
+}
+
+// ============ build_iron_highway ============
+// Load per-cell direction constraints from iron_highway.h and fill extra_weights_.
+// Forbidden directions get a very high cost (hard constraint in A*).
+void OptPlanner::build_iron_highway(SharedEnvironment* env)
+{
+    if (env == nullptr) return;
+    if (!optsvr::cfg().iron_highway_enabled) return;
+
+    int forbid_cost = optsvr::cfg().iron_highway_forbid_cost;
+
+    // Ensure extra_weights_ is sized correctly
+    if (extra_weights_.size() != static_cast<size_t>(env->rows * env->cols)) {
+        extra_weights_.assign(env->rows * env->cols, std::vector<int>(4, 0));
+    }
+
+    // Direction encoding: 0=E, 1=S, 2=W, 3=N
+    // IronHighway mask bits: 1=W, 2=E, 4=N, 8=S
+    static constexpr int DIR_MAP[4] = {2, 0, 3, 1};  // mask_bit -> extra_weights dir
+    
+    int count = 0;
+    for (int i = 0; i < IronHighway::NUM_CELLS; i++) {
+        const auto& c = IronHighway::kConstraints[i];
+        if (c.loc < 0 || c.loc >= env->rows * env->cols) continue;
+        uint8_t mask = c.forbid;
+        if (mask & 1)  { extra_weights_[c.loc][DIR_MAP[0]] = forbid_cost; count++; }  // forbid W → dir 2
+        if (mask & 2)  { extra_weights_[c.loc][DIR_MAP[1]] = forbid_cost; count++; }  // forbid E → dir 0
+        if (mask & 4)  { extra_weights_[c.loc][DIR_MAP[2]] = forbid_cost; count++; }  // forbid N → dir 3
+        if (mask & 8)  { extra_weights_[c.loc][DIR_MAP[3]] = forbid_cost; count++; }  // forbid S → dir 1
+    }
+
+    if (optsvr::cfg().iron_highway_debug)
+        std::cerr << "[OptPlanner] Iron highway: " << IronHighway::NUM_CELLS
+                  << " cells, " << count << " direction constraints (cost=" << forbid_cost << ")\n";
 }
 
 } // namespace optsvr
