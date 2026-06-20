@@ -112,7 +112,13 @@ bool causalPIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
 				if (dir == 1 && (forbid & 8)) blocked = true;   // S blocked
 				if (dir == 2 && (forbid & 1)) blocked = true;   // W blocked
 				if (dir == 3 && (forbid & 4)) blocked = true;   // N blocked
-				if (blocked) continue;
+				if (blocked) {
+				    if (optsvr::IRON_HIGHWAY_PIBT_PENALTY > 0) {
+				        int penalty_h = get_gp_h(lns, curr_id, neighbor) + optsvr::IRON_HIGHWAY_PIBT_PENALTY;
+				        successors.emplace_back(neighbor, penalty_h, -1, rand());
+				    }
+				    continue;
+				}
 			}
 		}
 

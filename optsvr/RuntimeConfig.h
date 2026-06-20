@@ -209,12 +209,6 @@ struct RuntimeConfig {
     float iron_lane_exit_priority;
     float iron_lane_buffer_penalty;
 
-    // Iron highway
-    int   iron_highway_enabled;
-    int   iron_highway_forbid_cost;
-    float iron_highway_pibt_boost;
-    int   iron_highway_debug;
-
     // Iron future flow
     float iron_future_flow_w;
     float iron_future_flow_k;
@@ -460,12 +454,6 @@ struct RuntimeConfig {
         iron_lane_exit_buffer_radius = read_int("IRON_LANE_EXIT_BUFFER_RADIUS", IRON_LANE_EXIT_BUFFER_RADIUS);
         iron_lane_exit_priority = read_float("IRON_LANE_EXIT_PRIORITY", IRON_LANE_EXIT_PRIORITY);
         iron_lane_buffer_penalty = read_float("IRON_LANE_BUFFER_PENALTY", IRON_LANE_BUFFER_PENALTY);
-
-        // Iron highway
-        iron_highway_enabled    = read_int  ("IRON_HIGHWAY_ENABLED",       IRON_HIGHWAY_ENABLED);
-        iron_highway_forbid_cost= read_int  ("IRON_HIGHWAY_FORBID_COST",   IRON_HIGHWAY_FORBID_COST);
-        iron_highway_pibt_boost = read_float("IRON_HIGHWAY_PIBT_BOOST",    IRON_HIGHWAY_PIBT_BOOST);
-        iron_highway_debug      = read_int  ("IRON_HIGHWAY_DEBUG",         IRON_HIGHWAY_DEBUG);
 
         // Iron future flow
         iron_future_flow_w       = read_float("IRON_FUTURE_FLOW_W",       IRON_FUTURE_FLOW_W);
@@ -921,12 +909,6 @@ private:
         iron_lane_exit_buffer_radius = IRON_LANE_EXIT_BUFFER_RADIUS;
         iron_lane_exit_priority = IRON_LANE_EXIT_PRIORITY;
         iron_lane_buffer_penalty = IRON_LANE_BUFFER_PENALTY;
-
-        // Iron highway reset
-        iron_highway_enabled    = IRON_HIGHWAY_ENABLED;
-        iron_highway_forbid_cost= IRON_HIGHWAY_FORBID_COST;
-        iron_highway_pibt_boost = IRON_HIGHWAY_PIBT_BOOST;
-        iron_highway_debug      = IRON_HIGHWAY_DEBUG;
 
         // RoomPlanner / RoomExecutor 优化 (精简后仅保留有效参数)
         opt_room_flow_scale = OPT_ROOM_FLOW_SCALE;

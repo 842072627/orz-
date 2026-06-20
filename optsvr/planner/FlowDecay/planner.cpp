@@ -115,7 +115,7 @@ void OptPlanner::initialize(int preprocess_time_limit, SharedEnvironment* env)
     }
 
     // Iron harvest highway direction constraints
-    if (optsvr::cfg().iron_highway_enabled) {
+    if (IRON_HIGHWAY_ENABLED) {
         build_iron_highway(env);
     }
 
@@ -1304,8 +1304,8 @@ void OptPlanner::plan(int time_limit, std::vector<std::vector<Action>>& actions,
 
     // Iron highway PIBT boost: agents on highway cells get priority boost
     // (copy, doesn't pollute local_priority — fresh each tick)
-    if (optsvr::cfg().iron_highway_enabled && optsvr::cfg().iron_highway_pibt_boost > 0.0f) {
-        double boost = static_cast<double>(optsvr::cfg().iron_highway_pibt_boost);
+    if (IRON_HIGHWAY_ENABLED && IRON_HIGHWAY_PIBT_BOOST > 0.0f) {
+        double boost = static_cast<double>(IRON_HIGHWAY_PIBT_BOOST);
         for (int a = 0; a < env->num_of_agents; a++) {
             int loc = env->curr_states[a].location;
             if (loc < 0) continue;
@@ -1481,9 +1481,7 @@ void OptPlanner::build_row_column_highway(SharedEnvironment* env)
 void OptPlanner::build_iron_highway(SharedEnvironment* env)
 {
     if (env == nullptr) return;
-    if (!optsvr::cfg().iron_highway_enabled) return;
-
-    int forbid_cost = optsvr::cfg().iron_highway_forbid_cost;
+    if (!IRON_HIGHWAY_ENABLED) return;
 
     // Ensure extra_weights_ is sized correctly
     if (extra_weights_.size() != static_cast<size_t>(env->rows * env->cols)) {
@@ -1495,19 +1493,30 @@ void OptPlanner::build_iron_highway(SharedEnvironment* env)
     static constexpr int DIR_MAP[4] = {2, 0, 3, 1};  // mask_bit -> extra_weights dir
     
     int count = 0;
+    const int cols = env->cols;
     for (int i = 0; i < IronHighway::NUM_CELLS; i++) {
         const auto& c = IronHighway::kConstraints[i];
         if (c.loc < 0 || c.loc >= env->rows * env->cols) continue;
         uint8_t mask = c.forbid;
-        if (mask & 1)  { extra_weights_[c.loc][DIR_MAP[0]] = forbid_cost; count++; }  // forbid W → dir 2
-        if (mask & 2)  { extra_weights_[c.loc][DIR_MAP[1]] = forbid_cost; count++; }  // forbid E → dir 0
-        if (mask & 4)  { extra_weights_[c.loc][DIR_MAP[2]] = forbid_cost; count++; }  // forbid N → dir 3
-        if (mask & 8)  { extra_weights_[c.loc][DIR_MAP[3]] = forbid_cost; count++; }  // forbid S → dir 1
+        // Forbidden directions: high cost
+        if (mask & 1)  { extra_weights_[c.loc][DIR_MAP[0]] = IRON_HIGHWAY_FORBID_COST; count++; }
+        if (mask & 2)  { extra_weights_[c.loc][DIR_MAP[1]] = IRON_HIGHWAY_FORBID_COST; count++; }
+        if (mask & 4)  { extra_weights_[c.loc][DIR_MAP[2]] = IRON_HIGHWAY_FORBID_COST; count++; }
+        if (mask & 8)  { extra_weights_[c.loc][DIR_MAP[3]] = IRON_HIGHWAY_FORBID_COST; count++; }
+        // South exit (y=1019, x=1608-1617) westbound penalty: push agents toward north exit
+        if (IRON_HIGHWAY_SOUTH_PENALTY > 0) {
+            int x = c.loc % cols;
+            int y = c.loc / cols;
+            if (y == 1019 && x >= 1608 && x <= 1617) {
+                // Only penalize the WEST direction (extra_weights dir 2), which is the ALLOWED flow
+                extra_weights_[c.loc][2] += IRON_HIGHWAY_SOUTH_PENALTY;
+            }
+        }
     }
 
-    if (optsvr::cfg().iron_highway_debug)
+    if (IRON_HIGHWAY_DEBUG)
         std::cerr << "[OptPlanner] Iron highway: " << IronHighway::NUM_CELLS
-                  << " cells, " << count << " direction constraints (cost=" << forbid_cost << ")\n";
+                  << " cells, " << count << " direction constraints (cost=" << IRON_HIGHWAY_FORBID_COST << ")\n";
 }
 
 } // namespace optsvr
