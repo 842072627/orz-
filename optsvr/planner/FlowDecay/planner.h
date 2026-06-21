@@ -104,6 +104,11 @@ private:
     // Lane exit buffer zone: non-lane cells within EXIT_BUFFER_RADIUS of any lane cell
     std::vector<bool> lane_exit_buffer_;
 
+    // Highway stall tracking: how many consecutive ticks an agent is stuck on a highway cell
+    std::vector<int> highway_stall_ticks_;
+    // Previous locations for stall detection
+    std::vector<int> prev_locs_;
+
     // ---- Warehouse 通道定向 (WARE_DIRECT, DHFULL版: 80%阈值 + 软惩罚) ----
     std::vector<std::vector<int>> extra_weights_;  // [loc][direction] penalty
     void build_row_column_highway(SharedEnvironment* env);

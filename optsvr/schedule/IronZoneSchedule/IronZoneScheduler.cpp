@@ -5,6 +5,7 @@
 #include "RuntimeConfig.h"
 #include "lane_data.h"
 #include "lane_traffic_light.h"
+#include "iron_core_restrict.h"
 
 #include <algorithm>
 #include <chrono>
@@ -791,6 +792,11 @@ void IronZoneScheduler::schedule(int time_limit_ms,
             continue;
         }
         int finish = task.locations.back();
+        // Skip tasks in core non-highway area (prevents highway exit blocking)
+        if (optsvr::is_core_non_highway(finish)) {
+            stats.skipped_component++;
+            continue;
+        }
         int finish_zone = zone_of_loc(finish);
 
         if (assigned_tasks.find(tid) != assigned_tasks.end()) {

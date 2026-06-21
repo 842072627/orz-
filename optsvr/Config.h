@@ -260,10 +260,14 @@ constexpr int   IRON_OPPORTUNITY_CROSS = 0;
 constexpr int   IRON_HIGHWAY_ENABLED       = 1;       // 0=关闭, 1=开启
 constexpr int   IRON_HIGHWAY_FORBID_COST   = 100000;  // 禁止方向A*代价
 constexpr int   IRON_HIGHWAY_EXIT_COST     = 300;     // 出口区域禁止方向代价(比主高速小,方便进出)
-constexpr float IRON_HIGHWAY_PIBT_BOOST    = 500.0f;  // highway上agent移动优先级提升(0=关)
-constexpr int   IRON_HIGHWAY_SOUTH_PENALTY  = 35;      // 南口(1019)西行额外代价(平衡出口流量,0=关)
+constexpr float IRON_HIGHWAY_PIBT_BOOST    = 1000.0f;  // highway上agent移动优先级提升(0=关)
+constexpr int   IRON_HIGHWAY_STALL_BOOST   = 100;     // 卡住每tick额外优先级(0=关)
+constexpr int   IRON_HIGHWAY_STALL_MAX     = 5000;    // stall叠加上限
+constexpr int   IRON_HIGHWAY_SOUTH_PENALTY  = 15;      // 南口(1019)西行额外代价(平衡出口流量,0=关)
 constexpr int   IRON_HIGHWAY_PIBT_PENALTY  = 0;       // PIBT禁止方向策略: 0=跳过(硬拦), >0=加入但代价加成(防死锁)
-constexpr int   IRON_HIGHWAY_DEBUG         = 0;       // 0=静默, 1=打印
+constexpr int   IRON_HIGHWAY_DEBUG         = 1;       // 0=静默, 1=打印
+constexpr int   IRON_HIGHWAY_CLEAR_DECISION= 1;       // 每tick清空decision_残留(防2000tick卡死,0=关)
+constexpr int   IRON_HIGHWAY_FORCE_MOVE    = 1;       // 单方向highway cell强制移动(0=关,1=forward真空时跳过occupied)
 // ═══════════════════════════════════════════════════════════════════
 constexpr int   IRON_LANE_ENABLED      = 0;       // 0=关闭, 1=开启红绿灯
 constexpr int   IRON_LANE_GUARD_DIST   = 20;      // 统计agent的曼哈顿距离阈值

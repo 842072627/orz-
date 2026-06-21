@@ -131,6 +131,46 @@ bool causalPIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
 
 	successors.emplace_back(prev_loc, wait_heuristic,-1,rand());
 
+	// Debug: log PIBT state at target cells
+	const int cols = lns.env->cols;
+	const int cur_x = prev_loc % cols;
+	const int cur_y = prev_loc / cols;
+	if (optsvr::IRON_HIGHWAY_DEBUG &&
+	    ((cur_x == 1622 && cur_y == 1019) || (cur_x == 1623 && cur_y == 1019))) {
+	    int tick = lns.env->curr_timestep;
+	    int goal = lns.tasks.at(curr_id);
+	    int gx = goal % cols, gy = goal / cols;
+	    std::fprintf(stderr, "[PIBT_DBG] tick=%d agent=%d cell=(%d,%d) goal=(%d,%d) higher=%d\n",
+	        tick, curr_id, cur_x, cur_y, gx, gy, higher_id);
+	    // Show each neighbor's guide heuristic
+	    const char* dir_name[4] = {"E","S","W","N"};
+	    int d4[4] = {1, cols, -1, -cols};
+	    for (int di = 0; di < 4; di++) {
+	        int nb = prev_loc + d4[di];
+	        uint8_t fb = IronHighway::get_forbid_mask(prev_loc);
+	        bool hw_blocked = false;
+	        if (fb) {
+	            int dir_bit = (di == 0) ? 2 : (di == 1) ? 8 : (di == 2) ? 1 : 4;
+	            if (fb & dir_bit) hw_blocked = true;
+	        }
+	        int hval = -1;
+	        for (auto& s : successors) {
+	            if (s.location == nb) { hval = s.heuristic; break; }
+	        }
+	        std::fprintf(stderr, "  %s: loc=%d guide=%d hw_block=%d",
+	            dir_name[di], nb, hval, (int)hw_blocked);
+	        // Check occupancy
+	        if (occupied[nb]) std::fprintf(stderr, " occ=Y");
+	        if (decision[nb] != -1) std::fprintf(stderr, " dec=%d", decision[nb]);
+	        if (higher_id != -1 && prev_decision[nb] == higher_id) std::fprintf(stderr, " prev_match");
+	        std::fprintf(stderr, "\n");
+	    }
+	    // Wait heuristic
+	    int wait_h = wait_heuristic;
+	    std::fprintf(stderr, "  W: guide=%d occ=%d dec=%d\n",
+	        wait_h, (int)occupied[prev_loc], decision[prev_loc]);
+	}
+
 
 	std::sort(successors.begin(), successors.end(), 
 		[&](const PIBT_C& a, const PIBT_C& b)
@@ -146,7 +186,42 @@ bool causalPIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
 			}
 			return a.heuristic < b.heuristic; 
 		});
-
+	
+	// Highway force move: single-direction cell, target free → force move (skip occupied/decision checks)
+	if (optsvr::IRON_HIGHWAY_ENABLED && optsvr::IRON_HIGHWAY_FORCE_MOVE) {
+		uint8_t forbid = IronHighway::get_forbid_mask(prev_loc);
+		if (forbid == 7 || forbid == 11 || forbid == 13 || forbid == 14) {
+			for (auto& s : successors) {
+				if (s.location == prev_loc) continue;  // skip wait
+				int delta = s.location - prev_loc;
+				int dir = (delta == 1) ? 0 : (delta == -1) ? 2 : (delta == lns.env->cols) ? 1 : 3;
+				// Check if successor is in the highway-allowed direction
+				bool hw_allow = false;
+				if (dir == 0 && !(forbid & 2)) hw_allow = true;
+				if (dir == 1 && !(forbid & 8)) hw_allow = true;
+				if (dir == 2 && !(forbid & 1)) hw_allow = true;
+				if (dir == 3 && !(forbid & 4)) hw_allow = true;
+				if (!hw_allow) continue;
+				// Target free if: no occupant, or occupant already moved away
+				int occupant = prev_decision[s.location];
+				bool target_free = (occupant == -1 || occupant == curr_id);
+				if (!target_free && next_states[occupant].location != -1 &&
+				    next_states[occupant].location != s.location) {
+					target_free = true;  // occupant moved elsewhere, target is empty
+				}
+				if (target_free) {
+					next_states.at(curr_id) = State(s.location, -1, -1);
+					decision.at(s.location) = curr_id;
+					if (optsvr::IRON_HIGHWAY_DEBUG) {
+						std::fprintf(stderr, "[HW_FORCE] tick=%d agent=%d from=%d to=%d\n",
+							lns.env->curr_timestep, curr_id, prev_loc, s.location);
+					}
+					return true;
+				}
+				break;  // only check first (best-heuristic) highway-allowed successor
+			}
+		}
+	}
 
     for (auto& next: successors){
 		if(occupied[next.location] && !(higher_id == -1 && prev_loc == next.location))

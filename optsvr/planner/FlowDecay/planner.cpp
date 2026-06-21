@@ -252,6 +252,10 @@ void OptPlanner::setup_multistep_episode_state(
     prev_decision_.clear();
     prev_decision_.resize(env->map.size(), -1);
 
+    // Init highway stall tracking
+    highway_stall_ticks_.assign(env->num_of_agents, 0);
+    prev_locs_.assign(env->num_of_agents, -1);
+
     for (int i = 0; i < env->num_of_agents; i++) {
         // 设置 task
         if (env->goal_locations[i].empty()) {
@@ -595,38 +599,60 @@ void OptPlanner::run_multistep_pibt_once(
     std::sort(ids_.begin(), ids_.end(), [&](int a, int b) {
         double pa = local_priority.at(a);
         double pb = local_priority.at(b);
-        int lock = IronLane::g_lane_lock_dir;
-        double exit_bonus = cfg().iron_lane_exit_priority;
-        double buf_penalty = cfg().iron_lane_buffer_penalty;
-        // Lane exit: agent in lane, goal not in lane → +exit_bonus
-        if (!env->goal_locations[a].empty() &&
-            IronLane::is_lane_cell(env->curr_states[a].location) &&
-            !IronLane::is_lane_cell(env->goal_locations[a].front().first))
-            pa += exit_bonus;
-        if (!env->goal_locations[b].empty() &&
-            IronLane::is_lane_cell(env->curr_states[b].location) &&
-            !IronLane::is_lane_cell(env->goal_locations[b].front().first))
-            pb += exit_bonus;
-        // Buffer penalty: agent in buffer zone, going counterflow → -buf_penalty
-        if (lock != 0) {
-            for (auto* p : {&pa, &pb}) {
-                int id = (p == &pa) ? a : b;
-                if (env->goal_locations[id].empty()) continue;
-                int loc = env->curr_states[id].location;
-                if (loc < 0 || loc >= (int)lane_exit_buffer_.size()) continue;
-                if (!lane_exit_buffer_[loc]) continue;
-                int ga = env->goal_locations[id].front().first;
-                int gc = IronLane::get_component(ga);
-                int ac = IronLane::get_component(loc);
-                if (ac == gc) continue;  // same side, no crossing
-                int dir = (gc == 2) ? 1 : -1;
-                if (dir != lock) *p -= buf_penalty;  // counterflow → penalize
+        // Highway exit (1616, 993) max priority — no one blocks the exit
+        constexpr int HW_EXIT_LOC = 1789016;
+        if (env->curr_states[a].location == HW_EXIT_LOC) pa = 1e9;
+        if (env->curr_states[b].location == HW_EXIT_LOC) pb = 1e9;
+        // Highway PIBT boost: agents on highway cells get priority boost
+        if (IRON_HIGHWAY_PIBT_BOOST > 0.0f) {
+            uint8_t fba = IronHighway::get_forbid_mask(env->curr_states[a].location);
+            if (fba != 0 && fba != 15) pa += static_cast<double>(IRON_HIGHWAY_PIBT_BOOST);
+            uint8_t fbb = IronHighway::get_forbid_mask(env->curr_states[b].location);
+            if (fbb != 0 && fbb != 15) pb += static_cast<double>(IRON_HIGHWAY_PIBT_BOOST);
+        }
+        if (optsvr::cfg().iron_lane_enabled) {
+            int lock = IronLane::g_lane_lock_dir;
+            double exit_bonus = cfg().iron_lane_exit_priority;
+            double buf_penalty = cfg().iron_lane_buffer_penalty;
+            // Lane exit: agent in lane, goal not in lane → +exit_bonus
+            if (!env->goal_locations[a].empty() &&
+                IronLane::is_lane_cell(env->curr_states[a].location) &&
+                !IronLane::is_lane_cell(env->goal_locations[a].front().first))
+                pa += exit_bonus;
+            if (!env->goal_locations[b].empty() &&
+                IronLane::is_lane_cell(env->curr_states[b].location) &&
+                !IronLane::is_lane_cell(env->goal_locations[b].front().first))
+                pb += exit_bonus;
+            // Buffer penalty: agent in buffer zone, going counterflow → -buf_penalty
+            if (lock != 0) {
+                for (auto* p : {&pa, &pb}) {
+                    int id = (p == &pa) ? a : b;
+                    if (env->goal_locations[id].empty()) continue;
+                    int loc = env->curr_states[id].location;
+                    if (loc < 0 || loc >= (int)lane_exit_buffer_.size()) continue;
+                    if (!lane_exit_buffer_[loc]) continue;
+                    int ga = env->goal_locations[id].front().first;
+                    int gc = IronLane::get_component(ga);
+                    int ac = IronLane::get_component(loc);
+                    if (ac == gc) continue;
+                    int dir = (gc == 2) ? 1 : -1;
+                    if (dir != lock) *p -= buf_penalty;
+                }
             }
         }
         return pa > pb;
     });
 
     std::fill(occupied_.begin(), occupied_.end(), false);
+    // Clear stale decision_ entries if configured (prevents 2000+tick stalls from accumulated claims)
+    if (IRON_HIGHWAY_CLEAR_DECISION) {
+        std::fill(decision_.begin(), decision_.end(), -1);
+        for (int i : ids_) {
+            if (decided_[i].state == DONE::NOT_DONE) {
+                decision_.at(decided_[i].loc) = i;
+            }
+        }
+    }
 
     for (int i : ids_) {
         if (decided_[i].state == DONE::NOT_DONE) {
@@ -1302,17 +1328,49 @@ void OptPlanner::plan(int time_limit, std::vector<std::vector<Action>>& actions,
         }
     }
 
-    // Iron highway PIBT boost: agents on highway cells get priority boost
+    // Iron highway PIBT boost + stall detection
     // (copy, doesn't pollute local_priority — fresh each tick)
-    if (IRON_HIGHWAY_ENABLED && IRON_HIGHWAY_PIBT_BOOST > 0.0f) {
-        double boost = static_cast<double>(IRON_HIGHWAY_PIBT_BOOST);
+    if (IRON_HIGHWAY_ENABLED) {
+        double base_boost = static_cast<double>(IRON_HIGHWAY_PIBT_BOOST);
         for (int a = 0; a < env->num_of_agents; a++) {
             int loc = env->curr_states[a].location;
             if (loc < 0) continue;
             uint8_t forbid = IronHighway::get_forbid_mask(loc);
-            if (forbid == 0) continue;    // not on a highway cell
-            if (forbid == 15) continue;    // all 4 blocked (shouldn't happen)
-            pibt_priority[a] += boost;
+            if (forbid == 0 || forbid == 15) {
+                // Not on highway or all blocked: reset stall count
+                highway_stall_ticks_[a] = 0;
+                prev_locs_[a] = loc;
+                continue;
+            }
+            // On a highway cell: check if stalled
+            if (prev_locs_[a] == loc) {
+                // Same position as last tick → stalled
+                highway_stall_ticks_[a] = std::min(
+                    highway_stall_ticks_[a] + 1,
+                    IRON_HIGHWAY_STALL_MAX / std::max(IRON_HIGHWAY_STALL_BOOST, 1));
+            } else {
+                // Moved → reset stall
+                highway_stall_ticks_[a] = 0;
+            }
+            prev_locs_[a] = loc;
+            // Apply boost
+            pibt_priority[a] += base_boost;
+            if (IRON_HIGHWAY_STALL_BOOST > 0 && highway_stall_ticks_[a] > 0) {
+                pibt_priority[a] += static_cast<double>(
+                    highway_stall_ticks_[a] * IRON_HIGHWAY_STALL_BOOST);
+                if (pibt_priority[a] > base_boost + IRON_HIGHWAY_STALL_MAX)
+                    pibt_priority[a] = base_boost + IRON_HIGHWAY_STALL_MAX;
+            }
+            // Debug: log agents stuck at specific cells
+            if (IRON_HIGHWAY_DEBUG && highway_stall_ticks_[a] >= 50) {
+                int x = loc % env->cols;
+                int y = loc / env->cols;
+                if ((x == 1622 && y == 1019) || (x == 1623 && y == 1019)) {
+                    std::fprintf(stderr, "[HWstall] tick=%d agent=%d loc=(%d,%d) stall=%d prio=%.0f forbid=%d\n",
+                        env->curr_timestep, a, x, y, highway_stall_ticks_[a],
+                        pibt_priority[a], forbid);
+                }
+            }
         }
     }
 

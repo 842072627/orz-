@@ -1,5 +1,4 @@
 #pragma once
-// Auto-generated iron harvest highway direction constraints
 // 440 highway cells with per-direction forbid masks
 // Mask bits: 1=W, 2=E, 4=N, 8=S
 // Generated from iron_cell_dirs-highway.json
@@ -9,10 +8,7 @@ namespace IronHighway {
 
 constexpr int NUM_CELLS = 440;
 
-struct CellConstraint {
-    int loc;        // map cell index
-    uint8_t forbid; // bitmask: 1=W, 2=E, 4=N, 8=S
-};
+struct CellConstraint { int loc; uint8_t forbid; };
 
 constexpr CellConstraint kConstraints[NUM_CELLS] = {
     {1785416, 5},
@@ -457,18 +453,12 @@ constexpr CellConstraint kConstraints[NUM_CELLS] = {
     {1909621, 9},
 };
 
-// Get forbid mask for a cell (0 = no constraints)
-// NOTE: kConstraints MUST be sorted by loc for binary search
 inline uint8_t get_forbid_mask(int loc) {
     int lo = 0, hi = NUM_CELLS - 1;
     while (lo <= hi) {
         int mid = (lo + hi) / 2;
-        if (kConstraints[mid].loc == loc)
-            return kConstraints[mid].forbid;
-        if (kConstraints[mid].loc < loc)
-            lo = mid + 1;
-        else
-            hi = mid - 1;
+        if (kConstraints[mid].loc == loc) return kConstraints[mid].forbid;
+        if (kConstraints[mid].loc < loc) lo = mid + 1; else hi = mid - 1;
     }
     return 0;
 }
