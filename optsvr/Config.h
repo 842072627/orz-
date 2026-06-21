@@ -268,6 +268,7 @@ constexpr int   IRON_HIGHWAY_PIBT_PENALTY  = 0;       // PIBT禁止方向策略:
 constexpr int   IRON_HIGHWAY_DEBUG         = 1;       // 0=静默, 1=打印
 constexpr int   IRON_HIGHWAY_CLEAR_DECISION= 1;       // 每tick清空decision_残留(防2000tick卡死,0=关)
 constexpr int   IRON_HIGHWAY_FORCE_MOVE    = 1;       // 单方向highway cell强制移动(0=关,1=forward真空时跳过occupied)
+constexpr int   IRON_HIGHWAY_GUIDE_PENALTY = 100000;  // 入口引导惩罚(0=关): 93个guide cell错误方向代价
 // ═══════════════════════════════════════════════════════════════════
 constexpr int   IRON_LANE_ENABLED      = 0;       // 0=关闭, 1=开启红绿灯
 constexpr int   IRON_LANE_GUARD_DIST   = 20;      // 统计agent的曼哈顿距离阈值

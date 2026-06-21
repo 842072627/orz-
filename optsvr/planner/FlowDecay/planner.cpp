@@ -15,6 +15,7 @@ extern int g_wait_cycle;
 #include "lane_data.h"
 #include "lane_traffic_light.h"
 #include "iron_highway.h"
+#include "iron_highway_guide.h"
 // OptPlan 命名空间下的副本（从 default_planner 复制，可自由修改）
 #include "heuristics.h"
 #include "flow.h"
@@ -1575,6 +1576,21 @@ void OptPlanner::build_iron_highway(SharedEnvironment* env)
     if (IRON_HIGHWAY_DEBUG)
         std::cerr << "[OptPlanner] Iron highway: " << IronHighway::NUM_CELLS
                   << " cells, " << count << " direction constraints (cost=" << IRON_HIGHWAY_FORBID_COST << ")\n";
+
+    // Entry/exit guide penalties: penalize wrong EW direction at 93 gate-adjacent cells
+    if (IRON_HIGHWAY_GUIDE_PENALTY > 0) {
+        int guide_count = 0;
+        uint8_t ew_dir;
+        for (int i = 0; i < IRON_HIGHWAY_GUIDE_COUNT; i++) {
+            const auto& g = kHighwayGuide[i];
+            if (g.loc < 0 || g.loc >= env->rows * env->cols) continue;
+            extra_weights_[g.loc][g.ew_dir] += IRON_HIGHWAY_GUIDE_PENALTY;
+            guide_count++;
+        }
+        if (IRON_HIGHWAY_DEBUG)
+            std::cerr << "[OptPlanner] Guide penalty: " << guide_count
+                      << " cells (cost=" << IRON_HIGHWAY_GUIDE_PENALTY << ")\n";
+    }
 }
 
 } // namespace optsvr
