@@ -63,6 +63,7 @@ class TrajLNS{
     std::vector<std::pair<int,int>> deviation_agents;
 
     std::vector<Int4> flow;
+    std::vector<Int4> flow_opp;
     // std::vector<HeuristicTable>& heuristics;
     std::unordered_map<int, HeuristicTable>& heuristics;
     std::vector<Dist2Path> traj_dists;
@@ -86,7 +87,7 @@ class TrajLNS{
         env(env),
         trajs(env->num_of_agents),
         tasks(env->num_of_agents),
-        flow(env->map.size(),Int4({0,0,0,0})), heuristics(heuristics),
+        flow(env->map.size(),Int4({0,0,0,0})), flow_opp(env->map.size(),Int4({0,0,0,0})), heuristics(heuristics),
         traj_dists(env->num_of_agents),goal_nodes(env->num_of_agents),
         fw_metrics(env->num_of_agents),neighbors(neighbors){
         };

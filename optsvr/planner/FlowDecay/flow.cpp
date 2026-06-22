@@ -28,6 +28,7 @@ void remove_traj(TrajLNS& lns, int agent){
     }
     int loc, prev_loc, diff, d, to;
     float decay = optsvr::cfg().flow_decay;
+    float decay_opp = optsvr::FLOW_DECAY_OPPOSITE;
     int   scale = optsvr::cfg().flow_decay_scale;
 
     to = lns.trajs[agent].size();
@@ -39,6 +40,8 @@ void remove_traj(TrajLNS& lns, int agent){
         d = get_d(diff, lns.env);
 
         lns.flow[prev_loc].d[d] -= flow_weight(j, decay, scale);
+        if (decay_opp < 1.0f)
+            lns.flow_opp[prev_loc].d[d] -= flow_weight(j, decay_opp, scale);
     }
 }
 
@@ -53,6 +56,7 @@ void add_traj(TrajLNS& lns, int agent){
     }
     int loc, prev_loc, diff, d;
     float decay = optsvr::cfg().flow_decay;
+    float decay_opp = optsvr::FLOW_DECAY_OPPOSITE;
     int   scale = optsvr::cfg().flow_decay_scale;
 
     for (int j = 1; j < (int)lns.trajs[agent].size(); j++){
@@ -62,6 +66,8 @@ void add_traj(TrajLNS& lns, int agent){
         d = get_d(diff, lns.env);
 
         lns.flow[prev_loc].d[d] += flow_weight(j, decay, scale);
+        if (decay_opp < 1.0f)
+            lns.flow_opp[prev_loc].d[d] += flow_weight(j, decay_opp, scale);
     }
 }
 
@@ -182,7 +188,8 @@ bool update_traj(TrajLNS& lns, int i, const TimePoint* deadline,
 
     s_node goal_node = astar(lns.env, lns.flow, lns.heuristics[goal],
                              lns.trajs[i], lns.mem, start, goal,
-                             &(lns.neighbors), deadline, extra_weights);
+                             &(lns.neighbors), deadline, extra_weights,
+                             &lns.flow_opp);
     if (goal_node.id == -1){
         return false;
     }

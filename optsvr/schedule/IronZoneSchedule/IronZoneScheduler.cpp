@@ -6,6 +6,8 @@
 #include "lane_data.h"
 #include "lane_traffic_light.h"
 #include "iron_core_restrict.h"
+#include "iron_highway.h"
+#include "iron_highway_guide.h"
 
 #include <algorithm>
 #include <chrono>
@@ -611,14 +613,14 @@ void IronZoneScheduler::print_round_stats(const RoundStats& s, int tick) const {
     int busy_after = s.busy_before + s.assigned;
 
     std::fprintf(stderr,
-        "[IronZone] tick=%d phase=%.2f variant=%d target=%d(base=%d) freeA=%d freeT=%d assigned=%d busy=%d unmatched=%d opp(cap=%d,extra=%d,reject=%d) avgDist=%.1f avgLen=%.1f avgComp=%.1f cross=%.1f%% avgZ=%.2f shortage(start=%.1f,finish=%.1f,gain=%.1f,zones=%d) pool(short=%d,starved=%d) skip(comp=%d,empty=%d,quota=%d,gate=%d) freeLen(<=500=%d,<=1000=%d,<=1500=%d,>1500=%d) assignLen(<=500=%d,<=1000=%d,<=1500=%d,>1500=%d) assignDist(<=50=%d,<=150=%d,>150=%d) long>=%d=%.1f%% cand=%.1f opt(rounds=%d,seed=%d,replace=%d,swap=%d) heap(pops=%d,skip=%d,fb=%d,gfb=%d) time(build=%.1fms,solve=%.1fms)\n",
+        "[IronZone] tick=%d phase=%.2f variant=%d target=%d(base=%d) freeA=%d freeT=%d assigned=%d busy=%d unmatched=%d opp(cap=%d,extra=%d,reject=%d) avgDist=%.1f avgLen=%.1f avgComp=%.1f cross=%.1f%% avgZ=%.2f shortage(start=%.1f,finish=%.1f,gain=%.1f,zones=%d) pool(short=%d,starved=%d) skip(comp=%d,empty=%d,quota=%d,gate=%d,highway=%d) freeLen(<=500=%d,<=1000=%d,<=1500=%d,>1500=%d) assignLen(<=500=%d,<=1000=%d,<=1500=%d,>1500=%d) assignDist(<=50=%d,<=150=%d,>150=%d) long>=%d=%.1f%% cand=%.1f opt(rounds=%d,seed=%d,replace=%d,swap=%d) heap(pops=%d,skip=%d,fb=%d,gfb=%d) time(build=%.1fms,solve=%.1fms)\n",
         tick, s.early_phase, s.assign_variant, s.target_active, s.base_target_active,
         s.free_agents, s.free_tasks, s.assigned, busy_after, s.unmatched_agents,
         s.opportunity_cap, s.opportunity_assigned, s.opportunity_rejected,
         avg_dist, avg_len, avg_completion, cross_pct, avg_zd,
         avg_start_shortage, avg_finish_shortage, avg_migration_gain,
         s.starved_zones, s.short_pool, s.starved_pool,
-        s.skipped_component, s.candidate_empty_agents, s.quota_skips, s.gate_skips,
+        s.skipped_component, s.candidate_empty_agents, s.quota_skips, s.gate_skips, s.skipped_highway_agent,
         s.free_len_short, s.free_len_mid, s.free_len_long, s.free_len_huge,
         s.assign_len_short, s.assign_len_mid, s.assign_len_long, s.assign_len_huge,
         s.assign_dist_near, s.assign_dist_mid, s.assign_dist_far,
@@ -763,6 +765,11 @@ void IronZoneScheduler::schedule(int time_limit_ms,
         int tid = schedule_snapshot_[a];
         if (tid < 0) {
             int loc = curr_locations_snapshot_[a];
+            // 禁止highway上的agent分配新任务
+            if (optsvr::IRON_HIGHWAY_FREEZE_ASSIGN && loc >= 0 && IronHighway::get_forbid_mask(loc) != 0) {
+                stats.skipped_highway_agent++;
+                continue;
+            }
             int z = zone_of_loc(loc);
             int comp = component_of_loc(loc);
             if (loc >= 0 && loc < map_size_ && z >= 0 && comp >= 0) {
@@ -792,10 +799,40 @@ void IronZoneScheduler::schedule(int time_limit_ms,
             continue;
         }
         int finish = task.locations.back();
-        // Skip tasks in core non-highway area (prevents highway exit blocking)
-        if (optsvr::is_core_non_highway(finish)) {
+        // Skip tasks whose FINISH is in core non-highway area
+        if (optsvr::IRON_CORE_TASK_FILTER && optsvr::is_core_non_highway(finish)) {
             stats.skipped_component++;
             continue;
+        }
+        // Also check ALL remaining locations (not just finish)
+        if (optsvr::IRON_CORE_TASK_FILTER) {
+            bool any_restricted = false;
+            for (int li = idx; li < static_cast<int>(task.locations.size()); li++) {
+                if (optsvr::is_core_non_highway(task.locations[li])) {
+                    any_restricted = true;
+                    break;
+                }
+            }
+            if (any_restricted) {
+                stats.skipped_component++;
+                continue;
+            }
+        }
+        // 过滤highway+guide上的任务：路点在highway/guide cell上就不分配
+        if (optsvr::IRON_HIGHWAY_SKIP_TASK) {
+            bool on_highway = false;
+            for (int li = idx; li < static_cast<int>(task.locations.size()); li++) {
+                int loc = task.locations[li];
+                uint8_t dummy;
+                if (IronHighway::get_forbid_mask(loc) != 0 || optsvr::get_highway_guide(loc, dummy)) {
+                    on_highway = true;
+                    break;
+                }
+            }
+            if (on_highway) {
+                stats.skipped_component++;
+                continue;
+            }
         }
         int finish_zone = zone_of_loc(finish);
 

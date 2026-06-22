@@ -269,6 +269,9 @@ constexpr int   IRON_HIGHWAY_DEBUG         = 1;       // 0=静默, 1=打印
 constexpr int   IRON_HIGHWAY_CLEAR_DECISION= 1;       // 每tick清空decision_残留(防2000tick卡死,0=关)
 constexpr int   IRON_HIGHWAY_FORCE_MOVE    = 1;       // 单方向highway cell强制移动(0=关,1=forward真空时跳过occupied)
 constexpr int   IRON_HIGHWAY_GUIDE_PENALTY = 100000;  // 入口引导惩罚(0=关): 93个guide cell错误方向代价
+constexpr int   IRON_CORE_TASK_FILTER = 1;    // 禁止分配任务到core非highway格(0=关,1=开启)
+constexpr int   IRON_HIGHWAY_FREEZE_ASSIGN = 1; // 禁止highway上的agent分配新任务(0=关,1=在highway上不分配)
+constexpr int   IRON_HIGHWAY_SKIP_TASK    = 1;    // 过滤highway+guide上的任务(0=关,1=开启)
 // ═══════════════════════════════════════════════════════════════════
 constexpr int   IRON_LANE_ENABLED      = 0;       // 0=关闭, 1=开启红绿灯
 constexpr int   IRON_LANE_GUARD_DIST   = 20;      // 统计agent的曼哈顿距离阈值
@@ -340,11 +343,12 @@ constexpr int   OPT_TIDAL_CORRIDOR_FORWARD_BONUS = 15; // 通道前进方向heur
 // FlowDecay 专属（PLANNER_MODE=1）
 // ═══════════════════════════════════════════════════════════════════
 constexpr float FLOW_DECAY       = 0.9f;      // 边流量衰减系数
+constexpr float FLOW_DECAY_OPPOSITE = 0.99f;   // 逆流衰减系数(>=1.0=关闭,越小衰减越快)
 constexpr int   FLOW_DECAY_SCALE = 100;        // 放大因子
 constexpr bool  WARE_DIRECT      = false;      // Warehouse 通道定向策略开关
 constexpr bool  OPT_PIBT_FORWARD_BREAK_TIE = true; // PIBT候选heuristic相等时优先FW
 constexpr int   GUIDE_FLOW_OPPOSITE_W = 1;    // 逆流惩罚倍数(1=原版行为)
-constexpr int   GUIDE_FLOW_SAME_W     = 3;    // 顺流奖励(0=关闭, >0时A*选人多方向)
+constexpr int   GUIDE_FLOW_SAME_W     = 1.3;    // 顺流奖励(0=关闭, >0时A*选人多方向)
 
 // ═══════════════════════════════════════════════════════════════════
 // 距离矩阵预计算（共用）

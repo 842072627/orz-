@@ -15,7 +15,8 @@ namespace OptPlan{
 s_node astar(SharedEnvironment* env, std::vector<Int4>& flow,
     HeuristicTable& ht, Traj& traj,
     MemoryPool& mem, int start, int goal, Neighbors* ns, const TimePoint* deadline = nullptr,
-    const std::vector<std::vector<int>>* extra_weights = nullptr);
+    const std::vector<std::vector<int>>* extra_weights = nullptr,
+    std::vector<Int4>* flow_opp = nullptr);
 }
 
 #endif

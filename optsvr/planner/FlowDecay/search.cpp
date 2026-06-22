@@ -44,7 +44,8 @@ static inline int compute_h(SharedEnvironment* env, int loc, int goal,
 s_node astar(SharedEnvironment* env, std::vector<Int4>& flow,
     HeuristicTable& ht, Traj& traj,
     MemoryPool& mem, int start, int goal, Neighbors* ns, const TimePoint* deadline,
-    const std::vector<std::vector<int>>* extra_weights)
+    const std::vector<std::vector<int>>* extra_weights,
+    std::vector<Int4>* flow_opp)
 {
     mem.reset();
 
@@ -131,7 +132,10 @@ s_node astar(SharedEnvironment* env, std::vector<Int4>& flow,
 
 
             int flow_same = unscale_flow(flow[curr->id].d[d]) + 1;
-            int flow_opposite = unscale_flow(flow[next].d[(d+2)%4]);
+            // Use flow_opp grid for opposite traffic (slower decay = longer-range awareness)
+            int flow_opposite = (flow_opp != nullptr)
+                ? unscale_flow((*flow_opp)[next].d[(d+2)%4])
+                : unscale_flow(flow[next].d[(d+2)%4]);
             temp_op = flow_same * flow_opposite;
             int same_w = optsvr::cfg().guide_flow_same_w;
             int opp_w  = optsvr::cfg().guide_flow_opposite_w;
