@@ -294,7 +294,7 @@ constexpr float IRON_FUTURE_FLOW_K        = 1.0f;   // 流量基数乘子
 constexpr float IRON_FUTURE_FLOW_DECAY    = 0.01f;  // 1/(1+d*decay)
 constexpr int   IRON_FUTURE_FLOW_ZONE_ROWS = 64;    // ff内部zone网格行数
 constexpr int   IRON_FUTURE_FLOW_ZONE_COLS = 64;    // ff内部zone网格列数
-constexpr float IRON_FUTURE_FLOW_LOCK_TH  = 35.0f;  // 方向锁阈值(0=关): 逆流流量>=此值则拦
+constexpr float IRON_FUTURE_FLOW_LOCK_TH  = 50.0f;  // 方向锁阈值(0=关): 逆流流量>=此值则拦
 constexpr float IRON_FUTURE_FLOW_CONGEST_CAP = 300.0f; // 拥塞上限: zone总流>=此值则穿过的任务无论方向一律拦
 // ═══════════════════════════════════════════════════════════════════
 // ---- Planner: flow_scale覆盖(仅room) ----
