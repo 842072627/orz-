@@ -344,7 +344,7 @@ constexpr int   OPT_TIDAL_CORRIDOR_FORWARD_BONUS = 15; // 通道前进方向heur
 // FlowDecay 专属（PLANNER_MODE=1）
 // ═══════════════════════════════════════════════════════════════════
 constexpr float FLOW_DECAY       = 0.9f;      // 边流量衰减系数
-constexpr float FLOW_DECAY_OPPOSITE = 1.0f;   // 逆流衰减系数(>=1.0=关闭,越小衰减越快)
+constexpr float FLOW_DECAY_OPPOSITE = 0.99f;   // 逆流衰减系数(>=1.0=关闭,越小衰减越快)
 constexpr int   FLOW_DECAY_SCALE = 100;        // 放大因子
 constexpr bool  WARE_DIRECT      = false;
 constexpr bool  OPT_PIBT_FORWARD_BREAK_TIE = true; // PIBT候选heuristic相等时优先FW
