@@ -1,79 +1,40 @@
 #include "TaskScheduler.h"
+
 #include "scheduler.h"
 #include "const.h"
-#include "RuntimeConfig.h"
-#include "MapProfile.h"
-#include "MapTuner.h"
-#include "HeuristicMatrix.h"
-#include "IronZoneScheduler.h"
-#include "PerfLogger.h"
-#include <cstdlib>
 
-void sigint_handler(int);
-
-static optsvr::IronZoneScheduler g_ironzone_scheduler;
-static bool g_config_loaded = false;
-
+/**
+ * Initializes the task scheduler with a given time limit for preprocessing.
+ * 
+ * This function prepares the task scheduler by allocating up to half of the given preprocessing time limit 
+ * and adjust for a specified tolerance to account for potential timing errors. 
+ * It ensures that initialization does not exceed the allocated time.
+ * 
+ * @param preprocess_time_limit The total time limit allocated for preprocessing (in milliseconds).
+ *
+ */
 void TaskScheduler::initialize(int preprocess_time_limit)
 {
-    if (!g_config_loaded) {
-        optsvr::cfg().load_from_env();
-        g_config_loaded = true;
-    }
-
-    optsvr::perf().on_init_start();
-
-    // 地图识别 + MapTuner 调参
-    optsvr::map_profile() = optsvr::analyze_map(env);
-    optsvr::apply_map_tuning(optsvr::map_profile(), env);
-
-    // 非 iron 地图直接退出（本地只调 iron）
-    if (optsvr::map_profile().type != optsvr::MapType::IRON_HARVEST_DOMAIN) {
-        sigint_handler(1);
-        return;
-    }
-
-    // BFS 预计算（云端64GB可跑，本地用 OPT_PRECOMPUTE_HEURISTIC=0 关闭）
-    if (optsvr::cfg().precompute_heuristic && !optsvr::cfg().skip_test) {
-        auto now = std::chrono::steady_clock::now();
-        auto deadline = env->plan_start_time
-                      + std::chrono::milliseconds(preprocess_time_limit)
-                      - std::chrono::milliseconds(500);
-        if (deadline > now + std::chrono::milliseconds(100)) {
-            optsvr::heuristic_matrix().build(env, optsvr::cfg().num_threads, deadline,
-                                             optsvr::cfg().turn_aware_heuristic);
-        }
-    }
-
-    // IronZoneScheduler 初始化
-    if (optsvr::cfg().schedule_mode == 10) {
-        g_ironzone_scheduler.initialize(env, preprocess_time_limit);
-    }
-
-    if (optsvr::cfg().skip_test) {
-        optsvr::perf().on_init_end();
-        return;
-    }
-
+    //give at most half of the entry time_limit to scheduler;
+    //-SCHEDULER_TIMELIMIT_TOLERANCE for timing error tolerance
     int limit = preprocess_time_limit/2 - DefaultPlanner::SCHEDULER_TIMELIMIT_TOLERANCE;
-    DefaultPlanner::schedule_initialize(limit, env);
-
-    optsvr::perf().on_init_end();
+    DefaultPlanner::schedule_initialize(limit, env);    
 }
+
+/**
+ * Plans a task schedule within a specified time limit.
+ * 
+ * This function schedules tasks by calling shedule_plan function in default planner with half of the given time limit,
+ * adjusted for timing error tolerance. The planned schedule is output to the provided schedule vector.
+ * 
+ * @param time_limit The total time limit allocated for scheduling (in milliseconds).
+ * @param proposed_schedule A reference to a vector that will be populated with the proposed schedule (next task id for each agent).
+ */
 
 void TaskScheduler::plan(int time_limit, std::vector<int> & proposed_schedule)
 {
-    if (optsvr::cfg().skip_test) return;
-
-    optsvr::perf().on_round_begin();
-
+    //give at most half of the entry time_limit to scheduler;
+    //-SCHEDULER_TIMELIMIT_TOLERANCE for timing error tolerance
     int limit = time_limit/2 - DefaultPlanner::SCHEDULER_TIMELIMIT_TOLERANCE;
-
-    if (optsvr::cfg().schedule_mode == 10) {
-        g_ironzone_scheduler.schedule(limit, proposed_schedule, env);
-    } else {
-        DefaultPlanner::schedule_plan(limit, proposed_schedule, env);
-    }
-
-    optsvr::perf().on_schedule_done();
+    DefaultPlanner::schedule_plan(limit, proposed_schedule, env);
 }

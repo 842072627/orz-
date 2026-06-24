@@ -12,13 +12,7 @@ include_directories("inc")
 # default planner
 include_directories("default_planner")
 
-# optsvr iron modules
-include_directories("optsvr")
-include_directories("optsvr/schedule/IronZoneSchedule")
-include_directories("optsvr/planner/FlowDecay")
-
-file(GLOB SOURCES "src/*.cpp" "default_planner/*.cpp" "optsvr/*.cpp" "optsvr/schedule/IronZoneSchedule/*.cpp" "optsvr/planner/FlowDecay/*.cpp")
-list(REMOVE_ITEM SOURCES "${CMAKE_SOURCE_DIR}/src/sigint_stub.cpp")
+file(GLOB SOURCES "src/*.cpp" "default_planner/*.cpp")
 file(GLOB DEFAULT_PLANNER_SOURCES "default_planner/*.cpp")
 
 
@@ -90,7 +84,6 @@ if(BUILD_TESTS)
         tests/python_interface_test.cpp
         ${PY_BRIDGE_SOURCES}
         ${TEST_SOURCES}
-        src/sigint_stub.cpp  # sigint_handler for python_interface_test (driver.cpp excluded)
     )
     target_link_libraries(python_interface_test PRIVATE pybind11::embed ${Boost_LIBRARIES})
     add_test(NAME python_interface_test COMMAND python_interface_test
