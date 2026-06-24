@@ -597,6 +597,25 @@ void OptPlanner::run_multistep_pibt_once(
     SharedEnvironment* env, std::vector<double>& local_priority,
     std::vector<Action>& one_step_actions)
 {
+    // 预计算 highway agent 未来3步是否直行（用于转弯降优先级）
+    std::vector<bool> hw_straight(env->num_of_agents, false);
+    if (IRON_HIGHWAY_TURN_PENALTY > 0) {
+        for (int a = 0; a < env->num_of_agents; a++) {
+            const auto& traj = trajLNS_.trajs[a];
+            if (traj.size() < 4) continue;
+            int curr = env->curr_states[a].location;
+            if (curr < 0) continue;
+            int pos = -1;
+            for (int i = 0; i + 3 < (int)traj.size(); i++) {
+                if (traj[i] == curr) { pos = i; break; }
+            }
+            if (pos < 0) continue;
+            int d1 = get_d(traj[pos+1] - traj[pos], env);
+            int d2 = get_d(traj[pos+2] - traj[pos+1], env);
+            int d3 = get_d(traj[pos+3] - traj[pos+2], env);
+            if (d1 == d2 && d2 == d3) hw_straight[a] = true;
+        }
+    }
     std::sort(ids_.begin(), ids_.end(), [&](int a, int b) {
         double pa = local_priority.at(a);
         double pb = local_priority.at(b);
@@ -610,6 +629,13 @@ void OptPlanner::run_multistep_pibt_once(
             if (fba != 0 && fba != 15) pa += static_cast<double>(IRON_HIGHWAY_PIBT_BOOST);
             uint8_t fbb = IronHighway::get_forbid_mask(env->curr_states[b].location);
             if (fbb != 0 && fbb != 15) pb += static_cast<double>(IRON_HIGHWAY_PIBT_BOOST);
+        }
+        // 转弯降优先级：直行的优先于转弯的
+        if (IRON_HIGHWAY_TURN_PENALTY > 0) {
+            if (IronHighway::get_forbid_mask(env->curr_states[a].location) != 0 && !hw_straight[a])
+                pa -= static_cast<double>(IRON_HIGHWAY_TURN_PENALTY);
+            if (IronHighway::get_forbid_mask(env->curr_states[b].location) != 0 && !hw_straight[b])
+                pb -= static_cast<double>(IRON_HIGHWAY_TURN_PENALTY);
         }
         if (optsvr::cfg().iron_lane_enabled) {
             int lock = IronLane::g_lane_lock_dir;
@@ -930,6 +956,22 @@ void OptPlanner::plan(int time_limit, std::vector<std::vector<Action>>& actions,
 
     update_guide_paths_once_for_multistep(env, flow_end_time);
 
+    // Bypass-Raw-Debug: read flow at known highway cells right after guide path update
+    if (iron_map && IRON_HIGHWAY_DEBUG && pressure_stats_.tick >= 100 && pressure_stats_.tick <= 200) {
+        for (int ci = 0; ci < 10; ci++) {
+            int loc = IronHighway::kConstraints[ci].loc;
+            int forbid = IronHighway::kConstraints[ci].forbid;
+            std::fprintf(stderr, "[FlowRaw] tick=%d hi=%d loc=%d forbid=%d "
+                "flowE=%d flowS=%d flowW=%d flowN=%d "
+                "flowOppE=%d flowOppS=%d flowOppW=%d flowOppN=%d\n",
+                pressure_stats_.tick, ci, loc, forbid,
+                trajLNS_.flow[loc].d[0], trajLNS_.flow[loc].d[1],
+                trajLNS_.flow[loc].d[2], trajLNS_.flow[loc].d[3],
+                trajLNS_.flow_opp[loc].d[0], trajLNS_.flow_opp[loc].d[1],
+                trajLNS_.flow_opp[loc].d[2], trajLNS_.flow_opp[loc].d[3]);
+        }
+    }
+
     // Guide path gap diagnostic
     if (iron_map && optsvr::cfg().iron_lane_debug) {
         int still_need = 0;
@@ -951,6 +993,107 @@ void OptPlanner::plan(int time_limit, std::vector<std::vector<Action>>& actions,
                         / pressure_stats_.guide_required
                     : 0.0);
         }
+    }
+
+    // Flow debug: print raw (pre-unscale) flow values for highway cells at tick threshold
+    {
+        static int g_flow_debug_done = 0;
+        if (iron_map && IRON_HIGHWAY_DEBUG && !g_flow_debug_done && pressure_stats_.tick >= 1000) {
+            g_flow_debug_done = 1;
+        // Vertex flow: total flow through ALL walkable cells (sum of 4 directions)
+        // Per-step vertex_cost = sum(unscale(flow[d])) / 2 (from search.cpp line 157)
+        // We measure unscale_sum = sum(unscale_flow(flow[i].d[j])) for j=0..3
+        int s = optsvr::cfg().flow_decay_scale;
+        auto unscale = [s](int raw) -> int {
+            if (s <= 1) return raw;
+            return (raw + s / 2) / s;
+        };
+        int vtx_raw_buckets[10] = {0}; // raw sum of flow[d]
+        int vtx_unscale_buckets[10] = {0}; // unscale sum (what goes into vertex cost)
+        int vtx_unscale_opp_buckets[10] = {0}; // same for opp grid
+        int total_walkable = 0;
+        int max_raw_v = 0, max_opp_v = 0;
+        int max_unscale = 0, max_unscale_opp = 0;
+        long long sum_raw_v = 0, sum_raw_opp = 0;
+        long long sum_unscale = 0, sum_unscale_opp = 0;
+        int nonzero_unscale = 0, nonzero_unscale_opp = 0;
+        for (int i = 0; i < (int)env->map.size(); i++) {
+            if (env->map[i] == 1) continue; // obstacle
+            total_walkable++;
+            int raw_v = 0;
+            for (int d = 0; d < 4; d++) raw_v += trajLNS_.flow[i].d[d];
+            int raw_opp = 0;
+            for (int d = 0; d < 4; d++) raw_opp += trajLNS_.flow_opp[i].d[d];
+            sum_raw_v += raw_v; sum_raw_opp += raw_opp;
+            if (raw_v > max_raw_v) max_raw_v = raw_v;
+            if (raw_opp > max_opp_v) max_opp_v = raw_opp;
+            
+            int us = 0;
+            for (int d = 0; d < 4; d++) us += unscale(trajLNS_.flow[i].d[d]);
+            int us_opp = 0;
+            for (int d = 0; d < 4; d++) us_opp += unscale(trajLNS_.flow_opp[i].d[d]);
+            sum_unscale += us; sum_unscale_opp += us_opp;
+            if (us > max_unscale) max_unscale = us;
+            if (us_opp > max_unscale_opp) max_unscale_opp = us_opp;
+            if (us > 0) nonzero_unscale++;
+            if (us_opp > 0) nonzero_unscale_opp++;
+            
+            int idx = 9;
+            if (raw_v == 0) idx = 0;
+            else if (raw_v <= 10) idx = 1;
+            else if (raw_v <= 50) idx = 2;
+            else if (raw_v <= 100) idx = 3;
+            else if (raw_v <= 200) idx = 4;
+            else if (raw_v <= 500) idx = 5;
+            else if (raw_v <= 1000) idx = 6;
+            else if (raw_v <= 5000) idx = 7;
+            else idx = 8;
+            vtx_raw_buckets[idx]++;
+            
+            int uidx = 9;
+            if (us == 0) uidx = 0;
+            else if (us == 1) uidx = 1;
+            else if (us <= 3) uidx = 2;
+            else if (us <= 5) uidx = 3;
+            else if (us <= 10) uidx = 4;
+            else if (us <= 20) uidx = 5;
+            else if (us <= 50) uidx = 6;
+            else if (us <= 100) uidx = 7;
+            else uidx = 8;
+            vtx_unscale_buckets[uidx]++;
+            
+            int uidxo = 9;
+            if (us_opp == 0) uidxo = 0;
+            else if (us_opp == 1) uidxo = 1;
+            else if (us_opp <= 3) uidxo = 2;
+            else if (us_opp <= 5) uidxo = 3;
+            else if (us_opp <= 10) uidxo = 4;
+            else if (us_opp <= 20) uidxo = 5;
+            else if (us_opp <= 50) uidxo = 6;
+            else if (us_opp <= 100) uidxo = 7;
+            else uidxo = 8;
+            vtx_unscale_opp_buckets[uidxo]++;
+        }
+        std::fprintf(stderr, "[FlowVtx] tick=%d walkable=%d rawSum=%lld rawOppSum=%lld avgRaw=%lld avgRawOpp=%lld maxRaw=%d maxRawOpp=%d\n",
+            pressure_stats_.tick, total_walkable, sum_raw_v, sum_raw_opp,
+            total_walkable > 0 ? sum_raw_v / total_walkable : 0,
+            total_walkable > 0 ? sum_raw_opp / total_walkable : 0,
+            max_raw_v, max_opp_v);
+        std::fprintf(stderr, "[FlowVtx] usSum=%lld usOppSum=%lld avgUs=%lld avgUsOpp=%lld maxUs=%d maxUsOpp=%d nonzeroUs=%d nonzeroUsOpp=%d\n",
+            sum_unscale, sum_unscale_opp,
+            total_walkable > 0 ? sum_unscale / total_walkable : 0,
+            total_walkable > 0 ? sum_unscale_opp / total_walkable : 0,
+            max_unscale, max_unscale_opp, nonzero_unscale, nonzero_unscale_opp);
+        std::fprintf(stderr, "[FlowVtx] rawBuckets: 0=%d 1-10=%d 11-50=%d 51-100=%d 101-200=%d 201-500=%d 501-1k=%d 1k-5k=%d 5k+=%d\n",
+            vtx_raw_buckets[0], vtx_raw_buckets[1], vtx_raw_buckets[2], vtx_raw_buckets[3],
+            vtx_raw_buckets[4], vtx_raw_buckets[5], vtx_raw_buckets[6], vtx_raw_buckets[7], vtx_raw_buckets[8]);
+        std::fprintf(stderr, "[FlowVtx] usBuckets: 0=%d 1=%d 2-3=%d 4-5=%d 6-10=%d 11-20=%d 21-50=%d 51-100=%d 101+=%d\n",
+            vtx_unscale_buckets[0], vtx_unscale_buckets[1], vtx_unscale_buckets[2], vtx_unscale_buckets[3],
+            vtx_unscale_buckets[4], vtx_unscale_buckets[5], vtx_unscale_buckets[6], vtx_unscale_buckets[7], vtx_unscale_buckets[8]);
+        std::fprintf(stderr, "[FlowVtx] usOppBuckets: 0=%d 1=%d 2-3=%d 4-5=%d 6-10=%d 11-20=%d 21-50=%d 51-100=%d 101+=%d\n",
+            vtx_unscale_opp_buckets[0], vtx_unscale_opp_buckets[1], vtx_unscale_opp_buckets[2], vtx_unscale_opp_buckets[3],
+            vtx_unscale_opp_buckets[4], vtx_unscale_opp_buckets[5], vtx_unscale_opp_buckets[6], vtx_unscale_opp_buckets[7], vtx_unscale_opp_buckets[8]);
+    }
     }
 
     // commit cross-episode priority

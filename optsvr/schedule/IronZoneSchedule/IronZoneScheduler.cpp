@@ -613,14 +613,14 @@ void IronZoneScheduler::print_round_stats(const RoundStats& s, int tick) const {
     int busy_after = s.busy_before + s.assigned;
 
     std::fprintf(stderr,
-        "[IronZone] tick=%d phase=%.2f variant=%d target=%d(base=%d) freeA=%d freeT=%d assigned=%d busy=%d unmatched=%d opp(cap=%d,extra=%d,reject=%d) avgDist=%.1f avgLen=%.1f avgComp=%.1f cross=%.1f%% avgZ=%.2f shortage(start=%.1f,finish=%.1f,gain=%.1f,zones=%d) pool(short=%d,starved=%d) skip(comp=%d,empty=%d,quota=%d,gate=%d,highway=%d) freeLen(<=500=%d,<=1000=%d,<=1500=%d,>1500=%d) assignLen(<=500=%d,<=1000=%d,<=1500=%d,>1500=%d) assignDist(<=50=%d,<=150=%d,>150=%d) long>=%d=%.1f%% cand=%.1f opt(rounds=%d,seed=%d,replace=%d,swap=%d) heap(pops=%d,skip=%d,fb=%d,gfb=%d) time(build=%.1fms,solve=%.1fms)\n",
+        "[IronZone] tick=%d phase=%.2f variant=%d target=%d(base=%d) freeA=%d freeT=%d assigned=%d busy=%d unmatched=%d opp(cap=%d,extra=%d,reject=%d) avgDist=%.1f avgLen=%.1f avgComp=%.1f cross=%.1f%% avgZ=%.2f shortage(start=%.1f,finish=%.1f,gain=%.1f,zones=%d) pool(short=%d,starved=%d) skip(comp=%d,empty=%d,quota=%d,gate=%d,highway=%d,garbage=%d) freeLen(<=500=%d,<=1000=%d,<=1500=%d,>1500=%d) assignLen(<=500=%d,<=1000=%d,<=1500=%d,>1500=%d) assignDist(<=50=%d,<=150=%d,>150=%d) long>=%d=%.1f%% cand=%.1f opt(rounds=%d,seed=%d,replace=%d,swap=%d) heap(pops=%d,skip=%d,fb=%d,gfb=%d) time(build=%.1fms,solve=%.1fms)\n",
         tick, s.early_phase, s.assign_variant, s.target_active, s.base_target_active,
         s.free_agents, s.free_tasks, s.assigned, busy_after, s.unmatched_agents,
         s.opportunity_cap, s.opportunity_assigned, s.opportunity_rejected,
         avg_dist, avg_len, avg_completion, cross_pct, avg_zd,
         avg_start_shortage, avg_finish_shortage, avg_migration_gain,
         s.starved_zones, s.short_pool, s.starved_pool,
-        s.skipped_component, s.candidate_empty_agents, s.quota_skips, s.gate_skips, s.skipped_highway_agent,
+        s.skipped_component, s.candidate_empty_agents, s.quota_skips, s.gate_skips, s.skipped_highway_agent, s.garbage_skipped,
         s.free_len_short, s.free_len_mid, s.free_len_long, s.free_len_huge,
         s.assign_len_short, s.assign_len_mid, s.assign_len_long, s.assign_len_huge,
         s.assign_dist_near, s.assign_dist_mid, s.assign_dist_far,
@@ -867,6 +867,27 @@ void IronZoneScheduler::schedule(int time_limit_ms,
         zone_free_tasks[start_zone]++;
     }
     stats.free_tasks = static_cast<int>(tasks.size());
+
+    // 垃圾任务池：砍掉最长的 N%
+    if (optsvr::IRON_GARBAGE_RATIO > 0 && tasks.size() > 1) {
+        int keep = std::max(1, static_cast<int>(tasks.size())
+            * (100 - optsvr::IRON_GARBAGE_RATIO) / 100);
+        if (keep < static_cast<int>(tasks.size())) {
+            std::nth_element(tasks.begin(), tasks.begin() + keep, tasks.end(),
+                [](const TaskMeta& a, const TaskMeta& b) {
+                    return a.length < b.length;
+                });
+            stats.garbage_skipped += static_cast<int>(tasks.size()) - keep;
+            tasks.resize(keep);
+            for (auto& v : tasks_by_zone) v.clear();
+            for (int i = 0; i < static_cast<int>(tasks.size()); i++) {
+                int sz = tasks[i].start_zone;
+                if (sz >= 0 && sz < zone_count_)
+                    tasks_by_zone[sz].push_back(i);
+            }
+            stats.free_tasks = static_cast<int>(tasks.size());
+        }
+    }
 
     // ---- pretick: reset future flow + add flow from busy agents ----
     std::vector<std::vector<int>> agents_by_zone;  // only built when ff enabled

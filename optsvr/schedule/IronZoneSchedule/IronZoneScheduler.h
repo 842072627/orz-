@@ -61,6 +61,7 @@ private:
         int unmatched_agents = 0;
         int skipped_component = 0;
         int skipped_highway_agent = 0;
+        int garbage_skipped = 0;
         int starved_zones = 0;
         int short_pool = 0;
         int starved_pool = 0;

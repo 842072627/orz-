@@ -147,9 +147,88 @@ s_node astar(SharedEnvironment* env, std::vector<Int4>& flow,
 
             //all vertex flow
             //the sum of all out going edge flow is the same as the total number of vertex visiting.
+            // IRON_VERTEX_MODE controls the formula (Config.h)
             temp_vertex = 1;
-            for (int j=0; j<4; j++){
-                temp_vertex += unscale_flow(flow[next].d[j]);
+            if (optsvr::IRON_VERTEX_MODE == 0) {
+                // 0=Original: sum(unscale(flow)) / 2
+                for (int j=0; j<4; j++) temp_vertex += unscale_flow(flow[next].d[j]);
+            } else {
+                // Compute all variants
+                int sum_us = 0, sum_raw = 0, sum_opp_only = 0, sum_us_opp = 0;
+                for (int j=0; j<4; j++) {
+                    int us = unscale_flow(flow[next].d[j]);
+                    sum_us += us;
+                    sum_raw += flow[next].d[j];
+                    if (j != d) sum_opp_only += us;
+                    if (flow_opp != nullptr) sum_us_opp += unscale_flow((*flow_opp)[next].d[j]);
+                }
+                int w = std::max(1, optsvr::IRON_VERTEX_W);
+                if (optsvr::IRON_VERTEX_MODE == 1) {
+                    // Weighted: original * W
+                    temp_vertex += sum_us * w;
+                } else if (optsvr::IRON_VERTEX_MODE == 2) {
+                    // Opp-only: exclude movement direction, no weight
+                    temp_vertex += sum_opp_only;
+                } else if (optsvr::IRON_VERTEX_MODE == 3) {
+                    // Same-exempt + amplification: exclude movement dir, scale by W
+                    // w=1 same as mode2, w=3 -> 1.5x, w=5 -> 2.5x
+                    temp_vertex += sum_opp_only * w;
+                } else if (optsvr::IRON_VERTEX_MODE == 4) {
+                    // Opp-grid: use flow_opp instead of flow
+                    temp_vertex += sum_us_opp;
+                } else if (optsvr::IRON_VERTEX_MODE == 5) {
+                    // Raw: use raw values / W
+                    temp_vertex += sum_raw / w;
+                } else if (optsvr::IRON_VERTEX_MODE == 6) {
+                    // Opp-only + weighted
+                    temp_vertex += sum_opp_only * w;
+                } else if (optsvr::IRON_VERTEX_MODE == 7) {
+                    // Square: sum_us^2 / W
+                    temp_vertex += (sum_us * sum_us) / w;
+                } else if (optsvr::IRON_VERTEX_MODE == 8) {
+                    // Opp-only weighted properly: sum_opp_only * w / 2
+                    // w=1 -> same as mode 2, w=3 -> 1.5x, w=5 -> 2.5x, w=10 -> 5x
+                    temp_vertex += sum_opp_only * w;
+                } else if (optsvr::IRON_VERTEX_MODE == 9) {
+                    // Opp-only square: (sum_opp_only^2) / w
+                    temp_vertex += (sum_opp_only * sum_opp_only) / w;
+                } else if (optsvr::IRON_VERTEX_MODE == 10) {
+                    // Directional split: penalize opp, reward same
+                    // opp_only * w, subtract same_dir flow (going with flow = good)
+                    int same_dir = unscale_flow(flow[next].d[d]);
+                    int dir_cost = sum_opp_only * w - same_dir;
+                    if (dir_cost < 0) dir_cost = 0;
+                    temp_vertex += dir_cost;
+                } else if (optsvr::IRON_VERTEX_MODE == 11) {
+                    // Normalized opp: scale by path depth
+                    // Prevents over-accumulation on long paths
+                    int depth_norm = std::max(1, depth);
+                    temp_vertex += (sum_opp_only * w * 10) / depth_norm;
+                } else if (optsvr::IRON_VERTEX_MODE == 12) {
+                    // Threshold opp: only count opp_only when > threshold W
+                    // Filters out low-congestion cells
+                    if (sum_opp_only > w) temp_vertex += sum_opp_only;
+                } else if (optsvr::IRON_VERTEX_MODE == 13) {
+                    // Raw opp (no unscale): use raw flow for opp directions / scale
+                    int raw_opp = 0;
+                    int s = optsvr::cfg().flow_decay_scale;
+                    for (int j=0; j<4; j++) {
+                        if (j != d) raw_opp += flow[next].d[j];
+                    }
+                    if (s > 1) raw_opp /= s;
+                    temp_vertex += raw_opp;
+                } else if (optsvr::IRON_VERTEX_MODE == 14) {
+                    // Logistic opp: opp^2 / (opp + W)
+                    // Sigmoid-like: penalizes mid values more, caps high values
+                    if (sum_opp_only > 0) temp_vertex += (sum_opp_only * sum_opp_only) / (sum_opp_only + w);
+                } else if (optsvr::IRON_VERTEX_MODE == 15) {
+                    // Mixed opp+same: opp*W + same_dir (penalize both, opp more)
+                    int same_dir = unscale_flow(flow[next].d[d]);
+                    temp_vertex += sum_opp_only * w + same_dir;
+                } else {
+                    // Fallback: original
+                    for (int j=0; j<4; j++) temp_vertex += unscale_flow(flow[next].d[j]);
+                }
             }
 
             op_flow += temp_op;

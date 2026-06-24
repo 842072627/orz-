@@ -219,7 +219,6 @@ constexpr float OPT_MAZE_PLANNER_ENTRY_DELTA = 6.0f;
 // ═══════════════════════════════════════════════════════════════════
 // IronZone 专属（SCHEDULE_MODE=10）
 // 大图低密度物流调度：按粗 zone 控制本地候选，减少跨图追任务。
-// ═══════════════════════════════════════════════════════════════════
 constexpr int   IRON_ZONE_ROWS       = 19;
 constexpr int   IRON_ZONE_COLS       = 18;
 constexpr int   IRON_ASSIGN_VARIANT  = 0;     // 0=continuous, 1=wave, 2=zone quota, 3=finish dispersion, 4=dynamic wave, 5=start-distance gate, 6=distance dominant, 7=fair zone quota, 8=completion-cost wave, 9=completion fixed70, 10=completion fixed75, 11=completion ramp70-80, 12=start fixed80, 13=base fixed70, 14=legacy early fixed70, 15=balanced fixed70, 16=opportunity reserve fixed70
@@ -265,13 +264,15 @@ constexpr int   IRON_HIGHWAY_STALL_BOOST   = 100;     // 卡住每tick额外优�
 constexpr int   IRON_HIGHWAY_STALL_MAX     = 5000;    // stall叠加上限
 constexpr int   IRON_HIGHWAY_SOUTH_PENALTY  = 15;      // 南口(1019)西行额外代价(平衡出口流量,0=关)
 constexpr int   IRON_HIGHWAY_PIBT_PENALTY  = 0;       // PIBT禁止方向策略: 0=跳过(硬拦), >0=加入但代价加成(防死锁)
-constexpr int   IRON_HIGHWAY_DEBUG         = 1;       // 0=静默, 1=打印
+constexpr int   IRON_HIGHWAY_DEBUG         = 0;       // 0=静默, 1=打印
 constexpr int   IRON_HIGHWAY_CLEAR_DECISION= 1;       // 每tick清空decision_残留(防2000tick卡死,0=关)
+constexpr int   IRON_HIGHWAY_TURN_PENALTY = 0;       // 转弯agent PIBT优先级降低(0=关, >0打破平局防截停直行)
 constexpr int   IRON_HIGHWAY_FORCE_MOVE    = 1;       // 单方向highway cell强制移动(0=关,1=forward真空时跳过occupied)
 constexpr int   IRON_HIGHWAY_GUIDE_PENALTY = 100000;  // 入口引导惩罚(0=关): 93个guide cell错误方向代价
 constexpr int   IRON_CORE_TASK_FILTER = 1;    // 禁止分配任务到core非highway格(0=关,1=开启)
 constexpr int   IRON_HIGHWAY_FREEZE_ASSIGN = 1; // 禁止highway上的agent分配新任务(0=关,1=在highway上不分配)
 constexpr int   IRON_HIGHWAY_SKIP_TASK    = 1;    // 过滤highway+guide上的任务(0=关,1=开启)
+constexpr int   IRON_GARBAGE_RATIO  = 0;     // 垃圾任务池(0=关): 最长N%暂不分配
 // ═══════════════════════════════════════════════════════════════════
 constexpr int   IRON_LANE_ENABLED      = 0;       // 0=关闭, 1=开启红绿灯
 constexpr int   IRON_LANE_GUARD_DIST   = 20;      // 统计agent的曼哈顿距离阈值
@@ -343,12 +344,17 @@ constexpr int   OPT_TIDAL_CORRIDOR_FORWARD_BONUS = 15; // 通道前进方向heur
 // FlowDecay 专属（PLANNER_MODE=1）
 // ═══════════════════════════════════════════════════════════════════
 constexpr float FLOW_DECAY       = 0.9f;      // 边流量衰减系数
-constexpr float FLOW_DECAY_OPPOSITE = 0.99f;   // 逆流衰减系数(>=1.0=关闭,越小衰减越快)
+constexpr float FLOW_DECAY_OPPOSITE = 1.0f;   // 逆流衰减系数(>=1.0=关闭,越小衰减越快)
 constexpr int   FLOW_DECAY_SCALE = 100;        // 放大因子
-constexpr bool  WARE_DIRECT      = false;      // Warehouse 通道定向策略开关
+constexpr bool  WARE_DIRECT      = false;
 constexpr bool  OPT_PIBT_FORWARD_BREAK_TIE = true; // PIBT候选heuristic相等时优先FW
 constexpr int   GUIDE_FLOW_OPPOSITE_W = 1;    // 逆流惩罚倍数(1=原版行为)
 constexpr int   GUIDE_FLOW_SAME_W     = 1.3;    // 顺流奖励(0=关闭, >0时A*选人多方向)
+
+// Vertex flow formula: controls how all_vertex_flow is computed in A*
+// Mode: 0=original(sum(unscale)/2), 1=weighted(*W), 2=opp-only(no W), 3=same-exempt+amp(*W), 4=opp-grid, 5=raw, 6=opp-weighted, 7=square, 8=opp-w(sum_opp_only*W/2), 9=opp-sq(opp^2/W/2), 10=dir(opp*W-same), 11=norm(opp*W*10/depth/2), 12=thresh(>W), 13=raw-opp, 14=logistic(opp^2/(opp+W)/2), 15=mixed(opp*W+same)
+constexpr int   IRON_VERTEX_MODE      = 0;
+constexpr int   IRON_VERTEX_W         = 1;
 
 // ═══════════════════════════════════════════════════════════════════
 // 距离矩阵预计算（共用）

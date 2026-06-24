@@ -3,6 +3,7 @@
 #include "flow.h"
 
 #include "RuntimeConfig.h"
+#include "iron_highway.h"
 #include <random>
 #include <unordered_set>
 #include <cmath>
@@ -68,6 +69,18 @@ void add_traj(TrajLNS& lns, int agent){
         lns.flow[prev_loc].d[d] += flow_weight(j, decay, scale);
         if (decay_opp < 1.0f)
             lns.flow_opp[prev_loc].d[d] += flow_weight(j, decay_opp, scale);
+    }
+    // Debug: check if this adds non-zero flow to any highway cell
+    for (int ci = 0; ci < 3; ci++) {
+        int hloc = ::IronHighway::kConstraints[ci].loc;
+        for (int pj = 1; pj < (int)lns.trajs[agent].size(); pj++) {
+            if (lns.trajs[agent][pj-1] == hloc || lns.trajs[agent][pj] == hloc) {
+                std::fprintf(stderr, "[AddTrajDbg] agent=%d step=%d prev=%d cur=%d hloc=%d forbid=%d flowNowE=%d\n",
+                    agent, pj, lns.trajs[agent][pj-1], lns.trajs[agent][pj],
+                    hloc, ::IronHighway::kConstraints[ci].forbid,
+                    lns.flow[hloc].d[0]);
+            }
+        }
     }
 }
 
