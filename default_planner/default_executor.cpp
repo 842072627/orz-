@@ -29,7 +29,7 @@ namespace DefaultPlanner{
     // --- Executor direction lock config ---
     static constexpr float STEP_DECAY = 0.98f;     // 步数衰减
     static constexpr float HEAT_DECAY = 0.9f;      // 时间衰减
-    static constexpr float LOCK_THRESHOLD = 12.0f;   // 锁热阈值
+    static constexpr float LOCK_THRESHOLD = 31.0f;   // 锁热阈值
 
     // --- Heat debug + direction lock data ---
     #define HEAT_DEBUG 0
@@ -297,7 +297,7 @@ bool mcp(int agent_id, std::vector<ExecutionCommand> & agent_command, SharedEnvi
         int curr_orientation = env->system_states[agent_id].orientation;
         int next_location = curr_location + moves[curr_orientation];
 
-        // === 方向锁检查（预判全路径） ===
+        // === 方向锁检查（当前格热区 + 全路径预判） ===
         {
             int sim_loc = curr_location;
             int sim_orient = curr_orientation;
@@ -305,6 +305,25 @@ bool mcp(int agent_id, std::vector<ExecutionCommand> & agent_command, SharedEnvi
             for (size_t step = 0; step < env->staged_actions[agent_id].size() && sim_valid; step++) {
                 Action a = env->staged_actions[agent_id][step];
                 if (a == Action::FW) {
+                    // a) 离开当前格前，检当前格热区
+                    auto cur_h = heat.find(sim_loc);
+                    if (cur_h != heat.end()) {
+                        float max_h = cur_h->second[0]; int max_d = 0;
+                        for (int d = 1; d < 4; d++) {
+                            if (cur_h->second[d] > max_h) { max_h = cur_h->second[d]; max_d = d; }
+                        }
+                        if (max_h >= LOCK_THRESHOLD) {
+                            int flow_dir = (max_d + 2) % 4;
+                            if (sim_orient != flow_dir) {
+                                bool has_backup = (tpg[sim_loc].size() > 1);
+                                if (!has_backup) {
+                                    agent_command[agent_id] = ExecutionCommand::STOP;
+                                    return false;
+                                }
+                            }
+                        }
+                    }
+                    // b) 进入下一个格前，检目标格锁
                     int fut_loc = sim_loc + moves[sim_orient];
                     if (fut_loc >= 0 && fut_loc < env->rows * env->cols && !env->map[fut_loc]) {
                         auto it = lock_dir.find(fut_loc);
@@ -313,7 +332,6 @@ bool mcp(int agent_id, std::vector<ExecutionCommand> & agent_command, SharedEnvi
                             int opp_dir = (lock_d + 2) % 4;
                             int entering_dir = (sim_orient + 2) % 4;
                             if (entering_dir == opp_dir) {
-                                // 未来某步会逆行进入锁格 → 现在就 STOP
                                 agent_command[agent_id] = ExecutionCommand::STOP;
                                 return false;
                             }
