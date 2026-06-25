@@ -10,9 +10,8 @@
 // Executor 方向锁：全量预判 + 热度衰减 + 备份豁免
 // 
 // 配置参数（可调）
-constexpr float HEAT_LOCK_STEP_DECAY = 0.98f;    // 步数衰减
-constexpr float HEAT_LOCK_HEAT_DECAY = 0.9f;     // 时间衰减
-constexpr float HEAT_LOCK_THRESHOLD = 31.0f;     // 锁热阈值
+constexpr float HEAT_LOCK_STEP_DECAY = 0.98f;    // 步数衰减，越远权重越低
+constexpr float HEAT_LOCK_THRESHOLD = 3.0f;      // maze: max=3.9, TH=3锁最热的3个格：同一tick总流量（所有方向之和）超过才锁
 
 // 方向 [E=0, S=1, W=2, N=3]
 constexpr int DIR_OPP[4] = {2, 3, 0, 1};         // 对向映射

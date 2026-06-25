@@ -32,18 +32,8 @@ void Executor::next_command(int exec_time_limit, std::vector<ExecutionCommand> &
         int curr_loc = env->system_states[i].location;
         int curr_orient = env->system_states[i].orientation;
 
-        // 备份检查：如果被推（后面有人排队），放行
-        bool has_backup = false;
-        auto it_bk = backup_count.find(curr_loc);
-        if (it_bk != backup_count.end() && it_bk->second > 1) {
-            has_backup = true;
-        }
-
         if (heat_lock_check(i, curr_loc, curr_orient, env)) {
-            // 方向锁要拦，检查备份豁免
-            if (!has_backup) {
-                agent_command[i] = ExecutionCommand::STOP;
-            }
+            agent_command[i] = ExecutionCommand::STOP;
         }
     }
 }
