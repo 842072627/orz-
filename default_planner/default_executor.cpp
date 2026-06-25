@@ -10,10 +10,6 @@
 
 #include "default_executor.h"
 
-#include <fstream>
-#include <array>
-#include <cmath>
-
 namespace DefaultPlanner{
 
     std::unordered_map<int, std::list<int>> tpg; //dependency graph for location visiting orders
@@ -26,27 +22,10 @@ namespace DefaultPlanner{
     int window_size;
     bool first_execution = true;
 
-    // --- Executor direction lock config ---
-    static constexpr float STEP_DECAY = 0.98f;     // 步数衰减
-    static constexpr float HEAT_DECAY = 0.9f;      // 时间衰减
-    static constexpr float LOCK_THRESHOLD = 31.0f;   // 锁热阈值
-
-    // --- Heat debug + direction lock data ---
-    #define HEAT_DEBUG 0
-    std::unordered_map<int, std::array<float, 4>> heat; // 4-dir smoothed heat per loc [E,S,W,N]
-    std::unordered_map<int, std::array<float, 4>> dir_cnt; // weighted per-tick direction counts
-    std::unordered_map<int, int> lock_dir; // -1=unlocked, 0-3=locked direction
-    int heat_tick = 0;
-    std::ofstream heat_csv;
-
 void execute_initialize(int preprocess_time_limit, SharedEnvironment* env)
 {
     window_size = (int)env->min_planner_communication_time / (env->action_time*env->max_counter) + 1; //calculate the window size based on the communication time limit and action execution time
     previous_locations.resize(env->num_of_agents, -1);
-    if (HEAT_DEBUG) {
-        heat_csv.open("heat_debug.csv");
-        heat_csv << "tick,loc,tpg_size,de,ds,dw,dn,he,hs,hw,hn,lock\n";
-    }
 }
 
 vector<State> execute_process_new_plan(int sync_time_limit, Plan& plan_struct, vector<vector<Action>> & staged_actions, SharedEnvironment* env)
@@ -103,6 +82,8 @@ vector<State> execute_process_new_plan(int sync_time_limit, Plan& plan_struct, v
                 if (new_orientation == -1)
                     new_orientation = 3;
             }
+            // cout<<"agent "<<i<<" current prediceted state location from last iteration "<<predicted_states[i].location<<" orientation "<<predicted_states[i].orientation<<endl;
+            // cout<<"agent "<<i<<" action "<<(plan[i][timestep] == Action::FW ? "FW" : (plan[i][timestep] == Action::CR ? "CR" : (plan[i][timestep] == Action::CCR ? "CCR" : (plan[i][timestep] == Action::NA ? "NA" : "W"))))<<" new prediceted state location "<<new_location<<" orientation "<<new_orientation<<endl;
             curr_states[i].location = new_location;
             curr_states[i].orientation = new_orientation;   
             curr_states[i].timestep+=1;
@@ -137,6 +118,8 @@ vector<State> execute_process_new_plan(int sync_time_limit, Plan& plan_struct, v
             int curr_orientation = curr_states[i].orientation;
             int new_location = curr_location;
             int new_orientation = curr_orientation;
+            // cout<<"agent "<<i<<" current prediceted state location from last iteration "<<predicted_states[i].location<<" orientation "<<predicted_states[i].orientation<<endl;
+            // cout<<"agent "<<i<<" action "<<(curr_action == Action::FW ? "FW" : (curr_action == Action::CR ? "CR" : (curr_action == Action::CCR ? "CCR" : (curr_action == Action::NA ? "NA" : "W"))))<<" current state location "<<curr_location<<" orientation "<<curr_orientation<<endl;
 
             assert(tpg[curr_location].front() == i);
 
@@ -177,6 +160,7 @@ vector<State> execute_process_new_plan(int sync_time_limit, Plan& plan_struct, v
             if (t == 0)
             {
                 temp_tpg[pre_states[i].location].push_back(i);
+                // cout<<"inserting "<<i<<" into tpg loc "<<pre_states[i].location<<endl;
             }
 
             if (pre_states[i].location != curr_states[i].location) //agent move
@@ -185,6 +169,7 @@ vector<State> execute_process_new_plan(int sync_time_limit, Plan& plan_struct, v
                 assert(tpg[pre_states[i].location].front() == i);
                 tpg[pre_states[i].location].pop_front();
                 temp_tpg[curr_states[i].location].push_back(i);
+                // cout<<"inserting "<<i<<" into tpg loc "<<curr_states[i].location<<endl;
             }
         }
     }
@@ -193,6 +178,7 @@ vector<State> execute_process_new_plan(int sync_time_limit, Plan& plan_struct, v
         if (action_index[i] < staged_actions[i].size())
         {
             staged_actions[i].resize(action_index[i]);//remove the actions that are not executed in the windowed simulation
+            // cout<<"resizing staged actions for agent "<<i<<" to "<<action_index[i]<<endl;
         }
     }
     predicted_states = curr_states;
@@ -207,6 +193,7 @@ void execute_next_command(int exec_time_limit, std::vector<ExecutionCommand> & a
     {
         int prev_location = previous_locations[i];
         int curr_location = env->system_states[i].location;
+        // cout<<"tpg for agent "<<i<<" prev loc "<< prev_location<<" tpg first "<<tpg[prev_location].front()<<endl;
         assert(tpg[prev_location].front() == i);
         if (prev_location != curr_location && tpg[prev_location].front() == i)
         {
@@ -215,64 +202,9 @@ void execute_next_command(int exec_time_limit, std::vector<ExecutionCommand> & a
             previous_locations[i] = curr_location;
         }
     }
-
-    // --- 方向锁：全量预判 + 热度衰减 ---
-    dir_cnt.clear();
-    lock_dir.clear();
-    int moves[4] = {1, env->cols, -1, -env->cols};
-    for (int i = 0; i < env->system_states.size(); i++) {
-        int sim_loc = env->system_states[i].location;
-        int sim_orient = env->system_states[i].orientation;
-        bool sim_valid = true;
-        for (size_t step = 0; step < env->staged_actions[i].size() && sim_valid; step++) {
-            float w = pow(STEP_DECAY, (float)step);
-            Action a = env->staged_actions[i][step];
-            if (a == Action::FW) {
-                int next_loc = sim_loc + moves[sim_orient];
-                if (next_loc >= 0 && next_loc < env->rows * env->cols && !env->map[next_loc]) {
-                    int entering_dir = (sim_orient + 2) % 4;
-                    dir_cnt[next_loc][entering_dir] += w;
-                    sim_loc = next_loc;
-                } else {
-                    sim_valid = false;
-                }
-            } else if (a == Action::CR) {
-                sim_orient = (sim_orient + 1) % 4;
-            } else if (a == Action::CCR) {
-                sim_orient = (sim_orient - 1 + 4) % 4;
-            }
-        }
-    }
-    // 热度更新 + 锁决策
-    for (auto& kv : dir_cnt) {
-        int loc = kv.first;
-        float de = kv.second[0], ds = kv.second[1], dw = kv.second[2], dn = kv.second[3];
-        auto& h = heat[loc];
-        float he = h[0] = h[0] * HEAT_DECAY + de;
-        float hs = h[1] = h[1] * HEAT_DECAY + ds;
-        float hw = h[2] = h[2] * HEAT_DECAY + dw;
-        float hn = h[3] = h[3] * HEAT_DECAY + dn;
-        float max_h = he; int max_d = 0;
-        if (hs > max_h) { max_h = hs; max_d = 1; }
-        if (hw > max_h) { max_h = hw; max_d = 2; }
-        if (hn > max_h) { max_h = hn; max_d = 3; }
-        int lk = (max_h >= LOCK_THRESHOLD) ? max_d : -1;
-        lock_dir[loc] = lk;
-        if (HEAT_DEBUG) {
-            int tpg_sz = tpg.count(loc) ? (int)tpg[loc].size() : 0;
-            if (tpg_sz > 0 || de + ds + dw + dn > 0.001f || lk != -1) {
-                heat_csv << heat_tick << "," << loc << ","
-                         << tpg_sz << ","
-                         << de << "," << ds << "," << dw << "," << dn << ","
-                         << he << "," << hs << "," << hw << "," << hn << ","
-                         << lk << "\n";
-            }
-        }
-    }
-    heat_tick++;
-
     for (int i = 0; i < env->system_states.size(); i++)
     {
+
         mcp(i, agent_command, env);
     }
     
@@ -280,13 +212,16 @@ void execute_next_command(int exec_time_limit, std::vector<ExecutionCommand> & a
 
 bool mcp(int agent_id, std::vector<ExecutionCommand> & agent_command, SharedEnvironment* env)
 {
+    // cout<<"mcp for "<<agent_id<<endl;
     if (env->staged_actions[agent_id].empty())
     {
+        //no action, just stop and wait for the next plan, no tpg order clear
         agent_command[agent_id] = ExecutionCommand::STOP;
         return false;
     }
     else if (env->staged_actions[agent_id].front() != Action::FW) 
     {
+        //try to go but still stay at current location because it's not move forward, no tpg order clear
         agent_command[agent_id] = ExecutionCommand::GO;
         return false;
     }
@@ -297,66 +232,19 @@ bool mcp(int agent_id, std::vector<ExecutionCommand> & agent_command, SharedEnvi
         int curr_orientation = env->system_states[agent_id].orientation;
         int next_location = curr_location + moves[curr_orientation];
 
-        // === 方向锁检查（当前格热区 + 全路径预判） ===
-        {
-            int sim_loc = curr_location;
-            int sim_orient = curr_orientation;
-            bool sim_valid = true;
-            for (size_t step = 0; step < env->staged_actions[agent_id].size() && sim_valid; step++) {
-                Action a = env->staged_actions[agent_id][step];
-                if (a == Action::FW) {
-                    // a) 离开当前格前，检当前格热区
-                    auto cur_h = heat.find(sim_loc);
-                    if (cur_h != heat.end()) {
-                        float max_h = cur_h->second[0]; int max_d = 0;
-                        for (int d = 1; d < 4; d++) {
-                            if (cur_h->second[d] > max_h) { max_h = cur_h->second[d]; max_d = d; }
-                        }
-                        if (max_h >= LOCK_THRESHOLD) {
-                            int flow_dir = (max_d + 2) % 4;
-                            if (sim_orient != flow_dir) {
-                                bool has_backup = (tpg[sim_loc].size() > 1);
-                                if (!has_backup) {
-                                    agent_command[agent_id] = ExecutionCommand::STOP;
-                                    return false;
-                                }
-                            }
-                        }
-                    }
-                    // b) 进入下一个格前，检目标格锁
-                    int fut_loc = sim_loc + moves[sim_orient];
-                    if (fut_loc >= 0 && fut_loc < env->rows * env->cols && !env->map[fut_loc]) {
-                        auto it = lock_dir.find(fut_loc);
-                        if (it != lock_dir.end() && it->second != -1) {
-                            int lock_d = it->second;
-                            int opp_dir = (lock_d + 2) % 4;
-                            int entering_dir = (sim_orient + 2) % 4;
-                            if (entering_dir == opp_dir) {
-                                agent_command[agent_id] = ExecutionCommand::STOP;
-                                return false;
-                            }
-                        }
-                        sim_loc = fut_loc;
-                    } else {
-                        sim_valid = false;
-                    }
-                } else if (a == Action::CR) {
-                    sim_orient = (sim_orient + 1) % 4;
-                } else if (a == Action::CCR) {
-                    sim_orient = (sim_orient - 1 + 4) % 4;
-                }
-            }
-        }
-
         if (tpg[next_location].empty() || tpg[next_location].front() == agent_id)
         {
+            //try to go and can go, clear the tpg order
             agent_command[agent_id] = ExecutionCommand::GO;
+
+            // cout<<"mcp true, agent "<<agent_id<<" decided to move to "<<next_location<<endl;
             return true;
         }
         else
         {
-            agent_command[agent_id] = ExecutionCommand::STOP;
-            return false;
+                //the blocking agent cannot go, so we cannot go
+                agent_command[agent_id] = ExecutionCommand::STOP;
+                return false;
         }
     }
     
