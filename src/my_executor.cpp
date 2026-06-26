@@ -98,7 +98,7 @@ vector<State> execute_process_new_plan(int sync_time_limit, Plan& plan_struct, v
 
     //now run a mcp simulation assuming no delays for a windowed size, and obtain the actions
     // 先算方向锁，让模拟知道哪些格被锁
-    heat_lock_update(env);
+    heat_lock_update(env, staged_actions);
     vector<int> action_index(env->num_of_agents,0); //keep track of the next action index for each agent in the staged actions 
     curr_states = env->system_states;
     temp_tpg.clear();
@@ -216,7 +216,7 @@ void execute_next_command(int exec_time_limit, std::vector<ExecutionCommand> & a
         }
     }
     // 方向锁：先算流量再执行MCP
-    heat_lock_update(env);
+    heat_lock_update(env, env->staged_actions);
 
     for (int i = 0; i < env->system_states.size(); i++)
     {
@@ -246,12 +246,6 @@ bool mcp(int agent_id, std::vector<ExecutionCommand> & agent_command, SharedEnvi
         int curr_location = env->system_states[agent_id].location;
         int curr_orientation = env->system_states[agent_id].orientation;
         int next_location = curr_location + moves[curr_orientation];
-
-        // 方向锁检查：逆行进入锁格则STOP
-        if (heat_lock_check(agent_id, curr_location, curr_orientation, env)) {
-            agent_command[agent_id] = ExecutionCommand::STOP;
-            return false;
-        }
 
         if (tpg[next_location].empty() || tpg[next_location].front() == agent_id)
         {
