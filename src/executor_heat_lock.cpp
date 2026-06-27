@@ -39,6 +39,7 @@ void heat_lock_update(SharedEnvironment* env, const std::vector<std::vector<Acti
     // 1. 预判N步算流量（带衰减）+ 逐timestep重叠检测
     // 逐timestep occupancy: cell -> [t0, t1, ..., t11]
     std::unordered_map<int, std::array<int, 12>> plan_step_occ;
+    std::unordered_map<int, int> raw_cnt;  // 原始预定数（不加权）
     
     for (int i = 0; i < (int)env->system_states.size(); i++) {
         int sim_loc = env->system_states[i].location;
@@ -68,6 +69,24 @@ void heat_lock_update(SharedEnvironment* env, const std::vector<std::vector<Acti
     // ---- 诊断：逐timestep重叠检测 ----
     {
         int sys_ts = env->system_timestep;
+        // 全图格子预定数dump
+        static int dir_dumped = 0;
+        if (sys_ts > 1900 && !dir_dumped) {
+            dir_dumped = 1;
+            FILE* dfp = fopen("C:\\\\Users\\\\Administrator\\\\Desktop\\\\test-studio-mapf\\\\big-final-test\\\\executor-data\\\\cell_flow_2000.csv", "w");
+            if (dfp) {
+                fprintf(dfp, "cell,row,col,flow_e,flow_s,flow_w,flow_n,total\n");
+                int cols = env->cols;
+                for (auto& kv : dir_cnt) {
+                    int loc = kv.first;
+                    int r = loc / cols, c = loc % cols;
+                    fprintf(dfp, "%d,%d,%d,%.1f,%.1f,%.1f,%.1f,%.1f\n",
+                        loc, r, c, kv.second[0], kv.second[1], kv.second[2], kv.second[3],
+                        kv.second[0]+kv.second[1]+kv.second[2]+kv.second[3]);
+                }
+                fclose(dfp);
+            }
+        }
         static FILE* ov_fp = nullptr;
         if (!ov_fp) {
             ov_fp = fopen("C:\\Users\\Administrator\\Desktop\\test-studio-mapf\\big-final-test\\executor-data\\overlap_diag.csv", "w");
