@@ -6,7 +6,7 @@ namespace optsvr {
 // ═══════════════════════════════════════════════════════════════════
 // 全局控制
 // ═══════════════════════════════════════════════════════════════════
-constexpr bool  SKIP_TEST       = false;  // 默认不跳过（MapTuner 按地图类型设为 true）
+constexpr bool  SKIP_TEST       = true;   // 默认跳过，MapTuner 按地图类型设为 false
 constexpr int   DEBUG_LEVEL     = 0;       // 0=静默, 1=概要, 2=细节
 constexpr int   NUM_THREADS     = 0;       // 0=自动检测
 constexpr bool  OPT_TIMING_TRACE = false;  // 每个规划周期输出 schedule/guide/pibt 耗时
