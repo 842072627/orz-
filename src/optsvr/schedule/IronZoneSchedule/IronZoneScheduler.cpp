@@ -780,7 +780,13 @@ void IronZoneScheduler::schedule(int time_limit_ms,
     if (ff_enabled && ff_path_ready_ &&
         (cfg().iron_future_flow_lock_th != 0.0f ||
          cfg().iron_future_flow_congest_cap > 0.0f)) {
-        const float lock_th = cfg().iron_future_flow_lock_th;
+        // Dynamic lock threshold: start low when many agents are idle,
+        // ramp up as fewer agents remain idle (more congestion).
+        // Formula: lock_th = 50 + 200 * (1 - idle_ratio), max 250.
+        float idle_ratio = (n_agents > 0) ? static_cast<float>(free_agents.size()) / n_agents : 1.0f;
+        float lock_th = 50.0f + 200.0f * (1.0f - idle_ratio);
+        if (lock_th > 250.0f) lock_th = 250.0f;
+        if (lock_th < 50.0f) lock_th = 50.0f;
         const float congest_cap = cfg().iron_future_flow_congest_cap;
         for (TaskMeta& task : tasks) {
             auto it = task_pool_snapshot_.find(task.tid);
