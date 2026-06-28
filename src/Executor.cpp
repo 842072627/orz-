@@ -1,13 +1,7 @@
 #include "Executor.h"
 #include "RuntimeConfig.h"
 #include "MapTuner.h"
-#include "OriginExecutor.h"
 #include "DHExecutor.h"
-#include "RoomOptExecutor.h"
-#include "RoomExecutor.h"
-#include "GameExecutor.h"
-#include "IncrementalTpgExecutor.h"
-#include "ConservativeIncrementalTpgExecutor.h"
 #include <algorithm>
 #include <climits>
 #include <cmath>
@@ -23,115 +17,8 @@
 namespace blog = boost::log;
 extern blog::sources::severity_logger<blog::trivial::severity_level> lg;
 
-// Origin 执行器实例
-static optsvr::OriginExecutor g_origin_executor;
-// DHExecutor 执行器实例
+// DHExecutor 执行器实例 (warehouse fullfill, EXECUTOR_MODE=3)
 static optsvr::DHExecutor g_dh_executor;
-// RoomOptExecutor 执行器实例 (v10.25 连续STOP截断)
-static optsvr::RoomOptExecutor g_roomopt_executor;
-// RoomExecutor 执行器实例 (Room专用TPG, EXECUTOR_MODE=5)
-static optsvr::RoomExecutor g_room_executor;
-// GameExecutor 执行器实例 (Game专用: 对流检测+截断, EXECUTOR_MODE=6)
-static optsvr::GameExecutor g_game_executor;
-// IncrementalTpgExecutor 执行器实例 (Default MCP + 增量 TPG 裁剪, EXECUTOR_MODE=7)
-static optsvr::IncrementalTpgExecutor g_incremental_tpg_executor;
-// ConservativeIncrementalTpgExecutor 执行器实例 (9f9bf33 保守版, EXECUTOR_MODE=8)
-static optsvr::ConservativeIncrementalTpgExecutor g_conservative_incremental_tpg_executor;
-
-namespace {
-
-struct TpgTraceConfig {
-    bool enabled = false;
-    int row = 992;
-    int col = 1624;
-    int agent = -1;
-    int max_lines = 20000;
-};
-
-TpgTraceConfig load_tpg_trace_config()
-{
-    TpgTraceConfig cfg;
-    if (const char* v = std::getenv("OPT_TPG_TRACE")) {
-        std::string s(v);
-        cfg.enabled = (s == "1" || s == "true" || s == "TRUE" || s == "on" || s == "ON");
-    }
-    if (const char* v = std::getenv("OPT_TPG_TRACE_ROW")) cfg.row = std::atoi(v);
-    if (const char* v = std::getenv("OPT_TPG_TRACE_COL")) cfg.col = std::atoi(v);
-    if (const char* v = std::getenv("OPT_TPG_TRACE_AGENT")) cfg.agent = std::atoi(v);
-    if (const char* v = std::getenv("OPT_TPG_TRACE_MAX_LINES")) cfg.max_lines = std::max(1, std::atoi(v));
-    return cfg;
-}
-
-const TpgTraceConfig& tpg_trace_cfg()
-{
-    static TpgTraceConfig cfg = load_tpg_trace_config();
-    return cfg;
-}
-
-bool tpg_trace_consume_line()
-{
-    static int lines = 0;
-    const auto& cfg = tpg_trace_cfg();
-    if (!cfg.enabled || lines >= cfg.max_lines) return false;
-    lines++;
-    return true;
-}
-
-char action_to_char(Action action)
-{
-    switch (action) {
-        case Action::FW: return 'F';
-        case Action::CR: return 'R';
-        case Action::CCR: return 'C';
-        case Action::W: return 'W';
-        case Action::NA: return 'T';
-        default: return '?';
-    }
-}
-
-int trace_target_loc(const SharedEnvironment* env)
-{
-    const auto& cfg = tpg_trace_cfg();
-    if (!cfg.enabled || env == nullptr || env->cols <= 0) return -1;
-    return cfg.row * env->cols + cfg.col;
-}
-
-bool trace_agent_or_loc(const SharedEnvironment* env, int agent_id, int loc_a, int loc_b = -1)
-{
-    const auto& cfg = tpg_trace_cfg();
-    if (!cfg.enabled) return false;
-    if (cfg.agent >= 0 && cfg.agent != agent_id) return false;
-    const int target = trace_target_loc(env);
-    if (target < 0) return false;
-    const int south = target + env->cols;
-    return loc_a == target || loc_b == target || loc_a == south || loc_b == south;
-}
-
-std::string queue_summary(const std::list<int>& q)
-{
-    std::ostringstream os;
-    os << "[";
-    int shown = 0;
-    for (int id : q) {
-        if (shown > 0) os << ",";
-        os << id;
-        shown++;
-        if (shown >= 4) break;
-    }
-    if ((int)q.size() > shown) os << ",...";
-    os << "]";
-    return os.str();
-}
-
-std::string loc_to_rc(const SharedEnvironment* env, int loc)
-{
-    if (env == nullptr || env->cols <= 0 || loc < 0) return "(-,-)";
-    std::ostringstream os;
-    os << "(" << loc / env->cols << "," << loc % env->cols << ")";
-    return os.str();
-}
-
-} // namespace
 
 void Executor::initialize(int preprocess_time_limit)
 {
@@ -156,24 +43,11 @@ void Executor::initialize(int preprocess_time_limit)
 
     optsvr::load_map_tuning(env);
 
-    // 初始化各模式执行器。Executor::initialize 与 Entry::initialize 并行执行，
-    // MapTuner 内部做一次性保护；这里再保留环境变量兜底，方便本地 A/B。
+    // 初始化 DHExecutor（warehouse fullfill）
     int exec_mode = optsvr::cfg().executor_mode;
     if (const char* v = std::getenv("OPT_EXECUTOR_MODE")) exec_mode = std::atoi(v);
-    if (exec_mode == 1) {
-        g_origin_executor.initialize(this);
-    } else if (exec_mode == 3) {
+    if (exec_mode == 3) {
         g_dh_executor.initialize(this);
-    } else if (exec_mode == 4) {
-        g_roomopt_executor.initialize(this);
-    } else if (exec_mode == 5) {
-        g_room_executor.initialize(this);
-    } else if (exec_mode == 6) {
-        g_game_executor.initialize(this);
-    } else if (exec_mode == 7) {
-        g_incremental_tpg_executor.initialize(this);
-    } else if (exec_mode == 8) {
-        g_conservative_incremental_tpg_executor.initialize(this);
     }
 }
 
@@ -218,9 +92,6 @@ void Executor::rebuild_from_system_states()
     official_process_initialized_ = true;
 }
 
-// ════════════════════════════════════════════════════════════════════
-// Default 模式 process_new_plan：标准 append/window + TPG
-// ════════════════════════════════════════════════════════════════════
 vector<State> Executor::process_new_plan_official(int sync_time_limit, Plan& plan_struct,
                                                  vector<vector<Action>>& staged_actions)
 {
@@ -271,7 +142,6 @@ vector<State> Executor::process_new_plan_official(int sync_time_limit, Plan& pla
         }
     }
 
-    // MCP 模拟裁剪（Default 模式：无跟随）
     vector<int> action_index(env->num_of_agents, 0);
     curr_states = env->system_states;
     std::vector<std::list<int>> temp_tpg(env->map.size());
@@ -280,15 +150,6 @@ vector<State> Executor::process_new_plan_official(int sync_time_limit, Plan& pla
         auto pre_states = curr_states;
         for (int i = 0; i < env->num_of_agents; i++) {
             if ((int)staged_actions[i].size() <= action_index[i]) {
-                if (trace_agent_or_loc(env, i, curr_states[i].location) && tpg_trace_consume_line()) {
-                    const int loc = curr_states[i].location;
-                    std::fprintf(stderr,
-                        "[TPG_TRACE_PLAN_CROP] tick=%d step=%d agent=%d loc=%s reason=no_staged "
-                        "staged=%zu idx=%d currQ=%s\n",
-                        env->system_timestep, t, i, loc_to_rc(env, loc).c_str(),
-                        staged_actions[i].size(), action_index[i],
-                        (is_valid_location(loc) ? queue_summary(tpg[loc]).c_str() : "[]"));
-                }
                 curr_states[i].timestep++;
                 continue;
             }
@@ -301,54 +162,16 @@ vector<State> Executor::process_new_plan_official(int sync_time_limit, Plan& pla
 
             if (curr_action == Action::FW) {
                 const int candidate = curr_location + moves[curr_orientation];
-                bool advanced = false;
                 if (at_tpg_front && is_valid_location(candidate) &&
                     !tpg[candidate].empty() && tpg[candidate].front() == i) {
-                    new_location = candidate; action_index[i]++; advanced = true;
-                }
-                if (trace_agent_or_loc(env, i, curr_location, candidate) && tpg_trace_consume_line()) {
-                    const char* reason = "advance";
-                    if (!at_tpg_front) reason = "blocked_curr_front";
-                    else if (!is_valid_location(candidate)) reason = "invalid_next";
-                    else if (tpg[candidate].empty()) reason = "empty_next_q";
-                    else if (tpg[candidate].front() != i) reason = "blocked_next_front";
-                    std::fprintf(stderr,
-                        "[TPG_TRACE_PLAN_CROP] tick=%d step=%d agent=%d loc=%s next=%s action=F "
-                        "result=%s advanced=%d staged=%zu idx=%d currQ=%s nextQ=%s\n",
-                        env->system_timestep, t, i,
-                        loc_to_rc(env, curr_location).c_str(),
-                        loc_to_rc(env, candidate).c_str(),
-                        reason, advanced ? 1 : 0,
-                        staged_actions[i].size(), action_index[i],
-                        (is_valid_location(curr_location) ? queue_summary(tpg[curr_location]).c_str() : "[]"),
-                        (is_valid_location(candidate) ? queue_summary(tpg[candidate]).c_str() : "[]"));
+                    new_location = candidate; action_index[i]++;
                 }
             } else if (curr_action == Action::CR) {
                 new_orientation = (curr_orientation + 1) % 4;
                 if (at_tpg_front) action_index[i]++;
-                if (trace_agent_or_loc(env, i, curr_location) && tpg_trace_consume_line()) {
-                    std::fprintf(stderr,
-                        "[TPG_TRACE_PLAN_CROP] tick=%d step=%d agent=%d loc=%s action=R "
-                        "result=%s staged=%zu idx=%d currQ=%s\n",
-                        env->system_timestep, t, i,
-                        loc_to_rc(env, curr_location).c_str(),
-                        at_tpg_front ? "advance" : "blocked_curr_front",
-                        staged_actions[i].size(), action_index[i],
-                        (is_valid_location(curr_location) ? queue_summary(tpg[curr_location]).c_str() : "[]"));
-                }
             } else if (curr_action == Action::CCR) {
                 new_orientation = (curr_orientation + 3) % 4;
                 if (at_tpg_front) action_index[i]++;
-                if (trace_agent_or_loc(env, i, curr_location) && tpg_trace_consume_line()) {
-                    std::fprintf(stderr,
-                        "[TPG_TRACE_PLAN_CROP] tick=%d step=%d agent=%d loc=%s action=C "
-                        "result=%s staged=%zu idx=%d currQ=%s\n",
-                        env->system_timestep, t, i,
-                        loc_to_rc(env, curr_location).c_str(),
-                        at_tpg_front ? "advance" : "blocked_curr_front",
-                        staged_actions[i].size(), action_index[i],
-                        (is_valid_location(curr_location) ? queue_summary(tpg[curr_location]).c_str() : "[]"));
-                }
             }
             curr_states[i].location = new_location;
             curr_states[i].orientation = new_orientation;
@@ -382,27 +205,9 @@ vector<State> Executor::process_new_plan(int sync_time_limit, Plan& plan_struct,
                                          vector<vector<Action>>& staged_actions)
 {
     switch (optsvr::cfg().executor_mode) {
-        case 1:
-            if (!g_origin_executor.is_initialized()) g_origin_executor.initialize(this);
-            return g_origin_executor.process_new_plan(sync_time_limit, plan_struct, staged_actions);
         case 3:
             if (!g_dh_executor.is_initialized()) g_dh_executor.initialize(this);
             return g_dh_executor.process_new_plan(sync_time_limit, plan_struct, staged_actions);
-        case 4:
-            if (!g_roomopt_executor.is_initialized()) g_roomopt_executor.initialize(this);
-            return g_roomopt_executor.process_new_plan(sync_time_limit, plan_struct, staged_actions);
-        case 5:
-            if (!g_room_executor.is_initialized()) g_room_executor.initialize(this);
-            return g_room_executor.process_new_plan(sync_time_limit, plan_struct, staged_actions);
-        case 6:
-            if (!g_game_executor.is_initialized()) g_game_executor.initialize(this);
-            return g_game_executor.process_new_plan(sync_time_limit, plan_struct, staged_actions);
-        case 7:
-            if (!g_incremental_tpg_executor.is_initialized()) g_incremental_tpg_executor.initialize(this);
-            return g_incremental_tpg_executor.process_new_plan(sync_time_limit, plan_struct, staged_actions);
-        case 8:
-            if (!g_conservative_incremental_tpg_executor.is_initialized()) g_conservative_incremental_tpg_executor.initialize(this);
-            return g_conservative_incremental_tpg_executor.process_new_plan(sync_time_limit, plan_struct, staged_actions);
         default: return process_new_plan_official(sync_time_limit, plan_struct, staged_actions);
     }
 }
@@ -416,28 +221,7 @@ void Executor::next_command(int exec_time_limit, std::vector<ExecutionCommand>& 
         return;
     }
 
-    // RoomOptExecutor 维护自己的 TPG + 连续STOP截断
-    if (optsvr::cfg().executor_mode == 4) {
-        if (!g_roomopt_executor.is_initialized()) g_roomopt_executor.initialize(this);
-        g_roomopt_executor.next_command(exec_time_limit, agent_command);
-        return;
-    }
-
-    // RoomExecutor 维护自己的 TPG (Room专用)
-    if (optsvr::cfg().executor_mode == 5) {
-        if (!g_room_executor.is_initialized()) g_room_executor.initialize(this);
-        g_room_executor.next_command(exec_time_limit, agent_command);
-        return;
-    }
-
-    // GameExecutor 维护自己的 TPG + 对流检测 + 截断
-    if (optsvr::cfg().executor_mode == 6) {
-        if (!g_game_executor.is_initialized()) g_game_executor.initialize(this);
-        g_game_executor.next_command(exec_time_limit, agent_command);
-        return;
-    }
-
-    // 更新 TPG（Default/Origin/IncrementalTpg 模式共用）
+    // 更新 TPG
     for (int i = 0; i < (int)env->system_states.size(); i++) {
         int prev_location = previous_locations[i];
         int curr_location = env->system_states[i].location;
@@ -451,26 +235,9 @@ void Executor::next_command(int exec_time_limit, std::vector<ExecutionCommand>& 
         }
     }
 
-    // 按模式分流 MCP 决策
-    switch (optsvr::cfg().executor_mode) {
-        case 1:
-            if (!g_origin_executor.is_initialized()) g_origin_executor.initialize(this);
-            g_origin_executor.next_command(exec_time_limit, agent_command);
-            break;
-        case 7:
-            if (!g_incremental_tpg_executor.is_initialized()) g_incremental_tpg_executor.initialize(this);
-            g_incremental_tpg_executor.next_command(exec_time_limit, agent_command);
-            break;
-        case 8:
-            if (!g_conservative_incremental_tpg_executor.is_initialized()) g_conservative_incremental_tpg_executor.initialize(this);
-            g_conservative_incremental_tpg_executor.next_command(exec_time_limit, agent_command);
-            break;
-        default:
-            // Default: 基础 MCP（无跟随）
-            for (int i = 0; i < (int)env->system_states.size(); i++)
-                mcp_default_executor(i, agent_command);
-            break;
-    }
+    // Default: 基础 MCP
+    for (int i = 0; i < (int)env->system_states.size(); i++)
+        mcp_default_executor(i, agent_command);
 }
 
 bool Executor::mcp_default_executor(int agent_id, std::vector<ExecutionCommand>& agent_command)
@@ -483,77 +250,34 @@ bool Executor::mcp_default_executor(int agent_id, std::vector<ExecutionCommand>&
         next_location = curr_location + moves[curr_orientation];
 
     if (env->staged_actions[agent_id].empty()) {
-        if (trace_agent_or_loc(env, agent_id, curr_location, next_location) && tpg_trace_consume_line()) {
-            std::fprintf(stderr,
-                "[TPG_TRACE_MCP] tick=%d agent=%d loc=%s next=%s ori=%d decision=STOP "
-                "reason=staged_empty currQ=%s nextQ=%s\n",
-                env->system_timestep, agent_id,
-                loc_to_rc(env, curr_location).c_str(),
-                loc_to_rc(env, next_location).c_str(),
-                curr_orientation,
-                (is_valid_location(curr_location) ? queue_summary(tpg[curr_location]).c_str() : "[]"),
-                (is_valid_location(next_location) ? queue_summary(tpg[next_location]).c_str() : "[]"));
-        }
         agent_command[agent_id] = ExecutionCommand::STOP; return false;
     } else if (env->staged_actions[agent_id].front() != Action::FW) {
-        if (trace_agent_or_loc(env, agent_id, curr_location, next_location) && tpg_trace_consume_line()) {
-            std::fprintf(stderr,
-                "[TPG_TRACE_MCP] tick=%d agent=%d loc=%s next=%s ori=%d decision=GO "
-                "reason=non_fw action=%c staged=%zu currQ=%s nextQ=%s\n",
-                env->system_timestep, agent_id,
-                loc_to_rc(env, curr_location).c_str(),
-                loc_to_rc(env, next_location).c_str(),
-                curr_orientation,
-                action_to_char(env->staged_actions[agent_id].front()),
-                env->staged_actions[agent_id].size(),
-                (is_valid_location(curr_location) ? queue_summary(tpg[curr_location]).c_str() : "[]"),
-                (is_valid_location(next_location) ? queue_summary(tpg[next_location]).c_str() : "[]"));
-        }
-        agent_command[agent_id] = ExecutionCommand::GO; return false;
-    } else {
-        if (!is_valid_location(next_location)) {
-            if (trace_agent_or_loc(env, agent_id, curr_location, next_location) && tpg_trace_consume_line()) {
-                std::fprintf(stderr,
-                    "[TPG_TRACE_MCP] tick=%d agent=%d loc=%s next=%s ori=%d decision=STOP "
-                    "reason=invalid_next staged=%zu currQ=%s\n",
-                    env->system_timestep, agent_id,
-                    loc_to_rc(env, curr_location).c_str(),
-                    loc_to_rc(env, next_location).c_str(),
-                    curr_orientation,
-                    env->staged_actions[agent_id].size(),
-                    (is_valid_location(curr_location) ? queue_summary(tpg[curr_location]).c_str() : "[]"));
-            }
-            agent_command[agent_id] = ExecutionCommand::STOP; return false;
-        }
-        if (tpg[next_location].empty() || tpg[next_location].front() == agent_id) {
-            if (trace_agent_or_loc(env, agent_id, curr_location, next_location) && tpg_trace_consume_line()) {
-                std::fprintf(stderr,
-                    "[TPG_TRACE_MCP] tick=%d agent=%d loc=%s next=%s ori=%d decision=GO "
-                    "reason=front_ok staged=%zu currQ=%s nextQ=%s\n",
-                    env->system_timestep, agent_id,
-                    loc_to_rc(env, curr_location).c_str(),
-                    loc_to_rc(env, next_location).c_str(),
-                    curr_orientation,
-                    env->staged_actions[agent_id].size(),
-                    (is_valid_location(curr_location) ? queue_summary(tpg[curr_location]).c_str() : "[]"),
-                    queue_summary(tpg[next_location]).c_str());
-            }
-            agent_command[agent_id] = ExecutionCommand::GO; return true;
-        } else {
-            if (trace_agent_or_loc(env, agent_id, curr_location, next_location) && tpg_trace_consume_line()) {
-                std::fprintf(stderr,
-                    "[TPG_TRACE_MCP] tick=%d agent=%d loc=%s next=%s ori=%d decision=STOP "
-                    "reason=blocked_next_front front=%d staged=%zu currQ=%s nextQ=%s\n",
-                    env->system_timestep, agent_id,
-                    loc_to_rc(env, curr_location).c_str(),
-                    loc_to_rc(env, next_location).c_str(),
-                    curr_orientation,
-                    tpg[next_location].empty() ? -1 : tpg[next_location].front(),
-                    env->staged_actions[agent_id].size(),
-                    (is_valid_location(curr_location) ? queue_summary(tpg[curr_location]).c_str() : "[]"),
-                    queue_summary(tpg[next_location]).c_str());
-            }
-            agent_command[agent_id] = ExecutionCommand::STOP; return false;
-        }
+        // 旋转
+        agent_command[agent_id] = ExecutionCommand::STOP; return false;
     }
+
+    // 尝试前进
+    if (!is_valid_location(next_location)) {
+        agent_command[agent_id] = ExecutionCommand::STOP; return false;
+    }
+
+    const auto& next_queue = tpg[next_location];
+    if (!is_valid_location(curr_location)) {
+        agent_command[agent_id] = ExecutionCommand::STOP; return false;
+    }
+    const auto& curr_queue = tpg[curr_location];
+
+    // 当前格不在队首时等待
+    if (curr_queue.empty() || curr_queue.front() != agent_id) {
+        agent_command[agent_id] = ExecutionCommand::STOP; return false;
+    }
+
+    // 目标格无 agent 或自己在队首则前进
+    if (next_queue.empty() || next_queue.front() == agent_id) {
+        agent_command[agent_id] = ExecutionCommand::GO;
+        return true;
+    }
+
+    agent_command[agent_id] = ExecutionCommand::STOP;
+    return false;
 }

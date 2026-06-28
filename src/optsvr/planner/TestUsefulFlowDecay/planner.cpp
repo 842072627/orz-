@@ -397,7 +397,14 @@ void TestUsefulFlowDecayPlanner::setup_multistep_episode_state(
 
     for (int i = 0; i < env->num_of_agents; i++) {
         if (env->goal_locations[i].empty()) {
-            trajLNS_.tasks[i] = env->curr_states[i].location;
+            // 无任务时回家（首次在 timestep 0 保存原始起点，之后沿用）
+            static std::vector<int> s_dummy_goals;
+            if (env->curr_timestep == 0) {
+                s_dummy_goals.resize(env->num_of_agents);
+                for (int j = 0; j < env->num_of_agents; j++)
+                    s_dummy_goals[j] = env->start_states[j].location;
+            }
+            trajLNS_.tasks[i] = s_dummy_goals[i];
             local_priority[i] = -1e6;
         } else {
             trajLNS_.tasks[i] = env->goal_locations[i].front().first;
@@ -547,7 +554,14 @@ void TestUsefulFlowDecayPlanner::refresh_multistep_step_state(SharedEnvironment*
 
     for (int i = 0; i < env->num_of_agents; i++) {
         if (env->goal_locations[i].empty()) {
-            trajLNS_.tasks[i] = env->curr_states[i].location;
+            // 无任务时回家（首次在 timestep 0 保存原始起点，之后沿用）
+            static std::vector<int> s_dummy_goals;
+            if (env->curr_timestep == 0) {
+                s_dummy_goals.resize(env->num_of_agents);
+                for (int j = 0; j < env->num_of_agents; j++)
+                    s_dummy_goals[j] = env->start_states[j].location;
+            }
+            trajLNS_.tasks[i] = s_dummy_goals[i];
             local_priority[i] = -1e6;
         } else {
             trajLNS_.tasks[i] = env->goal_locations[i].front().first;
