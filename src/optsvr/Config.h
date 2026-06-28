@@ -267,6 +267,7 @@ constexpr float OPT_FLOW_TURN_TIE = 0.1f;       // Flow guide path同分时的�
 constexpr int   OPT_FLOW_VERTEX_COST_MODE = 4;  // 0=原版base,1=二次,2=指数,3=线性+指数,4=线性+二次尾部
 constexpr int   OPT_FLOW_VERTEX_COST_THRESHOLD = 0;
 constexpr int   OPT_FLOW_VERTEX_COST_WEIGHT = 45;
+
 constexpr int   OPT_FLOW_VERTEX_COST_CAP = 100000;
 constexpr float OPT_FLOW_VERTEX_COST_EXP_BASE = 3.0f;
 constexpr int   OPT_FLOW_VERTEX_COST_LINEAR_END = 4;
