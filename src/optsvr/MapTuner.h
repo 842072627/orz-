@@ -106,8 +106,8 @@ inline void load_for_combined(const MapProfile& profile, const SharedEnvironment
 
         case MapType::WAREHOUSE_DOMAIN:
             c.skip_test = false;
-            c.schedule_mode = 1;
-            c.planner_mode = 11;  // test_useful FlowDecay copy
+            c.schedule_mode = 10;  // IronZone (含 future flow 方向锁)
+            c.planner_mode = 11;   // test_useful FlowDecay copy
             c.ware_direct = true;
 
             c.executor_mode = 3;  // 3
@@ -132,6 +132,24 @@ inline void load_for_combined(const MapProfile& profile, const SharedEnvironment
             //c.reassign_keep_bias = 14;
             //c.reassign_keep_bias = 5;
             //c.reassign_enabled = false;
+
+            // IronZone scheduler + future flow settings
+            c.iron_zone_rows = 19;
+            c.iron_zone_cols = 18;
+            c.iron_max_radius = 1;
+            c.iron_dist_weight = 1.8f;
+            c.iron_task_len_weight = 1.25f;
+            c.iron_long_task_th = 1250;
+            c.iron_stats_interval = 10;
+            c.iron_lane_enabled = 0;
+
+            c.iron_future_flow_w = 1.0f;
+            c.iron_future_flow_k = 1.0f;
+            c.iron_future_flow_decay = 0.01f;
+            c.iron_future_flow_lock_th = 100.0f;  // 方向锁阈值
+            c.iron_future_flow_congest_cap = 320.0f;
+            c.iron_future_flow_zone_rows = 20;
+            c.iron_future_flow_zone_cols = 14;
 
             break;
 
