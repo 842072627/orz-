@@ -775,18 +775,25 @@ void IronZoneScheduler::schedule(int time_limit_ms,
             std::fprintf(stderr, "[IronZone] pretick: zones=%d active=%d path_ready=%d\n",
                 ff_zone_count_, n_active_zone, ff_path_ready_ ? 1 : 0);
         }
+    } // end if (ff_enabled) pretick
+
+    // Compute dynamic lock threshold once, shared between pre-filter and realtime check.
+    // idle_ratio >= 50%: lock_th = 200 (same as current fixed value)
+    // idle_ratio < 50%:  ramps up to 250 as agents fill up
+    float dynamic_lock_th = 200.0f;
+    {
+        float idle_ratio = (n_agents > 0) ? static_cast<float>(free_agents.size()) / n_agents : 1.0f;
+        if (idle_ratio >= 0.50f) {
+            dynamic_lock_th = 200.0f;
+        } else {
+            dynamic_lock_th = 200.0f + 100.0f * (0.50f - idle_ratio);
+            if (dynamic_lock_th > 250.0f) dynamic_lock_th = 250.0f;
+        }
     }
 
     if (ff_enabled && ff_path_ready_ &&
         (cfg().iron_future_flow_lock_th != 0.0f ||
          cfg().iron_future_flow_congest_cap > 0.0f)) {
-        // Dynamic lock threshold: start low when many agents are idle,
-        // ramp up as fewer agents remain idle (more congestion).
-        // Formula: lock_th = 50 + 200 * (1 - idle_ratio), max 250.
-        float idle_ratio = (n_agents > 0) ? static_cast<float>(free_agents.size()) / n_agents : 1.0f;
-        float lock_th = 50.0f + 200.0f * (1.0f - idle_ratio);
-        if (lock_th > 250.0f) lock_th = 250.0f;
-        if (lock_th < 50.0f) lock_th = 50.0f;
         const float congest_cap = cfg().iron_future_flow_congest_cap;
         for (TaskMeta& task : tasks) {
             auto it = task_pool_snapshot_.find(task.tid);
@@ -818,7 +825,7 @@ void IronZoneScheduler::schedule(int time_limit_ms,
                         blocked = true;
                         break;
                     }
-                    if (lock_th > 0.0f && total_flow >= lock_th) {
+                    if (dynamic_lock_th > 0.0f && total_flow >= dynamic_lock_th) {
                         int dom = 0;
                         if (zd[1] > zd[dom]) dom = 1;
                         if (zd[2] > zd[dom]) dom = 2;
@@ -864,7 +871,7 @@ void IronZoneScheduler::schedule(int time_limit_ms,
              cfg().iron_future_flow_congest_cap <= 0.0f)) {
             return true;
         }
-        const float lock_th = cfg().iron_future_flow_lock_th;
+        const float lock_th = dynamic_lock_th;
         const float congest_cap = cfg().iron_future_flow_congest_cap;
         if (lock_th <= 0.0f && congest_cap <= 0.0f) return true;
 

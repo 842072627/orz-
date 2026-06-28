@@ -6,28 +6,27 @@
 #include "planner.h"
 #include "const.h"
 
-// FlowDecay planner (optsvr/planner/FlowDecay/planner.h)
-#include "../optsvr/planner/FlowDecay/planner.h"
+#include "optsvr/planner/FlowDecay/planner.h"
 // GameOpt planner (optsvr/planner/GameOpt/GameOptPlanner.h)
-#include "../optsvr/planner/GameOpt/GameOptPlanner.h"
+#include "optsvr/planner/GameOpt/GameOptPlanner.h"
 // TurnAware planner (optsvr/planner/TurnAware/TurnAwarePlanner.h)
-#include "../optsvr/planner/TurnAware/TurnAwarePlanner.h"
+#include "optsvr/planner/TurnAware/TurnAwarePlanner.h"
 // EPIBT planner (optsvr/planner/EPIBT/EPIBTPlanner.h)
-#include "../optsvr/planner/EPIBT/EPIBTPlanner.h"
+#include "optsvr/planner/EPIBT/EPIBTPlanner.h"
 // RandomFlowEPIBT planner (optsvr/planner/RandomFlowEPIBT/RandomFlowEPIBTPlanner.h)
-#include "../optsvr/planner/RandomFlowEPIBT/RandomFlowEPIBTPlanner.h"
+#include "optsvr/planner/RandomFlowEPIBT/RandomFlowEPIBTPlanner.h"
 // IdleYield planner (optsvr/planner/IdleYield/IdleYieldPlanner.h)
-#include "../optsvr/planner/IdleYield/IdleYieldPlanner.h"
+#include "optsvr/planner/IdleYield/IdleYieldPlanner.h"
 // RoomPlanner (optsvr/planner/RoomPlanner/planner.h)
-#include "../optsvr/planner/RoomPlanner/planner.h"
+#include "optsvr/planner/RoomPlanner/planner.h"
 // RoomTidalPlanner (optsvr/planner/RoomTidalPlanner/RoomTidalPlanner.h)
-#include "../optsvr/planner/RoomTidalPlanner/RoomTidalPlanner.h"
+#include "optsvr/planner/RoomTidalPlanner/RoomTidalPlanner.h"
 // MazeTidalPlanner (optsvr/planner/MazeTidalPlanner/MazeTidalPlanner.h)
-#include "../optsvr/planner/MazeTidalPlanner/MazeTidalPlanner.h"
+#include "optsvr/planner/MazeTidalPlanner/MazeTidalPlanner.h"
 // TestUsefulFlowDecay planner (optsvr/planner/TestUsefulFlowDecay/planner.h)
-#include "../optsvr/planner/TestUsefulFlowDecay/planner.h"
+#include "optsvr/planner/TestUsefulFlowDecay/planner.h"
 // IronFlowDecay planner (optsvr/planner/IronFlowDecay/planner.h)
-#include "../optsvr/planner/IronFlowDecay/planner.h"
+#include "optsvr/planner/IronFlowDecay/planner.h"
 #include "RuntimeConfig.h"
 
 static optsvr::GameOptPlanner* g_game_planner_ = nullptr;
