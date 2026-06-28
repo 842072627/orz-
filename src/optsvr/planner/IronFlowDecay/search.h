@@ -1,0 +1,22 @@
+
+#ifndef IRON_FLOW_DECAY_search_hpp
+#define IRON_FLOW_DECAY_search_hpp
+
+#include "Types.h"
+#include "utils.h"
+#include "Memory.h"
+#include "heap.h"
+#include "search_node.h"
+#include "heuristics.h"
+
+namespace IronFlowDecayPlan{
+//a astar minimized the opposide traffic flow with existing traffic flow
+
+s_node astar(SharedEnvironment* env, std::vector<Int4>& flow,
+    HeuristicTable& ht, Traj& traj,
+    MemoryPool& mem, int start, int goal, Neighbors* ns, const TimePoint* deadline = nullptr,
+    const std::vector<std::vector<int>>* extra_weights = nullptr,
+    std::vector<Int4>* flow_opp = nullptr);
+}
+
+#endif

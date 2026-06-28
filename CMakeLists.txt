@@ -8,11 +8,18 @@ IF(NOT CMAKE_BUILD_TYPE)
 ENDIF()
 
 include_directories("inc")
-
-# default planner
 include_directories("default_planner")
+include_directories("src/optsvr")
 
-file(GLOB SOURCES "src/*.cpp" "default_planner/*.cpp")
+# 自动添加 optsvr 子目录到 include 路径（支持裸名 include）
+file(GLOB_RECURSE OPT_HEADERS "src/optsvr/*.h")
+foreach(hdr ${OPT_HEADERS})
+    get_filename_component(hdir ${hdr} DIRECTORY)
+    include_directories(${hdir})
+endforeach()
+
+file(GLOB_RECURSE OPT_SOURCES "src/optsvr/*.cpp")
+file(GLOB SOURCES "src/*.cpp" "default_planner/*.cpp" ${OPT_SOURCES})
 file(GLOB DEFAULT_PLANNER_SOURCES "default_planner/*.cpp")
 
 

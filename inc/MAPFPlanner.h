@@ -4,6 +4,7 @@
 #include "ActionModel.h"
 #include "Plan.h"
 
+namespace optsvr { class OptPlanner; }
 
 class MAPFPlanner
 {
@@ -12,7 +13,7 @@ public:
 
 	MAPFPlanner(SharedEnvironment* env): env(env){};
     MAPFPlanner(){env = new SharedEnvironment();};
-	virtual ~MAPFPlanner(){delete env;};
+	virtual ~MAPFPlanner();
 
 
     virtual void initialize(int preprocess_time_limit);
@@ -20,4 +21,6 @@ public:
     // return next states for all agents
     virtual void plan(int time_limit, Plan & plan);
 
+private:
+    optsvr::OptPlanner* opt_planner_ = nullptr;
 };

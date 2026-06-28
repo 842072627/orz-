@@ -2,6 +2,10 @@
 #include "Tasks.h"
 #include "utils.h"
 #include "heuristics.h"
+#include "RuntimeConfig.h"
+#include "PerfStats.h"
+#include <algorithm>
+#include <chrono>
 
 // The initialize function will be called by competition system at the preprocessing stage.
 // Implement the initialize functions of the planner and scheduler to load or compute auxiliary data.
@@ -9,6 +13,7 @@
 // This is an offline step, after it completes then evaluation begins.
 void Entry::initialize(int preprocess_time_limit)
 {
+    optsvr::perf().init();
     scheduler->initialize(preprocess_time_limit);
     planner->initialize(preprocess_time_limit);
 }
@@ -20,14 +25,45 @@ void Entry::initialize(int preprocess_time_limit)
 //NB: the parameter time_limit is specified in milliseconds.
 void Entry::compute(int time_limit, Plan & plan, std::vector<int> & proposed_schedule)
 {
+
+    // 首轮 compute 时 task_pool 已填充，用 task/agent 比例做 skip_test 延迟判断
+    // static bool first_compute = true;
+    // if (first_compute) {
+    //     first_compute = false;
+    //     float task_ratio = static_cast<float>(env->task_pool.size())
+    //                      / std::max(1, env->num_of_agents);
+    //     if (task_ratio > 1.05) {
+    //         optsvr::cfg().skip_test = true;
+    //     }
+    // }
+    //optsvr::cfg().skip_test = false;
+
+    // 跳过当前算例：不做任务分配和路径规划，所有 agent 保持静止
+    if (optsvr::cfg().skip_test) {
+        // 必须设置正确大小的空 plan，否则 Simulator 的 validate_staged_actions_prefix 校验会抛异常
+        plan.actions.resize(env->num_of_agents);
+        return;
+    }
+
+    using clk = std::chrono::steady_clock;
+    auto t0 = clk::now();
+
     //call the task scheduler to assign tasks to agents
     scheduler->plan(time_limit,proposed_schedule);
+
+    auto t1 = clk::now();
 
     //then update the first unfinished errand/location of tasks for planner reference
     update_goal_locations(proposed_schedule);
     
     //call the planner to compute the actions
     planner->plan(time_limit,plan);
+
+    auto t2 = clk::now();
+
+    // 记录性能统计
+    auto us = [](auto d){ return std::chrono::duration_cast<std::chrono::microseconds>(d).count(); };
+    optsvr::perf().record(us(t1-t0), us(t2-t1), us(t2-t0));
 
 }
 
