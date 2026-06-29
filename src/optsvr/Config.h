@@ -261,6 +261,7 @@ constexpr int   GUIDE_FLOW_SAME_W = 1;        // IDEA/IRON Config.h 写作 int 1
 // Fullfill highway
 constexpr bool  FULLFILL_HIGHWAY_FORCE_MOVE = false; // PIBT单方向格强制驱离（warehouse窄道多易死锁，默认关）
 constexpr bool  WARE_DIRECT      = false;      // Warehouse 通道定向策略开关
+constexpr bool  DUMMY_GOAL_HOME  = false;      // idle agent 回原始起点（Entry.cpp 机制）
 constexpr int   OPT_FLOW_TURN_PENALTY = 0;      // Flow guide path中每次转弯额外cost
 constexpr int   OPT_FLOW_START_TURN_PENALTY = 2; // Flow guide第一步相对当前朝向的转弯cost
 constexpr float OPT_FLOW_TURN_TIE = 0.1f;       // Flow guide path同分时的转弯tie-break

@@ -4,6 +4,7 @@
 #include "heuristics.h"
 #include "RuntimeConfig.h"
 #include "PerfStats.h"
+#include "home_return.h"
 #include <algorithm>
 #include <chrono>
 
@@ -55,7 +56,29 @@ void Entry::compute(int time_limit, Plan & plan, std::vector<int> & proposed_sch
 
     //then update the first unfinished errand/location of tasks for planner reference
     update_goal_locations(proposed_schedule);
-    
+
+    // 回家机制：idle agent 如果在 interior+guide 之外且出生在 interior 内，派 fake task 回家
+    // 就像做真实任务一样，到家或接到真实任务后自动恢复
+    if (optsvr::cfg().dummy_goal_home) {
+        const int cols = env->cols;
+        for (int i = 0; i < env->num_of_agents; i++) {
+            // 已有真实任务 → 跳过
+            if (!env->goal_locations[i].empty()) continue;
+            // 还没初始化好 → 跳过
+            if (i >= (int)g_home_start_locs.size()) continue;
+            int home_loc = g_home_start_locs[i];
+            if (home_loc < 0 || home_loc >= (int)g_home_inside_mask.size()) continue;
+            // 出生在外部 → 不回家（家在外面不需要回）
+            if (!g_home_inside_mask[home_loc]) continue;
+            // 当前在 interior+guide 内部 → 不需回家
+            int curr_loc = env->curr_states[i].location;
+            if (curr_loc >= 0 && curr_loc < (int)g_home_inside_mask.size() &&
+                g_home_inside_mask[curr_loc]) continue;
+            // idle + 出生在内部 + 当前在外部 → 派 fake task 回家
+            env->goal_locations[i].push_back({home_loc, 0});
+        }
+    }
+
     //call the planner to compute the actions
     planner->plan(time_limit,plan);
 

@@ -159,6 +159,7 @@ struct RuntimeConfig {
     int   guide_flow_opposite_w;
     int   guide_flow_same_w;
     bool  ware_direct;
+    bool  dummy_goal_home;
     int   flow_turn_penalty;
     int   flow_start_turn_penalty;
     float flow_turn_tie;
@@ -464,6 +465,7 @@ private:
         random_route_load_dynamic_path_weight = RANDOM_ROUTE_LOAD_DYNAMIC_PATH_WEIGHT;
         flow_decay = FLOW_DECAY; flow_decay_scale = FLOW_DECAY_SCALE;
         ware_direct = WARE_DIRECT;
+        dummy_goal_home = DUMMY_GOAL_HOME;
         flow_turn_penalty = OPT_FLOW_TURN_PENALTY;
         flow_start_turn_penalty = OPT_FLOW_START_TURN_PENALTY;
         flow_turn_tie = OPT_FLOW_TURN_TIE;

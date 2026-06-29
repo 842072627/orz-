@@ -65,6 +65,7 @@ inline void load_for_combined(const MapProfile& profile, const SharedEnvironment
             c.schedule_mode = 10;  // IronZone (含 future flow 方向锁)
             c.planner_mode = 11;   // TestUsefulFlowDecay
             c.ware_direct = true;
+            c.dummy_goal_home = true;
             c.executor_mode = 3;   // DHExecutor
 
             // IronZone scheduler + future flow settings
