@@ -396,16 +396,18 @@ void TestUsefulFlowDecayPlanner::setup_multistep_episode_state(
     prev_decision_.clear();
     prev_decision_.resize(env->map.size(), -1);
 
-    // 保存原始起点（用于 home_return 机制）
-    if (env->curr_timestep == 0) {
+    // 保存原始起点（DefaultPlanner 方案：独立 flag，不用 curr_timestep）
+    static bool g_home_inited = false;
+    if (!g_home_inited && env->num_of_agents > 0) {
         g_home_start_locs.resize(env->num_of_agents);
         for (int j = 0; j < env->num_of_agents; j++)
             g_home_start_locs[j] = env->start_states[j].location;
+        g_home_inited = true;
     }
 
     for (int i = 0; i < env->num_of_agents; i++) {
         if (env->goal_locations[i].empty()) {
-            trajLNS_.tasks[i] = env->curr_states[i].location;
+            trajLNS_.tasks[i] = g_home_start_locs[i];
             local_priority[i] = -1e6;
         } else {
             trajLNS_.tasks[i] = env->goal_locations[i].front().first;
@@ -440,8 +442,13 @@ void TestUsefulFlowDecayPlanner::setup_multistep_episode_state(
         // 跨 episode 的优先级更新
         if (require_guide_path_[i])
             local_priority[i] = p_copy_[i];
-        else if (!env->goal_locations[i].empty())
-            local_priority[i] = local_priority[i] + 1;
+        else if (!env->goal_locations[i].empty()) {
+            // 回家任务不递增优先级（保持基线 p_copy_）
+            if (!(optsvr::cfg().dummy_goal_home &&
+                  i < (int)g_home_start_locs.size() &&
+                  trajLNS_.tasks[i] == g_home_start_locs[i]))
+                local_priority[i] = local_priority[i] + 1;
+        }
 
         if (!env->goal_locations[i].empty() &&
             trajLNS_.neighbors[env->curr_states[i].location].size() == 1) {
@@ -555,7 +562,7 @@ void TestUsefulFlowDecayPlanner::refresh_multistep_step_state(SharedEnvironment*
 
     for (int i = 0; i < env->num_of_agents; i++) {
         if (env->goal_locations[i].empty()) {
-            trajLNS_.tasks[i] = env->curr_states[i].location;
+            trajLNS_.tasks[i] = g_home_start_locs[i];
             local_priority[i] = -1e6;
         } else {
             trajLNS_.tasks[i] = env->goal_locations[i].front().first;
@@ -852,31 +859,6 @@ void TestUsefulFlowDecayPlanner::build_fullfill_highway(SharedEnvironment* env)
                   << count << " forbids, cost=" << FORBID_COST
                   << ", guide_penalty=" << GUIDE_PENALTY
                   << ", rows=" << pr.size() << " cols=" << pc.size() << "\n";
-    }
-
-    // ---- Build inside mask for home_return mechanism ----
-    // interior = c > x1 && c < x2 && r > y1 && r < y2
-    // guide zone = guide penalty cells at boundary intersections
-    g_home_inside_mask.assign(map_size, 0);
-    for (int r = 0; r < rows; r++)
-        for (int c = 0; c < cols; c++)
-            if (inr(c, r))
-                g_home_inside_mask[r * cols + c] = 1;
-    // Column passage guide zone: 3 cols × 2 rows at top/bottom boundary
-    for (size_t i = 0; i < pc.size(); i++) {
-        for (int dc = -1; dc <= 1; dc++) {
-            int gc = pc[i] + dc;
-            auto mark = [&](int rr) { if (rr >= 0 && rr < rows && gc >= 0 && gc < cols)
-                g_home_inside_mask[rr * cols + gc] = 1; };
-            mark(y1); mark(y1 - 1); mark(y2); mark(y2 + 1);
-        }
-    }
-    // Row passage guide zone: 1 col × 2 rows at left/right boundary
-    for (size_t i = 0; i < pr.size(); i++) {
-        auto mark = [&](int cc) { int rr = pr[i];
-            if (rr >= 0 && rr < rows && cc >= 0 && cc < cols)
-                g_home_inside_mask[rr * cols + cc] = 1; };
-        mark(x1); mark(x1 - 1); mark(x2); mark(x2 + 1);
     }
 }
 
