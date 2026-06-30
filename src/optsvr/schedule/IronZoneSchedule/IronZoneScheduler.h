@@ -120,6 +120,8 @@ private:
     // future flow
     void print_round_stats(const RoundStats& stats, int tick) const;
     mutable int ff_locked_candidates_ = 0;
+    std::vector<bool> ff_zone_has_highway_;  // true=zone含highway cell, 免于FF方向锁
+    std::vector<int>  ff_zone_capacity_;     // 每ff_zone可走格子数(容量)
 };
 
 } // namespace optsvr

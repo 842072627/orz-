@@ -121,6 +121,9 @@ struct RuntimeConfig {
     int   iron_future_flow_zone_rows;
     int   iron_future_flow_zone_cols;
     float iron_future_flow_idle_weight;
+    bool  iron_future_flow_highway_exempt;
+    bool  iron_task_steal_enabled;
+    int   iron_task_steal_dist_ratio;
 
     // ---- Iron lane traffic-light planner branch ----
     int   iron_lane_enabled;

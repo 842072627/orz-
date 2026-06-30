@@ -67,6 +67,26 @@ void IronZoneScheduler::initialize(SharedEnvironment* env, int /*preprocess_time
             std::fprintf(stderr, "[IronZone] future-flow zones=%dx%d path_ready=%d\n",
                          ff_zone_rows_, ff_zone_cols_, ff_path_ready_ ? 1 : 0);
         }
+
+        // Precompute ff zone capacity (walkable cell count)
+        ff_zone_capacity_.assign(ff_zone_count_, 0);
+        for (int loc = 0; loc < map_size_; loc++) {
+            if (env->map[loc] != 0) continue;
+            int z = ff_zone_of_loc(loc);
+            if (z >= 0 && z < ff_zone_count_)
+                ff_zone_capacity_[z]++;
+        }
+
+        // Precompute which ff zones contain highway cells (exempt from FF direction lock)
+        ff_zone_has_highway_.assign(ff_zone_count_, false);
+        if (cfg().iron_future_flow_highway_exempt) {
+            for (int i = 0; i < IronHighway::NUM_CELLS; i++) {
+                int loc = IronHighway::kConstraints[i].loc;
+                int z = ff_zone_of_loc(loc);
+                if (z >= 0 && z < ff_zone_count_)
+                    ff_zone_has_highway_[z] = true;
+            }
+        }
     }
 }
 
@@ -821,6 +841,7 @@ void IronZoneScheduler::schedule(int time_limit_ms,
                     if (next >= ff_zone_count_) break;
                     const float* zd = &ff_dir_[cur * 4];
                     float total_flow = zd[0] + zd[1] + zd[2] + zd[3];
+                    if (ff_zone_has_highway_[cur]) { cur = next; continue; }
                     if (congest_cap > 0.0f && total_flow >= congest_cap) {
                         blocked = true;
                         break;
@@ -900,6 +921,7 @@ void IronZoneScheduler::schedule(int time_limit_ms,
                 if (next >= ff_zone_count_) break;
                 const float* zd = &ff_dir_[cur * 4];
                 float total_flow = zd[0] + zd[1] + zd[2] + zd[3];
+                if (ff_zone_has_highway_[cur]) { cur = next; continue; }
                 if (congest_cap > 0.0f && total_flow >= congest_cap) {
                     ff_locked_candidates_++;
                     return false;
@@ -1037,6 +1059,54 @@ void IronZoneScheduler::schedule(int time_limit_ms,
         }
     }
 
+    // ---- steal pass: 第一个位置没做的任务可被附近空闲agent抢 ----
+    if (cfg().iron_task_steal_enabled) {
+        // Build zone index of idle agents
+        std::vector<std::vector<int>> idle_by_zone(zone_count_);
+        for (const AgentMeta& agent : free_agents) {
+            if (local_schedule[agent.aid] >= 0) continue;  // has task
+            if (agent.zone >= 0 && agent.zone < zone_count_)
+                idle_by_zone[agent.zone].push_back(agent.aid);
+        }
+
+        const int ratio = std::max(2, cfg().iron_task_steal_dist_ratio);
+        int steal_count = 0;
+        for (const AgentMeta& agent : free_agents) {
+            int tid = local_schedule[agent.aid];
+            if (tid < 0) continue;
+            auto it = task_pool_snapshot_.find(tid);
+            if (it == task_pool_snapshot_.end()) continue;
+            if (it->second.idx_next_loc != 0) continue;  // 第一个位置已做
+            if (it->second.locations.empty()) continue;
+
+            int task_start = it->second.locations[0];
+            int a_r = agent.loc / cols_, a_c = agent.loc % cols_;
+            int s_r = task_start / cols_, s_c = task_start % cols_;
+            int a_dist = std::abs(a_r - s_r) + std::abs(a_c - s_c);
+
+            for (int bid : idle_by_zone[agent.zone]) {
+                if (bid == agent.aid) continue;
+                int b_loc = env->curr_states[bid].location;
+                int b_r = b_loc / cols_, b_c = b_loc % cols_;
+                int b_dist = std::abs(b_r - s_r) + std::abs(b_c - s_c);
+                if (b_dist * ratio < a_dist) {
+                    // 抢！
+                    local_schedule[bid] = tid;
+                    local_schedule[agent.aid] = -1;
+                    proposed_schedule[bid] = tid;
+                    proposed_schedule[agent.aid] = -1;
+                    steal_count++;
+                    if (cfg().debug_level >= 1)
+                        std::fprintf(stderr, "[Steal] agent%d (task%d, dist%d) <- agent%d (dist%d)\n",
+                            bid, tid, b_dist, agent.aid, a_dist);
+                    break;
+                }
+            }
+        }
+        if (cfg().debug_level >= 1 && steal_count > 0)
+            std::fprintf(stderr, "[Steal] total=%d\n", steal_count);
+    }
+
     int interval = cfg().iron_stats_interval;
     if (interval > 0 && cur_tick - last_stats_tick_ >= interval) {
         last_stats_tick_ = cur_tick;
@@ -1070,6 +1140,16 @@ void IronZoneScheduler::idle_relocate(const std::vector<int>& proposed_schedule,
 
     if (idle_list.empty()) return;
 
+    // Count ALL agents per zone for density check
+    std::vector<int> all_agents_in_zone(n_zones, 0);
+    for (int i = 0; i < n_agents; i++) {
+        int loc = env->curr_states[i].location;
+        if (loc < 0 || loc >= map_size_) continue;
+        int z = ff_zone_of_loc(loc);
+        if (z >= 0 && z < n_zones)
+            all_agents_in_zone[z]++;
+    }
+
     // Constants for scoring
     constexpr float W_DIST = 0.1f;
     constexpr float W_REPEL = 5.0f;
@@ -1099,7 +1179,15 @@ void IronZoneScheduler::idle_relocate(const std::vector<int>& proposed_schedule,
             int zd = std::abs(zr1 - zr2) + std::abs(zc1 - zc2);
 
             float repulse = W_REPEL * (idle_agents_in_zone[z] + zone_picks[z]);
-            float score = total_flow + W_DIST * zd + repulse;
+            // 密度惩罚: zone agent数 >= 80% 容量则加高分
+            float density = 0.0f;
+            if (z >= 0 && z < n_zones && ff_zone_capacity_[z] > 0)
+                density = static_cast<float>(all_agents_in_zone[z] + zone_picks[z])
+                        / static_cast<float>(ff_zone_capacity_[z]);
+            float density_penalty = 0.0f;
+            if (density > 0.5f)
+                density_penalty = 500000.0f * (density - 0.5f);
+            float score = total_flow + W_DIST * zd + repulse + density_penalty;
 
             if (score < best_score) {
                 best_score = score;
