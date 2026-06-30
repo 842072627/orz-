@@ -878,17 +878,6 @@ void TestUsefulFlowDecayPlanner::build_fullfill_highway(SharedEnvironment* env)
     // Initialize forbid mask for BFS and PIBT (derived from extra_weights_)
     TestUsefulFlowDecayPlan::init_highway_forbid_mask_from_weights(extra_weights_, map_size);
 
-    // Non-highway penalty: make highway paths relatively cheaper
-    if (cfg().iron_highway_non_highway_penalty > 0) {
-        int nhp = cfg().iron_highway_non_highway_penalty;
-        for (int loc = 0; loc < map_size; loc++) {
-            if (env->map[loc] != 0) continue;  // obstacle
-            if (get_highway_forbid(loc) != 0) continue;  // highway cell (runtime mask)
-            for (int d = 0; d < 4; d++)
-                extra_weights_[loc][d] += nhp;
-        }
-    }
-
     if (cfg().debug_level > 0) {
         int count = 0;
         for (int loc = 0; loc < map_size; loc++)

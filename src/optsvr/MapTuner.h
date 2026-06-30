@@ -81,10 +81,10 @@ inline void load_for_combined(const MapProfile& profile, const SharedEnvironment
             c.iron_future_flow_w = 1.0f;
             c.iron_future_flow_k = 1.0f;
             c.iron_future_flow_decay = 0.01f;
-            c.iron_future_flow_lock_th = 50.0f;
-            c.iron_future_flow_congest_cap = 200.0f;
+            c.iron_future_flow_lock_th = 200.0f;
+            c.iron_future_flow_congest_cap = 320.0f;
             c.iron_future_flow_zone_rows = 40;
-            c.iron_future_flow_zone_cols = 100;
+            c.iron_future_flow_zone_cols = 20;
             break;
 
         default:

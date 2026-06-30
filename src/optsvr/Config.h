@@ -170,12 +170,7 @@ constexpr int   IRON_CORE_TASK_FILTER      = 1;       // 禁止分配任务到co
 constexpr int   IRON_HIGHWAY_FREEZE_ASSIGN = 1;       // 禁止highway上的agent分配新任务(0=关,1=在highway上不分配)
 constexpr int   IRON_HIGHWAY_SKIP_TASK     = 1;       // 过滤highway+guide上的任务(0=关,1=开启)
 
-// Highway 非highway惩罚（让A*偏好走高速）
-constexpr int   IRON_HIGHWAY_NON_HIGHWAY_PENALTY = 0;   // 非highway格子额外代价(0=关)
-constexpr int   IRON_HIGHWAY_ROW_PENALTY   = 250;   // passage row 逆流惩罚
-constexpr int   IRON_HIGHWAY_COL_PENALTY   = 150;   // passage col 逆流惩罚
-
-// IDEA/IRON lane traffic-light planner branch.
+// IDEA/IRON lane traffic-light planner branch. Default matches IDEA/IRON Config.h.
 constexpr int   IRON_LANE_ENABLED      = 0;       // 0=关闭, 1=开启红绿灯
 constexpr int   IRON_LANE_GUARD_DIST   = 20;      // 统计agent的曼哈顿距离阈值
 constexpr int   IRON_LANE_CORE_FLIP_TH = 10;      // core人数>此值冻锁不翻
@@ -199,10 +194,6 @@ constexpr int   IRON_FUTURE_FLOW_ZONE_ROWS = 64;    // ff内部zone网格行数
 constexpr int   IRON_FUTURE_FLOW_ZONE_COLS = 64;    // ff内部zone网格列数
 constexpr float IRON_FUTURE_FLOW_LOCK_TH  = 50.0f;  // 方向锁阈值(0=关闭逆流锁)
 constexpr float IRON_FUTURE_FLOW_CONGEST_CAP = 300.0f; // 拥塞上限: zone总流>=此值则拦
-constexpr float IRON_FUTURE_FLOW_IDLE_WEIGHT = 200.0f;  // idle relocate热度权重
-constexpr bool  IRON_FUTURE_FLOW_HIGHWAY_EXEMPT = true;   // highway zone免于FF方向锁
-constexpr bool  IRON_TASK_STEAL_ENABLED = true;       // 抢单: 空闲agent近则抢
-constexpr int   IRON_TASK_STEAL_DIST_RATIO = 3;      // 空闲agent距离必须< 1/RATIO 已分配agent
 
 // ═══════════════════════════════════════════════════════════════════
 // Room 部分分配（SCHEDULE_MODE=5 的 Room 分支）
