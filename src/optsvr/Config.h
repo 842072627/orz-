@@ -310,7 +310,7 @@ constexpr int   OPT_PIBT_HISTORY_STATS_INTERVAL = 500;
 // ═══════════════════════════════════════════════════════════════════
 // 距离矩阵预计算（共用）
 // ═══════════════════════════════════════════════════════════════════
-constexpr bool  PRECOMPUTE_HEURISTIC = true;
+constexpr bool  PRECOMPUTE_HEURISTIC = false;
 constexpr int   MAX_PRECOMPUTE_CELLS = 100000000;
 constexpr bool  TURN_AWARE_HEURISTIC = false;
 
