@@ -14,6 +14,8 @@ public:
     void initialize(SharedEnvironment* env, int preprocess_time_limit_ms = 30000);
     void schedule(int time_limit_ms, std::vector<int>& proposed_schedule,
                   SharedEnvironment* env);
+    void idle_relocate(const std::vector<int>& proposed_schedule,
+                       SharedEnvironment* env, bool log = false);
 
 private:
     struct AgentMeta {

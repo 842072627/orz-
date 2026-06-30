@@ -454,6 +454,20 @@ void TestUsefulFlowDecayPlanner::setup_multistep_episode_state(
             trajLNS_.neighbors[env->curr_states[i].location].size() == 1) {
             local_priority[i] = local_priority[i] + 10;
         }
+
+        // Idle relocation: lowest priority
+        if (!env->goal_locations[i].empty() &&
+            env->goal_locations[i].front().second == -1) {
+            local_priority[i] = -1e6;
+        }
+
+        // Safety: real tasks must not carry over -1e6 from prior relocation
+        if (!env->goal_locations[i].empty() &&
+            env->goal_locations[i].front().second != -1 &&
+            local_priority[i] < -1e5) {
+            local_priority[i] = static_cast<double>(env->num_of_agents - i) /
+                                static_cast<double>(env->num_of_agents + 1);
+        }
     }
 }
 
@@ -585,6 +599,20 @@ void TestUsefulFlowDecayPlanner::refresh_multistep_step_state(SharedEnvironment*
         if (!env->goal_locations[i].empty() &&
             trajLNS_.neighbors[env->curr_states[i].location].size() == 1) {
             local_priority[i] = local_priority[i] + 10;
+        }
+
+        // Idle relocation: lowest priority
+        if (!env->goal_locations[i].empty() &&
+            env->goal_locations[i].front().second == -1) {
+            local_priority[i] = -1e6;
+        }
+
+        // Safety: real tasks must not carry over -1e6 from prior relocation
+        if (!env->goal_locations[i].empty() &&
+            env->goal_locations[i].front().second != -1 &&
+            local_priority[i] < -1e5) {
+            local_priority[i] = static_cast<double>(env->num_of_agents - i) /
+                                static_cast<double>(env->num_of_agents + 1);
         }
     }
 }
