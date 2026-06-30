@@ -195,6 +195,10 @@ constexpr int   IRON_FUTURE_FLOW_ZONE_COLS = 64;    // ff内部zone网格列数
 constexpr float IRON_FUTURE_FLOW_LOCK_TH  = 50.0f;  // 方向锁阈值(0=关闭逆流锁)
 constexpr float IRON_FUTURE_FLOW_CONGEST_CAP = 300.0f; // 拥塞上限: zone总流>=此值则拦
 
+// Highway 软惩罚（passage row/col 方向引导）
+constexpr int   IRON_HIGHWAY_ROW_PENALTY   = 250;   // passage row 逆流惩罚
+constexpr int   IRON_HIGHWAY_COL_PENALTY   = 150;   // passage col 逆流惩罚
+
 // ═══════════════════════════════════════════════════════════════════
 // Room 部分分配（SCHEDULE_MODE=5 的 Room 分支）
 // ═══════════════════════════════════════════════════════════════════

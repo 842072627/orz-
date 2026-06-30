@@ -134,6 +134,9 @@ struct RuntimeConfig {
     int   iron_lane_exit_buffer_radius;
     float iron_lane_exit_priority;
     float iron_lane_buffer_penalty;
+    // ---- Highway 软惩罚 ----
+    int   iron_highway_row_penalty;
+    int   iron_highway_col_penalty;
 
     // ---- Room 部分分配 ----
     int   room_assign_agent_mode;   // 0=全部, 1=动态筛选, 2=静态随机
@@ -344,6 +347,9 @@ struct RuntimeConfig {
         OVERRIDE_INT("IRON_LANE_EXIT_BUFFER_RADIUS", iron_lane_exit_buffer_radius);
         OVERRIDE_FLOAT("IRON_LANE_EXIT_PRIORITY", iron_lane_exit_priority);
         OVERRIDE_FLOAT("IRON_LANE_BUFFER_PENALTY", iron_lane_buffer_penalty);
+
+        OVERRIDE_INT("IRON_HIGHWAY_ROW_PENALTY", iron_highway_row_penalty);
+        OVERRIDE_INT("IRON_HIGHWAY_COL_PENALTY", iron_highway_col_penalty);
 
         OVERRIDE_FLOAT("OPT_FLOW_DECAY", flow_decay);
         OVERRIDE_INT("OPT_FLOW_DECAY_SCALE", flow_decay_scale);

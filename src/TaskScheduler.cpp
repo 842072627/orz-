@@ -68,3 +68,11 @@ void TaskScheduler::plan(int time_limit, std::vector<int> & proposed_schedule)
 
     
 }
+
+void TaskScheduler::idle_relocate(std::vector<int> & proposed_schedule)
+{
+    if (optsvr::cfg().skip_test) return;
+    if (optsvr::cfg().schedule_mode != 10) return;
+
+    g_ironzone_scheduler.idle_relocate(proposed_schedule, env);
+}

@@ -56,6 +56,9 @@ void Entry::compute(int time_limit, Plan & plan, std::vector<int> & proposed_sch
     //then update the first unfinished errand/location of tasks for planner reference
     update_goal_locations(proposed_schedule);
     
+    // idle agent relocation: move idle agents toward low-flow zones
+    scheduler->idle_relocate(proposed_schedule);
+    
     //call the planner to compute the actions
     planner->plan(time_limit,plan);
 

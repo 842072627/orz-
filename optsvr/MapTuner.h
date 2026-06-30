@@ -18,10 +18,19 @@ inline void load_map_tuning(const SharedEnvironment* env) {
 
         case MapType::WAREHOUSE_DOMAIN:
             c.skip_test = false;
-            c.schedule_mode = 1;   // GreedyHeap
+            c.schedule_mode = 10;  // IronZone (含 future flow 方向锁)
             c.executor_mode = 3;   // DHExecutor
             c.planner_mode = 11;   // TestUsefulFlowDecay
             c.ware_direct = true;
+
+            // future flow 方向锁参数
+            c.iron_future_flow_w = 1.0f;
+            c.iron_future_flow_k = 1.0f;
+            c.iron_future_flow_decay = 0.01f;
+            c.iron_future_flow_lock_th = 200.0f;
+            c.iron_future_flow_congest_cap = 320.0f;
+            c.iron_future_flow_zone_rows = 40;
+            c.iron_future_flow_zone_cols = 20;
             break;
 
         default:
