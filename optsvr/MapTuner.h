@@ -22,6 +22,7 @@ inline void load_map_tuning(const SharedEnvironment* env) {
             c.executor_mode = 3;   // DHExecutor
             c.planner_mode = 11;   // TestUsefulFlowDecay
             c.ware_direct = true;
+            c.iron_highway_row_penalty = 500;
 
             // future flow 方向锁参数
             c.iron_future_flow_w = 1.0f;

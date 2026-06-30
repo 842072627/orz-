@@ -577,6 +577,9 @@ private:
         iron_lane_exit_priority = IRON_LANE_EXIT_PRIORITY;
         iron_lane_buffer_penalty = IRON_LANE_BUFFER_PENALTY;
 
+        iron_highway_row_penalty = IRON_HIGHWAY_ROW_PENALTY;
+        iron_highway_col_penalty = IRON_HIGHWAY_COL_PENALTY;
+
         room_assign_agent_mode = ROOM_ASSIGN_AGENT_MODE;
         room_assign_ratio = ROOM_ASSIGN_RATIO;
         room_topk_tasks = ROOM_TOPK_TASKS;
