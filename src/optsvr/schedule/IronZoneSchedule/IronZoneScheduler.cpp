@@ -1071,7 +1071,7 @@ void IronZoneScheduler::idle_relocate(const std::vector<int>& proposed_schedule,
     if (idle_list.empty()) return;
 
     // Constants for scoring
-    constexpr float W_DIST = 0.5f;
+    constexpr float W_DIST = 0.1f;
     constexpr float W_REPEL = 5.0f;
 
     if (log) {
@@ -1092,6 +1092,7 @@ void IronZoneScheduler::idle_relocate(const std::vector<int>& proposed_schedule,
 
         for (int z = 0; z < n_zones; z++) {
             float total_flow = ff_dir_[z*4] + ff_dir_[z*4+1] + ff_dir_[z*4+2] + ff_dir_[z*4+3];
+            total_flow *= cfg().iron_future_flow_idle_weight;
 
             int zr1 = a_z / ff_zone_cols_, zc1 = a_z % ff_zone_cols_;
             int zr2 = z   / ff_zone_cols_, zc2 = z   % ff_zone_cols_;
@@ -1104,6 +1105,15 @@ void IronZoneScheduler::idle_relocate(const std::vector<int>& proposed_schedule,
                 best_score = score;
                 best_z = z;
             }
+        }
+
+        if (log && ai == 0) {
+            float bf = ff_dir_[best_z*4] + ff_dir_[best_z*4+1] + ff_dir_[best_z*4+2] + ff_dir_[best_z*4+3];
+            std::fprintf(stderr, "[IdleRelocate] agent=%d a_z=(%d,%d) best_z=(%d,%d) zd=%d raw_flow=%.1f flow_w=%.1f repulse=%.1f score=%.1f\n",
+                agent, a_z / ff_zone_cols_, a_z % ff_zone_cols_,
+                best_z / ff_zone_cols_, best_z % ff_zone_cols_,
+                std::abs((a_z / ff_zone_cols_) - (best_z / ff_zone_cols_)) + std::abs((a_z % ff_zone_cols_) - (best_z % ff_zone_cols_)),
+                bf, cfg().iron_future_flow_idle_weight * bf, 0.0f, best_score);
         }
 
         if (best_z < 0) continue;
@@ -1147,6 +1157,21 @@ void IronZoneScheduler::idle_relocate(const std::vector<int>& proposed_schedule,
                 agent, a_loc, a_z, target_cell, best_z, tf, log_zd,
                 static_cast<double>(W_REPEL) * (idle_agents_in_zone[best_z] + zone_picks[best_z] - 1),
                 static_cast<double>(best_score));
+        }
+    }
+    
+    // Dump zone flow CSV
+    if (log) {
+        FILE* fcsv = std::fopen("C:/Users/Administrator/Desktop/test-studio-mapf/big-final-test/fullfill-data/zone_flow.csv", "w");
+        if (fcsv) {
+            std::fprintf(fcsv, "z,zr,zc,flow_e,flow_s,flow_w,flow_n,total\n");
+            for (int z = 0; z < n_zones; z++) {
+                float fe = ff_dir_[z*4], fs = ff_dir_[z*4+1], fw = ff_dir_[z*4+2], fn = ff_dir_[z*4+3];
+                std::fprintf(fcsv, "%d,%d,%d,%.2f,%.2f,%.2f,%.2f,%.2f\n",
+                    z, z / ff_zone_cols_, z % ff_zone_cols_, fe, fs, fw, fn, fe+fs+fw+fn);
+            }
+            std::fclose(fcsv);
+            std::fprintf(stderr, "[IdleRelocate] zone_flow.csv written (%d zones)\n", n_zones);
         }
     }
 }

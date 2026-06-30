@@ -120,6 +120,7 @@ struct RuntimeConfig {
     float iron_future_flow_congest_cap;
     int   iron_future_flow_zone_rows;
     int   iron_future_flow_zone_cols;
+    float iron_future_flow_idle_weight;
 
     // ---- Iron lane traffic-light planner branch ----
     int   iron_lane_enabled;
@@ -134,6 +135,9 @@ struct RuntimeConfig {
     int   iron_lane_exit_buffer_radius;
     float iron_lane_exit_priority;
     float iron_lane_buffer_penalty;
+    int   iron_highway_row_penalty;
+    int   iron_highway_col_penalty;
+    int   iron_highway_non_highway_penalty;
 
     // ---- Room 部分分配 ----
     int   room_assign_agent_mode;   // 0=全部, 1=动态筛选, 2=静态随机
@@ -345,6 +349,8 @@ struct RuntimeConfig {
         OVERRIDE_INT("IRON_LANE_EXIT_BUFFER_RADIUS", iron_lane_exit_buffer_radius);
         OVERRIDE_FLOAT("IRON_LANE_EXIT_PRIORITY", iron_lane_exit_priority);
         OVERRIDE_FLOAT("IRON_LANE_BUFFER_PENALTY", iron_lane_buffer_penalty);
+        OVERRIDE_INT("IRON_HIGHWAY_COL_PENALTY", iron_highway_col_penalty);
+        OVERRIDE_INT("IRON_HIGHWAY_NON_HIGHWAY_PENALTY", iron_highway_non_highway_penalty);
 
         OVERRIDE_FLOAT("OPT_FLOW_DECAY", flow_decay);
         OVERRIDE_INT("OPT_FLOW_DECAY_SCALE", flow_decay_scale);
@@ -572,6 +578,8 @@ private:
         iron_lane_exit_buffer_radius = IRON_LANE_EXIT_BUFFER_RADIUS;
         iron_lane_exit_priority = IRON_LANE_EXIT_PRIORITY;
         iron_lane_buffer_penalty = IRON_LANE_BUFFER_PENALTY;
+        iron_highway_col_penalty = IRON_HIGHWAY_COL_PENALTY;
+        iron_highway_non_highway_penalty = IRON_HIGHWAY_NON_HIGHWAY_PENALTY;
 
         room_assign_agent_mode = ROOM_ASSIGN_AGENT_MODE;
         room_assign_ratio = ROOM_ASSIGN_RATIO;
