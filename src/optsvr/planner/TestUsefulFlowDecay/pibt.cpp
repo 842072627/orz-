@@ -8,6 +8,9 @@
 #include "Config.h"
 #include "HeuristicMatrix.h"
 #include "TestUsefulPibtDensity.h"
+#include "../../schedule/IronZoneSchedule/IronZoneScheduler.h"
+
+extern optsvr::IronZoneScheduler g_ironzone_scheduler;
 #include "fullfill_highway.h"
 #include "heuristics.h"
 
@@ -109,10 +112,21 @@ bool causalPIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
 		        if (blocked) continue;
 		    }
 		}
+		// HECA: hard block if stepping into a monitor cell with blocked guide zone
+		if (optsvr::cfg().iron_ff_exit_block_enabled &&
+		    g_ironzone_scheduler.is_monitor_cells_initialized()) {
+		    const auto& cg = g_ironzone_scheduler.get_cell_to_gz();
+		    const auto& gzb = g_ironzone_scheduler.get_guide_zone_blocked();
+		    if (!cg.empty()) {
+		        int mg = (neighbor < (int)cg.size()) ? cg[neighbor] : -1;
+		        if (mg >= 0 && mg < (int)gzb.size() && gzb[mg])
+		            continue;
+		    }
+		}
 		add_successor(neighbor, false);
-	}
-
-	add_successor(prev_loc, true);
+	    }
+	    // wait successor
+	    add_successor(prev_loc, true);
 
 	const int history_sort_mode = history_congestion != nullptr ? history_congestion->sort_mode() : 0;
 	const double history_tie_eps = history_congestion != nullptr ? history_congestion->tie_base_eps() : 0.0;

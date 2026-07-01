@@ -17,6 +17,22 @@ public:
     void idle_relocate(const std::vector<int>& proposed_schedule,
                        SharedEnvironment* env, bool log = false);
 
+    // ---- HECA: highway exit congestion avoidance ----
+    void init_monitor_cells(SharedEnvironment* env);
+    void update_guide_zone_density(SharedEnvironment* env);
+    bool should_intercept_exit(int agent_loc, SharedEnvironment* env,
+                               int& out_hold_target) const;
+    int pick_hold_target(int agent_loc) const;
+    // Public accessors for planner layer interception
+    const std::vector<char>& get_guide_zone_blocked() const { return guide_zone_blocked_; }
+    bool is_monitor_cells_initialized() const { return monitor_cells_initialized_; }
+    int get_guide_zone_count() const { return guide_zone_count_; }
+    int get_cols() const { return cols_; }
+    int get_rows() const { return rows_; }
+    const std::vector<int>& get_cell_to_gz() const { return cell_to_gz_; }
+    const std::vector<char>& get_cell_to_gz_dir() const { return cell_to_gz_dir_; }
+    const std::vector<int>& get_hold_candidates() const { return hold_candidates_; }
+
 private:
     struct AgentMeta {
         int aid = -1;
@@ -120,6 +136,20 @@ private:
     // future flow
     void print_round_stats(const RoundStats& stats, int tick) const;
     mutable int ff_locked_candidates_ = 0;
+
+    // ---- HECA data ----
+    bool monitor_cells_initialized_ = false;
+    std::vector<int> cell_to_gz_;              // map_size, -1=not monitor, else guide_zone_id
+    std::vector<char> cell_to_gz_dir_;          // map_size, direction to guide (0=E,1=S,2=W,3=N)
+    int guide_zone_count_ = 0;
+    std::vector<int> guide_zone_cells_;          // walkable cells per guide zone
+    std::vector<int> guide_zone_agents_;         // current agents per guide zone
+    std::vector<float> guide_zone_density_;      // density
+    std::vector<char> guide_zone_blocked_;       // density > TH
+    std::vector<float> idl_flow_;                // idle flow per zone*4 (separate from ff_dir_)
+    std::vector<int> hold_candidates_;            // walkable cells on highway interior (not perimeter)
+    std::vector<int> heca_pr_;                       // passage rows (computed once)
+    std::vector<int> heca_pc_;                       // passage cols (computed once)
 };
 
 } // namespace optsvr

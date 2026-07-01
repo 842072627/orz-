@@ -170,7 +170,15 @@ constexpr int   IRON_CORE_TASK_FILTER      = 1;       // 禁止分配任务到co
 constexpr int   IRON_HIGHWAY_FREEZE_ASSIGN = 1;       // 禁止highway上的agent分配新任务(0=关,1=在highway上不分配)
 constexpr int   IRON_HIGHWAY_SKIP_TASK     = 1;       // 过滤highway+guide上的任务(0=关,1=开启)
 
-// IDEA/IRON lane traffic-light planner branch. Default matches IDEA/IRON Config.h.
+// ──── HECA: Highway exit congestion avoidance ────────────────
+constexpr bool  IRON_FF_EXIT_BLOCK_ENABLED   = false;    // 开关
+constexpr float IRON_FF_EXIT_DENSITY_TH      = 0.4f;     // guide zone 拥塞密度阈值
+constexpr int   IRON_FF_LOOKAHEAD_STEPS      = 50;       // 预判扫描步数
+constexpr int   IRON_FF_HOLD_MIN_DIST        = 100;      // hold目标曼哈顿最小距离
+constexpr int   IRON_FF_HOLD_MAX_DIST        = 200;      // hold目标曼哈顿最大距离
+constexpr float IRON_FF_IDLE_FLOW_W          = 0.3f;     // idle flow权重
+
+// IDEA/IRON lane
 constexpr int   IRON_LANE_ENABLED      = 0;       // 0=关闭, 1=开启红绿灯
 constexpr int   IRON_LANE_GUARD_DIST   = 20;      // 统计agent的曼哈顿距离阈值
 constexpr int   IRON_LANE_CORE_FLIP_TH = 10;      // core人数>此值冻锁不翻

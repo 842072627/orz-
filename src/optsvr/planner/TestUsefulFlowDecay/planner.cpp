@@ -10,6 +10,9 @@
 #include "RuntimeConfig.h"
 #include "HeuristicMatrix.h"
 #include "MapProfile.h"
+#include "../../schedule/IronZoneSchedule/IronZoneScheduler.h"
+
+extern optsvr::IronZoneScheduler g_ironzone_scheduler;
 
 // TestUsefulFlowDecayPlan 命名空间下的副本（从 default_planner 复制，可自由修改）
 #include "heuristics.h"
@@ -413,6 +416,30 @@ void TestUsefulFlowDecayPlanner::setup_multistep_episode_state(
             trajLNS_.tasks[i] = env->goal_locations[i].front().first;
         }
 
+        // HECA: persistent redirect state - check on each tick
+        if (optsvr::cfg().iron_ff_exit_block_enabled &&
+            g_ironzone_scheduler.is_monitor_cells_initialized()) {
+            const auto& gzb = g_ironzone_scheduler.get_guide_zone_blocked();
+            if (!gzb.empty()) {
+                if ((int)agent_hold_target_.size() < env->num_of_agents) {
+                    agent_hold_target_.resize(env->num_of_agents, -1);
+                    agent_hold_zone_.resize(env->num_of_agents, -1);
+                }
+                // Release: zone no longer blocked
+                if (agent_hold_target_[i] >= 0) {
+                    if (agent_hold_zone_[i] < 0 || agent_hold_zone_[i] >= (int)gzb.size() || !gzb[agent_hold_zone_[i]]) {
+                        agent_hold_target_[i] = -1;
+                        agent_hold_zone_[i] = -1;
+                    }
+                }
+                // Apply persistent redirect: override tasks[i] with hold target
+                if (agent_hold_target_[i] >= 0) {
+                    trajLNS_.tasks[i] = agent_hold_target_[i];
+                    require_guide_path_[i] = true;
+                }
+            }
+        }
+
         // 检测 guide-path mismatch / need replan
         require_guide_path_[i] = false;
         if (trajLNS_.trajs[i].empty()) {
@@ -722,6 +749,77 @@ void TestUsefulFlowDecayPlanner::plan(int time_limit, std::vector<std::vector<Ac
     setup_multistep_episode_state(env, flow_end_time, local_priority);
 
     update_guide_paths_once_for_multistep(env, flow_end_time);
+
+    // HECA: scan computed guide paths, redirect agents heading to blocked exits
+    if (optsvr::cfg().iron_ff_exit_block_enabled &&
+        g_ironzone_scheduler.is_monitor_cells_initialized()) {
+        const auto& gzb = g_ironzone_scheduler.get_guide_zone_blocked();
+        const auto& cg = g_ironzone_scheduler.get_cell_to_gz();
+        if (!cg.empty() && !gzb.empty()) {
+            if ((int)agent_hold_target_.size() < env->num_of_agents) {
+                agent_hold_target_.resize(env->num_of_agents, -1);
+                agent_hold_zone_.resize(env->num_of_agents, -1);
+            }
+            int redirected = 0;
+            for (int i = 0; i < env->num_of_agents; i++) {
+                if (agent_hold_target_[i] >= 0) continue;
+                auto& traj = trajLNS_.trajs[i];
+                if (traj.empty()) continue;
+                int max_scan = std::min(50, (int)traj.size());
+                for (int si = 0; si < max_scan; si++) {
+                    int mg = (traj[si] < (int)cg.size()) ? cg[traj[si]] : -1;
+                    if (mg >= 0 && mg < (int)gzb.size() && gzb[mg]) {
+                        // Distribute: each agent picks from top-3 cold zones by hash
+                        int hold = -1;
+                        int best[3] = {-1,-1,-1};
+                        float best_s[3] = {1e9f,1e9f,1e9f};
+                        for (int loc : g_ironzone_scheduler.get_hold_candidates()) {
+                            int dist = std::abs(loc / env->cols - env->curr_states[i].location / env->cols)
+                                     + std::abs(loc % env->cols - env->curr_states[i].location % env->cols);
+                            if (dist < 100 || dist > 200) continue;
+                            int z = loc / (env->cols * 40 / 20) * 20 + (loc % env->cols) * 20 / env->cols;
+                            float flow = 0;
+                            if (z >= 0) for (int d=0; d<4; d++) flow += 1;
+                            if (dist + flow < best_s[2]) {
+                                if (dist + flow < best_s[1]) {
+                                    best[2]=best[1]; best_s[2]=best_s[1];
+                                    best[1]=best[0]; best_s[1]=best_s[0];
+                                    best[0]=loc; best_s[0]=dist+flow;
+                                } else if (dist+flow < best_s[1]) {
+                                    best[2]=best[1]; best_s[2]=best_s[1];
+                                    best[1]=loc; best_s[1]=dist+flow;
+                                } else {
+                                    best[2]=loc; best_s[2]=dist+flow;
+                                }
+                            }
+                        }
+                        if (best[0] >= 0) {
+                            int idx = (i * 1000003) % 3;
+                            hold = (best[idx] >= 0) ? best[idx] : best[0];
+                        }
+                        if (hold < 0)
+                            hold = g_ironzone_scheduler.pick_hold_target(
+                                env->curr_states[i].location);
+                        if (hold >= 0) {
+                            agent_hold_target_[i] = hold;
+                            agent_hold_zone_[i] = mg;
+                            trajLNS_.tasks[i] = hold;
+                            redirected++;
+                            FILE* f = fopen("C:/Users/Administrator/Desktop/test-studio-mapf/big-final-test/fullfill-data/heca_debug.log","a");
+                            if(f){fprintf(f,"[HECA-REDIRECT] agent=%d goal=%d->%d zone=%d tick=%d\n",i,traj.back(),hold,mg,env->curr_timestep);fclose(f);}
+                        }
+                        break;
+                    }
+                }
+            }
+            if (redirected > 0) {
+                for (int i = 0; i < env->num_of_agents; i++) {
+                    if (!trajLNS_.trajs[i].empty() && trajLNS_.tasks[i] != trajLNS_.trajs[i].back())
+                        update_traj(trajLNS_, i, &flow_end_time, nullptr);
+                }
+            }
+        }
+    }
 
     // commit cross-episode priority
     p_ = local_priority;

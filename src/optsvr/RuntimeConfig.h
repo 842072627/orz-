@@ -121,6 +121,14 @@ struct RuntimeConfig {
     int   iron_future_flow_zone_rows;
     int   iron_future_flow_zone_cols;
 
+    // ---- HECA: highway exit congestion avoidance ----
+    bool  iron_ff_exit_block_enabled;
+    float iron_ff_exit_density_th;
+    int   iron_ff_lookahead_steps;
+    int   iron_ff_hold_min_dist;
+    int   iron_ff_hold_max_dist;
+    float iron_ff_idle_flow_w;
+
     // ---- Iron lane traffic-light planner branch ----
     int   iron_lane_enabled;
     int   iron_lane_guard_dist;
@@ -333,6 +341,12 @@ struct RuntimeConfig {
         OVERRIDE_FLOAT("IRON_FUTURE_FLOW_CONGEST_CAP", iron_future_flow_congest_cap);
         OVERRIDE_INT("IRON_FUTURE_FLOW_ZONE_ROWS", iron_future_flow_zone_rows);
         OVERRIDE_INT("IRON_FUTURE_FLOW_ZONE_COLS", iron_future_flow_zone_cols);
+        OVERRIDE_BOOL("IRON_FF_EXIT_BLOCK_ENABLED", iron_ff_exit_block_enabled);
+        OVERRIDE_FLOAT("IRON_FF_EXIT_DENSITY_TH", iron_ff_exit_density_th);
+        OVERRIDE_INT("IRON_FF_LOOKAHEAD_STEPS", iron_ff_lookahead_steps);
+        OVERRIDE_INT("IRON_FF_HOLD_MIN_DIST", iron_ff_hold_min_dist);
+        OVERRIDE_INT("IRON_FF_HOLD_MAX_DIST", iron_ff_hold_max_dist);
+        OVERRIDE_FLOAT("IRON_FF_IDLE_FLOW_W", iron_ff_idle_flow_w);
         OVERRIDE_INT("IRON_LANE_ENABLED", iron_lane_enabled);
         OVERRIDE_INT("IRON_LANE_GUARD_DIST", iron_lane_guard_dist);
         OVERRIDE_INT("IRON_LANE_CORE_FLIP_TH", iron_lane_core_flip_th);
@@ -560,6 +574,12 @@ private:
         iron_future_flow_congest_cap = IRON_FUTURE_FLOW_CONGEST_CAP;
         iron_future_flow_zone_rows = IRON_FUTURE_FLOW_ZONE_ROWS;
         iron_future_flow_zone_cols = IRON_FUTURE_FLOW_ZONE_COLS;
+        iron_ff_exit_block_enabled = IRON_FF_EXIT_BLOCK_ENABLED;
+        iron_ff_exit_density_th = IRON_FF_EXIT_DENSITY_TH;
+        iron_ff_lookahead_steps = IRON_FF_LOOKAHEAD_STEPS;
+        iron_ff_hold_min_dist = IRON_FF_HOLD_MIN_DIST;
+        iron_ff_hold_max_dist = IRON_FF_HOLD_MAX_DIST;
+        iron_ff_idle_flow_w = IRON_FF_IDLE_FLOW_W;
         iron_lane_enabled = IRON_LANE_ENABLED;
         iron_lane_guard_dist = IRON_LANE_GUARD_DIST;
         iron_lane_core_flip_th = IRON_LANE_CORE_FLIP_TH;

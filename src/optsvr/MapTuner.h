@@ -85,6 +85,14 @@ inline void load_for_combined(const MapProfile& profile, const SharedEnvironment
             c.iron_future_flow_congest_cap = 200.0f;
             c.iron_future_flow_zone_rows = 40;
             c.iron_future_flow_zone_cols = 20;
+
+            // HECA
+            c.iron_ff_exit_block_enabled = true;
+            c.iron_ff_exit_density_th = 0.3f;
+            c.iron_ff_lookahead_steps = 50;
+            c.iron_ff_hold_min_dist = 100;
+            c.iron_ff_hold_max_dist = 200;
+            c.iron_ff_idle_flow_w = 0.3f;
             break;
 
         default:

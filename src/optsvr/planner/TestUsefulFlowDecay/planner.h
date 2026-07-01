@@ -57,6 +57,10 @@ private:
     std::vector<std::vector<int>> extra_weights_;  // [loc][direction] penalty
     void build_fullfill_highway(SharedEnvironment* env);
 
+    // ---- HECA planner redirect state ----
+    std::vector<int> agent_hold_target_;  // per-agent hold cell (-1=none), persists across ticks
+    std::vector<int> agent_hold_zone_;    // per-agent blocked guide zone (-1=none)
+
 
     // ============ 内部子步骤（与 DefaultPlanner::planner.cpp 对应） ============
     static State rollout_next_state(const State& state, Action action, const SharedEnvironment* env);

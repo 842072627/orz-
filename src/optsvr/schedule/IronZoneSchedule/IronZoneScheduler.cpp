@@ -68,6 +68,9 @@ void IronZoneScheduler::initialize(SharedEnvironment* env, int /*preprocess_time
                          ff_zone_rows_, ff_zone_cols_, ff_path_ready_ ? 1 : 0);
         }
     }
+
+    // HECA: init monitor cells
+    init_monitor_cells(env);
 }
 
 int IronZoneScheduler::zone_of_loc(int loc) const {
@@ -738,6 +741,12 @@ void IronZoneScheduler::schedule(int time_limit_ms,
     if (ff_enabled) {
         ff_dir_.assign(ff_zone_count_ * 4, 0.0f);
         ff_bfs_cached_source_ = -1;
+        if (!idl_flow_.empty())
+            std::fill(idl_flow_.begin(), idl_flow_.end(), 0.0f);
+
+        // HECA: update guide zone density
+        if (cfg().iron_ff_exit_block_enabled)
+            update_guide_zone_density(env);
 
         // Pretick: add flow from agents with ongoing tasks
         for (int a = 0; a < n_agents; a++) {
@@ -972,10 +981,20 @@ void IronZoneScheduler::schedule(int time_limit_ms,
         }
     };
 
+    // ---- HECA: guide zone density (for planner intercept) ----
+    if (cfg().iron_ff_exit_block_enabled && monitor_cells_initialized_) {
+        int bz_count = 0;
+        for (int g = 0; g < guide_zone_count_; g++) if (guide_zone_blocked_[g]) bz_count++;
+        // Log status for debugging
+        FILE* f = fopen("C:/Users/Administrator/Desktop/test-studio-mapf/big-final-test/fullfill-data/heca_debug.log","a");
+        if(f){fprintf(f,"[HECA] tick=%d blocked_zones=%d\n",cur_tick,bz_count);fclose(f);}
+    }
+
     // ---- 纯贪心：同zone优先，然后扫邻zone ----
     for (int ai = 0; ai < static_cast<int>(free_agents.size()) && stats.assigned < max_new_assign; ai++) {
         if ((ai & 255) == 0 && std::chrono::steady_clock::now() >= deadline) break;
         const AgentMeta& agent = free_agents[ai];
+
         int chosen_ti = -1;
         float best_wdist = std::numeric_limits<float>::max();
         
@@ -1131,12 +1150,27 @@ void IronZoneScheduler::idle_relocate(const std::vector<int>& proposed_schedule,
 
         int target_cell = candidates[static_cast<size_t>(agent * 1000003u) % candidates.size()];
 
+        // HECA (planner layer): no scheduler-level interception
+
         if (agent < (int)env->goal_locations.size()) {
             env->goal_locations[agent].clear();
             env->goal_locations[agent].push_back({target_cell, -1});
         }
 
         zone_picks[best_z]++;
+
+        // HECA: add idle flow to idl_flow_ (separate from ff_dir_)
+        if (cfg().iron_ff_exit_block_enabled && !idl_flow_.empty() && best_z >= 0 && best_z != a_z && ff_path_ready_) {
+            float idle_w = cfg().iron_ff_idle_flow_w;
+            std::vector<int> path = ff_get_zone_path_fast(a_z, best_z);
+            for (size_t pi = 1; pi < path.size(); pi++) {
+                int cur = path[pi-1], nxt = path[pi];
+                int cr = cur / ff_zone_cols_, cc = cur % ff_zone_cols_;
+                int nr = nxt / ff_zone_cols_, nc = nxt % ff_zone_cols_;
+                int dir = ff_dir_from_delta(nr - cr, nc - cc);
+                if (dir >= 0) idl_flow_[cur * 4 + dir] += idle_w;
+            }
+        }
 
         if (log) {
             float tf = ff_dir_[best_z*4]+ff_dir_[best_z*4+1]+ff_dir_[best_z*4+2]+ff_dir_[best_z*4+3];
@@ -1149,6 +1183,258 @@ void IronZoneScheduler::idle_relocate(const std::vector<int>& proposed_schedule,
                 static_cast<double>(best_score));
         }
     }
+}
+
+
+// ===================================================================
+//  HECA: Highway exit congestion avoidance
+// ===================================================================
+
+void IronZoneScheduler::init_monitor_cells(SharedEnvironment* env) {
+    if (!env) return;
+    const int rows = env->rows, cols = env->cols;
+    const int map_size = rows * cols;
+    const int x1 = 7, y1 = 7, x2 = 488, y2 = 131;
+
+    auto inr = [&](int c, int r) { return c > x1 && c < x2 && r > y1 && r < y2; };
+    auto is_wall = [&](int r, int c) -> bool {
+        if (r < 0 || r >= rows || c < 0 || c >= cols) return true;
+        return env->map[r * cols + c] != 0;
+    };
+
+    // Passage rows
+    std::vector<int> row_free(rows, 0);
+    for (int r = 0; r < rows; r++)
+        for (int c = 0; c < cols; c++)
+            if (env->map[r * cols + c] == 0 && inr(c, r)) row_free[r]++;
+    int max_rf = *std::max_element(row_free.begin(), row_free.end());
+    int row_th = max_rf * 80 / 100;
+    std::vector<int> pr;
+    for (int r = 1; r < rows - 1; r++)
+        if (row_free[r] > row_th && row_free[r-1] <= row_th && row_free[r+1] <= row_th)
+            pr.push_back(r);
+
+    // Passage cols
+    std::vector<int> col_free(cols, 0);
+    for (int c = 0; c < cols; c++)
+        for (int r = 0; r < rows; r++)
+            if (env->map[r * cols + c] == 0 && inr(c, r)) col_free[c]++;
+    int max_cf = *std::max_element(col_free.begin(), col_free.end());
+    int col_th = max_cf * 80 / 100;
+    std::vector<int> pc;
+    for (int c = 1; c < cols - 1; c++)
+        if (col_free[c] > col_th && col_free[c-1] <= col_th && col_free[c+1] <= col_th)
+            pc.push_back(c);
+
+    // Forbid mask per cell
+    auto get_mask = [&](int r, int c) -> uint8_t {
+        if (is_wall(r, c)) return 255;
+        uint8_t m = 0;
+        if (is_wall(r, c-1)) m |= 1;
+        if (is_wall(r, c+1)) m |= 2;
+        if (is_wall(r-1, c)) m |= 4;
+        if (is_wall(r+1, c)) m |= 8;
+        for (size_t pi = 0; pi < pr.size(); pi++) {
+            if (r == pr[pi] && inr(c, r)) {
+                if (pi % 2 == 0) m |= 1; else m |= 2;
+            }
+        }
+        for (size_t pi = 0; pi < pc.size(); pi++) {
+            if (c == pc[pi] && inr(c, r)) {
+                if (pi % 2 == 0) m |= 4; else m |= 8;
+            }
+        }
+        return m;
+    };
+
+    const int ZR = 40, ZC = 20;
+    cell_to_gz_.assign(map_size, -1);
+    cell_to_gz_dir_.assign(map_size, -1);
+
+    guide_zone_count_ = 80;
+    guide_zone_cells_.assign(guide_zone_count_, 0);
+    guide_zone_agents_.assign(guide_zone_count_, 0);
+    guide_zone_density_.assign(guide_zone_count_, 0.0f);
+    guide_zone_blocked_.assign(guide_zone_count_, 0);
+
+    auto gid_of = [&](int zr, int zc) -> int {
+        if (zr <= 1) return zr * ZC + zc;
+        if (zr >= 38) return 40 + (zr - 38) * ZC + zc;
+        if (zc == 0) return 40 + (zr - 2);
+        if (zc == 19) return 40 + 38 + (zr - 2);
+        return -1;
+    };
+
+    // Pre-count walkable cells per guide zone
+    for (int r = 0; r < rows; r++)
+        for (int c = 0; c < cols; c++) {
+            if (env->map[r * cols + c] != 0) continue;
+            int gzc = std::min(ZC - 1, c * ZC / cols);
+            int gzr = std::min(ZR - 1, r * ZR / rows);
+            int g = gid_of(gzr, gzc);
+            if (g >= 0 && g < guide_zone_count_) guide_zone_cells_[g]++;
+        }
+
+    // TOP monitor cells: rows 9,11 x pc, N allowed
+    for (int r : {9, 11})
+        for (int c : pc) {
+            uint8_t m = get_mask(r, c);
+            if (m == 255 || (m & 4)) continue;
+            int loc = r * cols + c;
+            int gzc = std::min(ZC - 1, c * ZC / cols);
+            cell_to_gz_[loc] = gid_of(0, gzc);
+            cell_to_gz_dir_[loc] = 3;
+        }
+
+    // BOTTOM monitor cells: rows 127,129 x pc, S allowed
+    for (int r : {127, 129})
+        for (int c : pc) {
+            uint8_t m = get_mask(r, c);
+            if (m == 255 || (m & 8)) continue;
+            int loc = r * cols + c;
+            int gzc = std::min(ZC - 1, c * ZC / cols);
+            cell_to_gz_[loc] = gid_of(38, gzc);
+            cell_to_gz_dir_[loc] = 1;
+        }
+
+    // LEFT monitor cells: first 2 pc x pr, W allowed
+    for (size_t ci = 0; ci < 2 && ci < pc.size(); ci++)
+        for (int r : pr) {
+            uint8_t m = get_mask(r, pc[ci]);
+            if (m == 255 || (m & 1)) continue;
+            int loc = r * cols + pc[ci];
+            int gzr = std::min(ZR - 1, r * ZR / rows);
+            if (cell_to_gz_[loc] < 0) {
+                cell_to_gz_[loc] = gid_of(gzr, 0);
+                cell_to_gz_dir_[loc] = 2;
+            }
+        }
+
+    // RIGHT monitor cells: last 2 pc x pr, E allowed
+    for (size_t ci = pc.size() - 2; ci < pc.size(); ci++)
+        for (int r : pr) {
+            uint8_t m = get_mask(r, pc[ci]);
+            if (m == 255 || (m & 2)) continue;
+            int loc = r * cols + pc[ci];
+            int gzr = std::min(ZR - 1, r * ZR / rows);
+            if (cell_to_gz_[loc] < 0) {
+                cell_to_gz_[loc] = gid_of(gzr, 19);
+                cell_to_gz_dir_[loc] = 0;
+            }
+        }
+
+    // Build hold candidates: interior highway cells within (33,11)-(462,127)
+    hold_candidates_.clear();
+    for (int r : pr) {
+        if (r < 11 || r > 127) continue;
+        for (int c = 33; c <= 462; c++) {
+            int loc = r * cols + c;
+            if (env->map[loc] != 0) continue;
+            uint8_t m = get_mask(r, c);
+            if (m == 255) continue;
+            if (cell_to_gz_[loc] >= 0) continue;
+            hold_candidates_.push_back(loc);
+        }
+    }
+
+    heca_pr_ = pr;
+    heca_pc_ = pc;
+    monitor_cells_initialized_ = true;
+    int mc = 0;
+    for (int x : cell_to_gz_) if (x >= 0) mc++;
+    std::fprintf(stderr, "[HECA] init: %d monitor cells, %d hold candidates, %d guide zones\n",
+                 mc, static_cast<int>(hold_candidates_.size()), guide_zone_count_);
+    fflush(stderr);
+}
+
+void IronZoneScheduler::update_guide_zone_density(SharedEnvironment* env) {
+    if (!cfg().iron_ff_exit_block_enabled || !monitor_cells_initialized_) return;
+    if (guide_zone_count_ <= 0) return;
+    std::fill(guide_zone_agents_.begin(), guide_zone_agents_.end(), 0);
+    const int rows = env->rows, cols = env->cols;
+    const int ZR = 40, ZC = 20;
+    auto gid_of = [&](int zr, int zc) -> int {
+        if (zr <= 1) return zr * ZC + zc;
+        if (zr >= 38) return 40 + (zr - 38) * ZC + zc;
+        if (zc == 0) return 40 + (zr - 2);
+        if (zc == 19) return 40 + 38 + (zr - 2);
+        return -1;
+    };
+    for (int i = 0; i < env->num_of_agents; i++) {
+        int loc = env->curr_states[i].location;
+        if (loc < 0) continue;
+        int zr = std::min(ZR - 1, (loc / cols) * ZR / rows);
+        int zc = std::min(ZC - 1, (loc % cols) * ZC / cols);
+        int g = gid_of(zr, zc);
+        if (g >= 0 && g < guide_zone_count_) guide_zone_agents_[g]++;
+    }
+    float th = cfg().iron_ff_exit_density_th;
+    for (int gid = 0; gid < guide_zone_count_; gid++) {
+        float d = (float)guide_zone_agents_[gid] / std::max(1, guide_zone_cells_[gid]);
+        guide_zone_density_[gid] = d;
+        guide_zone_blocked_[gid] = (d > th) ? 1 : 0;
+    }
+}
+
+bool IronZoneScheduler::should_intercept_exit(int agent_loc, SharedEnvironment* env,
+                                              int& out_hold_target) const {
+    if (!cfg().iron_ff_exit_block_enabled || !monitor_cells_initialized_) return false;
+    if (agent_loc < 0 || agent_loc >= map_size_ || cell_to_gz_.empty()) return false;
+    uint8_t forbid = IronHighway::get_forbid_mask(agent_loc);
+    if (forbid == 0) return false;
+    int dc = 0;
+    if (!(forbid & 2)) dc = 1;
+    else if (!(forbid & 1)) dc = -1;
+    else return false;
+    int r = agent_loc / cols_, c = agent_loc % cols_;
+    int lookahead = cfg().iron_ff_lookahead_steps;
+    int first_step = -1, first_gid = -1, last_step = -1;
+    for (int step = 1; step <= lookahead; step++) {
+        int nc = c + dc * step;
+        if (nc < 0 || nc >= cols_) break;
+        int loc = r * cols_ + nc;
+        if (env->map[loc] != 0) break;
+        int gid = (loc < (int)cell_to_gz_.size()) ? cell_to_gz_[loc] : -1;
+        if (gid >= 0) {
+            if (first_step < 0) { first_step = step; first_gid = gid; }
+            last_step = step;
+        }
+    }
+    if (first_step < 0) return false;
+    if (first_gid >= 0 && first_gid < guide_zone_count_ && guide_zone_blocked_[first_gid])
+        return last_step > first_step;
+    return false;
+}
+
+int IronZoneScheduler::pick_hold_target(int agent_loc) const {
+    if (hold_candidates_.empty()) return -1;
+    if (ff_zone_count_ <= 0 || ff_dir_.empty()) return hold_candidates_[0];
+    int best_loc = -1;
+    float best_score = std::numeric_limits<float>::max();
+    int min_d = cfg().iron_ff_hold_min_dist;
+    int max_d = cfg().iron_ff_hold_max_dist;
+    int agent_r = agent_loc / cols_, agent_c = agent_loc % cols_;
+    for (int loc : hold_candidates_) {
+        int dist = std::abs(loc / cols_ - agent_r) + std::abs(loc % cols_ - agent_c);
+        if (dist < min_d || dist > max_d) continue;
+        int z = ff_zone_of_loc(loc);
+        if (z < 0 || z >= ff_zone_count_) continue;
+        float flow = ff_dir_[z*4] + ff_dir_[z*4+1] + ff_dir_[z*4+2] + ff_dir_[z*4+3];
+        if (!idl_flow_.empty())
+            flow += idl_flow_[z*4] + idl_flow_[z*4+1] + idl_flow_[z*4+2] + idl_flow_[z*4+3];
+        if (flow < best_score) { best_score = flow; best_loc = loc; }
+    }
+    if (best_loc < 0) {
+        for (int loc : hold_candidates_) {
+            int z = ff_zone_of_loc(loc);
+            if (z < 0 || z >= ff_zone_count_) continue;
+            float flow = ff_dir_[z*4] + ff_dir_[z*4+1] + ff_dir_[z*4+2] + ff_dir_[z*4+3];
+            if (!idl_flow_.empty())
+                flow += idl_flow_[z*4] + idl_flow_[z*4+1] + idl_flow_[z*4+2] + idl_flow_[z*4+3];
+            if (flow < best_score) { best_score = flow; best_loc = loc; }
+        }
+    }
+    return best_loc;
 }
 
 } // namespace optsvr
