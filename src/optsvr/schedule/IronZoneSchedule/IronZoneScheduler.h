@@ -120,7 +120,6 @@ private:
     // future flow
     void print_round_stats(const RoundStats& stats, int tick) const;
     mutable int ff_locked_candidates_ = 0;
-    std::vector<float> ff_zone_congest_cap_;  // 每zone拥塞上限, -1=不限制
 };
 
 } // namespace optsvr

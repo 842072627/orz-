@@ -408,7 +408,7 @@ void TestUsefulFlowDecayPlanner::setup_multistep_episode_state(
     for (int i = 0; i < env->num_of_agents; i++) {
         if (env->goal_locations[i].empty()) {
             trajLNS_.tasks[i] = g_home_start_locs[i];
-            local_priority[i] = p_copy_[i];
+            local_priority[i] = -1e6;
         } else {
             trajLNS_.tasks[i] = env->goal_locations[i].front().first;
         }
@@ -458,7 +458,7 @@ void TestUsefulFlowDecayPlanner::setup_multistep_episode_state(
         // Idle relocation: lowest priority
         if (!env->goal_locations[i].empty() &&
             env->goal_locations[i].front().second == -1) {
-            local_priority[i] = p_copy_[i];
+            local_priority[i] = -1e6;
         }
 
         // Safety: real tasks must not carry over -1e6 from prior relocation
@@ -577,7 +577,7 @@ void TestUsefulFlowDecayPlanner::refresh_multistep_step_state(SharedEnvironment*
     for (int i = 0; i < env->num_of_agents; i++) {
         if (env->goal_locations[i].empty()) {
             trajLNS_.tasks[i] = g_home_start_locs[i];
-            local_priority[i] = p_copy_[i];
+            local_priority[i] = -1e6;
         } else {
             trajLNS_.tasks[i] = env->goal_locations[i].front().first;
             local_priority[i] = local_priority[i] + 1;
@@ -604,7 +604,7 @@ void TestUsefulFlowDecayPlanner::refresh_multistep_step_state(SharedEnvironment*
         // Idle relocation: lowest priority
         if (!env->goal_locations[i].empty() &&
             env->goal_locations[i].front().second == -1) {
-            local_priority[i] = p_copy_[i];
+            local_priority[i] = -1e6;
         }
 
         // Safety: real tasks must not carry over -1e6 from prior relocation
