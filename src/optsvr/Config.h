@@ -195,6 +195,13 @@ constexpr int   IRON_FUTURE_FLOW_ZONE_COLS = 64;    // ff内部zone网格列数
 constexpr float IRON_FUTURE_FLOW_LOCK_TH  = 50.0f;  // 方向锁阈值(0=关闭逆流锁)
 constexpr float IRON_FUTURE_FLOW_CONGEST_CAP = 300.0f; // 拥塞上限: zone总流>=此值则拦
 
+// 按zone区分future flow限制
+constexpr bool  IRON_FF_ZONE_TUNING_ENABLED = false;     // 启用按zone区分
+constexpr int   IRON_FF_EDGE_COLS = 2;                   // 左右边缘各几列
+constexpr float IRON_FF_EDGE_CONGEST_CAP = 30.0f;        // 边缘拥塞上限
+constexpr int   IRON_FF_TOPBOT_ROWS = 3;                 // 上下边缘各行数
+constexpr float IRON_FF_TOPBOT_CONGEST_CAP = 40.0f;      // 上下边缘拥塞上限
+
 // ═══════════════════════════════════════════════════════════════════
 // Room 部分分配（SCHEDULE_MODE=5 的 Room 分支）
 // ═══════════════════════════════════════════════════════════════════

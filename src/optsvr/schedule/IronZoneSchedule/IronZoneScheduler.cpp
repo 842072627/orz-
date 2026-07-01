@@ -59,6 +59,24 @@ void IronZoneScheduler::initialize(SharedEnvironment* env, int /*preprocess_time
         ff_zone_count_ = ff_zone_rows_ * ff_zone_cols_;
         ff_dir_.assign(ff_zone_count_ * 4, 0.0f);
         ff_compute_zone_adjacency(env);
+
+        // Precompute per-zone congest_cap for zone tuning
+        ff_zone_congest_cap_.assign(ff_zone_count_, -1.0f);
+        if (cfg().iron_ff_zone_tuning_enabled) {
+            for (int z = 0; z < ff_zone_count_; z++) {
+                int zr = z / ff_zone_cols_;
+                int zc = z % ff_zone_cols_;
+                bool is_edge = (zc < cfg().iron_ff_edge_cols ||
+                                zc >= ff_zone_cols_ - cfg().iron_ff_edge_cols);
+                bool is_topbot = (zr < cfg().iron_ff_topbot_rows ||
+                                  zr >= ff_zone_rows_ - cfg().iron_ff_topbot_rows);
+                if (is_edge)
+                    ff_zone_congest_cap_[z] = cfg().iron_ff_edge_congest_cap;
+                else if (is_topbot)
+                    ff_zone_congest_cap_[z] = cfg().iron_ff_topbot_congest_cap;
+                // interior stays -1 (no restriction)
+            }
+        }
         if (!ff_load_cache("ff_cache.bin")) {
             ff_precompute_all_pairs(env);
             if (ff_path_ready_) ff_save_cache("ff_cache.bin");
@@ -821,7 +839,8 @@ void IronZoneScheduler::schedule(int time_limit_ms,
                     if (next >= ff_zone_count_) break;
                     const float* zd = &ff_dir_[cur * 4];
                     float total_flow = zd[0] + zd[1] + zd[2] + zd[3];
-                    if (congest_cap > 0.0f && total_flow >= congest_cap) {
+                    float zcap = (ff_zone_congest_cap_[cur] >= 0) ? ff_zone_congest_cap_[cur] : congest_cap;
+                    if (zcap > 0.0f && total_flow >= zcap) {
                         blocked = true;
                         break;
                     }
@@ -900,7 +919,8 @@ void IronZoneScheduler::schedule(int time_limit_ms,
                 if (next >= ff_zone_count_) break;
                 const float* zd = &ff_dir_[cur * 4];
                 float total_flow = zd[0] + zd[1] + zd[2] + zd[3];
-                if (congest_cap > 0.0f && total_flow >= congest_cap) {
+                float zcap = (ff_zone_congest_cap_[cur] >= 0) ? ff_zone_congest_cap_[cur] : congest_cap;
+                if (zcap > 0.0f && total_flow >= zcap) {
                     ff_locked_candidates_++;
                     return false;
                 }
