@@ -203,6 +203,10 @@ constexpr float IRON_FF_RIGHT_EDGE_CONGEST_CAP = 150.0f;// 右边缘拥塞上限
 constexpr int   IRON_FF_TOPBOT_ROWS = 1;                 // 上下边缘各行数
 constexpr float IRON_FF_TOP_CONGEST_CAP = 150.0f;       // 上边缘拥塞上限
 constexpr float IRON_FF_BOTTOM_CONGEST_CAP = 150.0f;    // 下边缘拥塞上限
+constexpr float IRON_FF_LEFT_CORNER_PENALTY = 40.0f;   // idle_relocate 左上/左下角惩罚
+constexpr float IRON_FF_RIGHT_CORNER_PENALTY = 150.0f; // idle_relocate 右上/右下角惩罚
+constexpr float IRON_FF_OUTER_PENALTY = 50.0f;         // idle_relocate 边缘收敛回内部
+constexpr float IRON_FF_LEFT_EDGE_PENALTY = 0.0f;      // idle_relocate 左边缘额外惩罚
 
 // ═══════════════════════════════════════════════════════════════════
 // Room 部分分配（SCHEDULE_MODE=5 的 Room 分支）

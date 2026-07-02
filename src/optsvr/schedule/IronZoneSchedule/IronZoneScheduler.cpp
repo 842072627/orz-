@@ -1124,8 +1124,38 @@ void IronZoneScheduler::idle_relocate(const std::vector<int>& proposed_schedule,
             int zr2 = z   / ff_zone_cols_, zc2 = z   % ff_zone_cols_;
             int zd = std::abs(zr1 - zr2) + std::abs(zc1 - zc2);
 
+            // 四角惩罚（含曼哈顿距离<=1的同行同列邻居）
+            float corner_penalty = 0;
+            int zr_max = ff_zone_rows_ - 1, zc_max = ff_zone_cols_ - 1;
+            bool near_left = false, near_right = false;
+            // 左角：左上邻居 (0,0)+(0,1)+(1,0)，左下邻居 (19,0)+(19,1)+(18,0)
+            if ((zr2 == 0 && (zc2 == 0 || zc2 == 1)) || (zr2 == 1 && zc2 == 0))
+                near_left = true;
+            if ((zr2 == zr_max && (zc2 == 0 || zc2 == 1)) || (zr2 == zr_max - 1 && zc2 == 0))
+                near_left = true;
+            // 右角：右上邻居 (0,max)+(0,max-1)+(1,max)，右下邻居 (max,max)+(max,max-1)+(max-1,max)
+            if ((zr2 == 0 && (zc2 == zc_max || zc2 == zc_max - 1)) || (zr2 == 1 && zc2 == zc_max))
+                near_right = true;
+            if ((zr2 == zr_max && (zc2 == zc_max || zc2 == zc_max - 1)) || (zr2 == zr_max - 1 && zc2 == zc_max))
+                near_right = true;
+            if (near_left) corner_penalty = cfg().iron_ff_left_corner_penalty;
+            if (near_right) corner_penalty = cfg().iron_ff_right_corner_penalty;
+
+            // 边缘惩罚：收敛 idle 回内部，不堵在 edge/top/bottom
+            float outer_penalty = 0;
+            if (zc2 < cfg().iron_ff_edge_cols ||
+                zc2 >= ff_zone_cols_ - cfg().iron_ff_edge_cols ||
+                zr2 < cfg().iron_ff_topbot_rows ||
+                zr2 >= ff_zone_rows_ - cfg().iron_ff_topbot_rows)
+                outer_penalty = cfg().iron_ff_outer_penalty;
+
+            // 左边缘额外惩罚
+            float left_edge_penalty = 0;
+            if (zc2 < cfg().iron_ff_edge_cols)
+                left_edge_penalty = cfg().iron_ff_left_edge_penalty;
+
             float repulse = W_REPEL * (idle_agents_in_zone[z] + zone_picks[z]);
-            float score = total_flow + W_DIST * zd + repulse;
+            float score = total_flow + W_DIST * zd + repulse + corner_penalty + outer_penalty + left_edge_penalty;
 
             if (score < best_score) {
                 best_score = score;
@@ -1149,7 +1179,6 @@ void IronZoneScheduler::idle_relocate(const std::vector<int>& proposed_schedule,
                 int loc = r * cols_ + c;
                 if (loc >= map_size_) continue;
                 if (env->map[loc] != 0) continue;
-                if (IronHighway::get_forbid_mask(loc) != 0) continue;
                 candidates.push_back(loc);
             }
         }

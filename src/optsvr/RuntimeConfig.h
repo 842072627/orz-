@@ -125,6 +125,10 @@ struct RuntimeConfig {
     int   iron_ff_topbot_rows;
     float iron_ff_top_congest_cap;
     float iron_ff_bottom_congest_cap;
+    float iron_ff_left_corner_penalty;         // idle_relocate 左下/左上 corner 惩罚
+    float iron_ff_right_corner_penalty;        // idle_relocate 右下/右上 corner 惩罚
+    float iron_ff_outer_penalty;                // idle_relocate 边缘 zone 惩罚（收敛回内部）
+    float iron_ff_left_edge_penalty;            // idle_relocate 左边缘额外惩罚
     int   iron_future_flow_zone_rows;
     int   iron_future_flow_zone_cols;
 
