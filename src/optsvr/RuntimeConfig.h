@@ -120,9 +120,11 @@ struct RuntimeConfig {
     float iron_future_flow_congest_cap;
     bool  iron_ff_zone_tuning_enabled;
     int   iron_ff_edge_cols;
-    float iron_ff_edge_congest_cap;
+    float iron_ff_left_edge_congest_cap;
+    float iron_ff_right_edge_congest_cap;
     int   iron_ff_topbot_rows;
-    float iron_ff_topbot_congest_cap;
+    float iron_ff_top_congest_cap;
+    float iron_ff_bottom_congest_cap;
     int   iron_future_flow_zone_rows;
     int   iron_future_flow_zone_cols;
 

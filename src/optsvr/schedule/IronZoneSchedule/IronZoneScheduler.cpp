@@ -70,10 +70,17 @@ void IronZoneScheduler::initialize(SharedEnvironment* env, int /*preprocess_time
                                 zc >= ff_zone_cols_ - cfg().iron_ff_edge_cols);
                 bool is_topbot = (zr < cfg().iron_ff_topbot_rows ||
                                   zr >= ff_zone_rows_ - cfg().iron_ff_topbot_rows);
-                if (is_edge)
-                    ff_zone_congest_cap_[z] = cfg().iron_ff_edge_congest_cap;
-                else if (is_topbot)
-                    ff_zone_congest_cap_[z] = cfg().iron_ff_topbot_congest_cap;
+                if (is_edge) {
+                    if (zc < cfg().iron_ff_edge_cols)
+                        ff_zone_congest_cap_[z] = cfg().iron_ff_left_edge_congest_cap;
+                    else
+                        ff_zone_congest_cap_[z] = cfg().iron_ff_right_edge_congest_cap;
+                } else if (is_topbot) {
+                    if (zr < cfg().iron_ff_topbot_rows)
+                        ff_zone_congest_cap_[z] = cfg().iron_ff_top_congest_cap;
+                    else
+                        ff_zone_congest_cap_[z] = cfg().iron_ff_bottom_congest_cap;
+                }
                 // interior stays -1 (no restriction)
             }
         }

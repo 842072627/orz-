@@ -86,10 +86,13 @@ inline void load_for_combined(const MapProfile& profile, const SharedEnvironment
             c.iron_future_flow_zone_rows = 20;
             c.iron_future_flow_zone_cols = 50;
             c.iron_ff_zone_tuning_enabled = true;
+            // ── 四方向独立 zone congest cap (方便调参) ──
             c.iron_ff_edge_cols = 1;
-            c.iron_ff_edge_congest_cap = 240.0f;
+            c.iron_ff_left_edge_congest_cap = 35.0f;    // ← 左
+            c.iron_ff_right_edge_congest_cap = 80.0f;  // ← 右
             c.iron_ff_topbot_rows = 1;
-            c.iron_ff_topbot_congest_cap = 280.0f;
+            c.iron_ff_top_congest_cap = 120.0f;         // ← 上
+            c.iron_ff_bottom_congest_cap = 120.0f;      // ← 下
             break;
 
         default:

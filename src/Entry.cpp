@@ -84,7 +84,7 @@ void Entry::compute(int time_limit, Plan & plan, std::vector<int> & proposed_sch
     }
 
     // idle agent relocation: move idle agents toward low-flow zones (DISABLED)
-    //scheduler->idle_relocate(proposed_schedule);
+    scheduler->idle_relocate(proposed_schedule);
 
     //call the planner to compute the actions
     planner->plan(time_limit,plan);

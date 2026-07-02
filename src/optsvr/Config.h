@@ -197,10 +197,12 @@ constexpr float IRON_FUTURE_FLOW_CONGEST_CAP = 300.0f; // 拥塞上限: zone总�
 
 // 按zone区分future flow限制
 constexpr bool  IRON_FF_ZONE_TUNING_ENABLED = false;     // 启用按zone区分
-constexpr int   IRON_FF_EDGE_COLS = 2;                   // 左右边缘各几列
-constexpr float IRON_FF_EDGE_CONGEST_CAP = 30.0f;        // 边缘拥塞上限
-constexpr int   IRON_FF_TOPBOT_ROWS = 3;                 // 上下边缘各行数
-constexpr float IRON_FF_TOPBOT_CONGEST_CAP = 40.0f;      // 上下边缘拥塞上限
+constexpr int   IRON_FF_EDGE_COLS = 1;                   // 左右边缘各几列
+constexpr float IRON_FF_LEFT_EDGE_CONGEST_CAP = 80.0f;  // 左边缘拥塞上限
+constexpr float IRON_FF_RIGHT_EDGE_CONGEST_CAP = 150.0f;// 右边缘拥塞上限
+constexpr int   IRON_FF_TOPBOT_ROWS = 1;                 // 上下边缘各行数
+constexpr float IRON_FF_TOP_CONGEST_CAP = 150.0f;       // 上边缘拥塞上限
+constexpr float IRON_FF_BOTTOM_CONGEST_CAP = 150.0f;    // 下边缘拥塞上限
 
 // ═══════════════════════════════════════════════════════════════════
 // Room 部分分配（SCHEDULE_MODE=5 的 Room 分支）
