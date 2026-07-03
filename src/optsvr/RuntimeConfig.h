@@ -121,6 +121,19 @@ struct RuntimeConfig {
     int   iron_future_flow_zone_rows;
     int   iron_future_flow_zone_cols;
 
+    // ---- IronZone zone tuning (方向独立cap + 惩罚) ----
+    bool  iron_ff_zone_tuning_enabled;
+    int   iron_ff_edge_cols;
+    int   iron_ff_topbot_rows;
+    float iron_ff_left_edge_congest_cap;
+    float iron_ff_right_edge_congest_cap;
+    float iron_ff_top_congest_cap;
+    float iron_ff_bottom_congest_cap;
+    float iron_ff_left_corner_penalty;
+    float iron_ff_right_corner_penalty;
+    float iron_ff_outer_penalty;
+    float iron_ff_left_edge_penalty;
+
     // ---- Iron lane traffic-light planner branch ----
     int   iron_lane_enabled;
     int   iron_lane_guard_dist;
@@ -159,6 +172,7 @@ struct RuntimeConfig {
     int   guide_flow_opposite_w;
     int   guide_flow_same_w;
     bool  ware_direct;
+    bool  dummy_goal_home;
     int   flow_turn_penalty;
     int   flow_start_turn_penalty;
     float flow_turn_tie;
@@ -332,6 +346,17 @@ struct RuntimeConfig {
         OVERRIDE_FLOAT("IRON_FUTURE_FLOW_CONGEST_CAP", iron_future_flow_congest_cap);
         OVERRIDE_INT("IRON_FUTURE_FLOW_ZONE_ROWS", iron_future_flow_zone_rows);
         OVERRIDE_INT("IRON_FUTURE_FLOW_ZONE_COLS", iron_future_flow_zone_cols);
+        OVERRIDE_BOOL("IRON_FF_ZONE_TUNING_ENABLED", iron_ff_zone_tuning_enabled);
+        OVERRIDE_INT("IRON_FF_EDGE_COLS", iron_ff_edge_cols);
+        OVERRIDE_INT("IRON_FF_TOPBOT_ROWS", iron_ff_topbot_rows);
+        OVERRIDE_FLOAT("IRON_FF_LEFT_EDGE_CONGEST_CAP", iron_ff_left_edge_congest_cap);
+        OVERRIDE_FLOAT("IRON_FF_RIGHT_EDGE_CONGEST_CAP", iron_ff_right_edge_congest_cap);
+        OVERRIDE_FLOAT("IRON_FF_TOP_CONGEST_CAP", iron_ff_top_congest_cap);
+        OVERRIDE_FLOAT("IRON_FF_BOTTOM_CONGEST_CAP", iron_ff_bottom_congest_cap);
+        OVERRIDE_FLOAT("IRON_FF_LEFT_CORNER_PENALTY", iron_ff_left_corner_penalty);
+        OVERRIDE_FLOAT("IRON_FF_RIGHT_CORNER_PENALTY", iron_ff_right_corner_penalty);
+        OVERRIDE_FLOAT("IRON_FF_OUTER_PENALTY", iron_ff_outer_penalty);
+        OVERRIDE_FLOAT("IRON_FF_LEFT_EDGE_PENALTY", iron_ff_left_edge_penalty);
         OVERRIDE_INT("IRON_LANE_ENABLED", iron_lane_enabled);
         OVERRIDE_INT("IRON_LANE_GUARD_DIST", iron_lane_guard_dist);
         OVERRIDE_INT("IRON_LANE_CORE_FLIP_TH", iron_lane_core_flip_th);
@@ -351,6 +376,7 @@ struct RuntimeConfig {
         OVERRIDE_INT("GUIDE_FLOW_OPPOSITE_W", guide_flow_opposite_w);
         OVERRIDE_INT("GUIDE_FLOW_SAME_W", guide_flow_same_w);
         OVERRIDE_BOOL("OPT_WARE_DIRECT", ware_direct);
+        OVERRIDE_BOOL("OPT_DUMMY_GOAL_HOME", dummy_goal_home);
         OVERRIDE_INT("OPT_FLOW_TURN_PENALTY", flow_turn_penalty);
         OVERRIDE_INT("OPT_FLOW_START_TURN_PENALTY", flow_start_turn_penalty);
         OVERRIDE_FLOAT("OPT_FLOW_TURN_TIE", flow_turn_tie);
@@ -464,6 +490,7 @@ private:
         random_route_load_dynamic_path_weight = RANDOM_ROUTE_LOAD_DYNAMIC_PATH_WEIGHT;
         flow_decay = FLOW_DECAY; flow_decay_scale = FLOW_DECAY_SCALE;
         ware_direct = WARE_DIRECT;
+        dummy_goal_home = DUMMY_GOAL_HOME;
         flow_turn_penalty = OPT_FLOW_TURN_PENALTY;
         flow_start_turn_penalty = OPT_FLOW_START_TURN_PENALTY;
         flow_turn_tie = OPT_FLOW_TURN_TIE;
@@ -558,6 +585,17 @@ private:
         iron_future_flow_congest_cap = IRON_FUTURE_FLOW_CONGEST_CAP;
         iron_future_flow_zone_rows = IRON_FUTURE_FLOW_ZONE_ROWS;
         iron_future_flow_zone_cols = IRON_FUTURE_FLOW_ZONE_COLS;
+        iron_ff_zone_tuning_enabled = IRON_FF_ZONE_TUNING_ENABLED;
+        iron_ff_edge_cols = IRON_FF_EDGE_COLS;
+        iron_ff_topbot_rows = IRON_FF_TOPBOT_ROWS;
+        iron_ff_left_edge_congest_cap = IRON_FF_LEFT_EDGE_CONGEST_CAP;
+        iron_ff_right_edge_congest_cap = IRON_FF_RIGHT_EDGE_CONGEST_CAP;
+        iron_ff_top_congest_cap = IRON_FF_TOP_CONGEST_CAP;
+        iron_ff_bottom_congest_cap = IRON_FF_BOTTOM_CONGEST_CAP;
+        iron_ff_left_corner_penalty = IRON_FF_LEFT_CORNER_PENALTY;
+        iron_ff_right_corner_penalty = IRON_FF_RIGHT_CORNER_PENALTY;
+        iron_ff_outer_penalty = IRON_FF_OUTER_PENALTY;
+        iron_ff_left_edge_penalty = IRON_FF_LEFT_EDGE_PENALTY;
         iron_lane_enabled = IRON_LANE_ENABLED;
         iron_lane_guard_dist = IRON_LANE_GUARD_DIST;
         iron_lane_core_flip_th = IRON_LANE_CORE_FLIP_TH;

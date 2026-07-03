@@ -195,6 +195,19 @@ constexpr int   IRON_FUTURE_FLOW_ZONE_COLS = 64;    // ff内部zone网格列数
 constexpr float IRON_FUTURE_FLOW_LOCK_TH  = 50.0f;  // 方向锁阈值(0=关闭逆流锁)
 constexpr float IRON_FUTURE_FLOW_CONGEST_CAP = 300.0f; // 拥塞上限: zone总流>=此值则拦
 
+// ---- IronZone zone tuning (方向独立cap + 惩罚) ----
+constexpr bool  IRON_FF_ZONE_TUNING_ENABLED     = false;
+constexpr int   IRON_FF_EDGE_COLS               = 1;
+constexpr int   IRON_FF_TOPBOT_ROWS             = 1;
+constexpr float IRON_FF_LEFT_EDGE_CONGEST_CAP   = 60.0f;
+constexpr float IRON_FF_RIGHT_EDGE_CONGEST_CAP  = 150.0f;
+constexpr float IRON_FF_TOP_CONGEST_CAP         = 150.0f;
+constexpr float IRON_FF_BOTTOM_CONGEST_CAP      = 120.0f;
+constexpr float IRON_FF_LEFT_CORNER_PENALTY     = 30.0f;
+constexpr float IRON_FF_RIGHT_CORNER_PENALTY    = 150.0f;
+constexpr float IRON_FF_OUTER_PENALTY           = 0.0f;
+constexpr float IRON_FF_LEFT_EDGE_PENALTY       = 150.0f;
+
 // ═══════════════════════════════════════════════════════════════════
 // Room 部分分配（SCHEDULE_MODE=5 的 Room 分支）
 // ═══════════════════════════════════════════════════════════════════
@@ -261,6 +274,7 @@ constexpr int   GUIDE_FLOW_SAME_W = 1;        // IDEA/IRON Config.h 写作 int 1
 // Fullfill highway
 constexpr bool  FULLFILL_HIGHWAY_FORCE_MOVE = false; // PIBT单方向格强制驱离（warehouse窄道多易死锁，默认关）
 constexpr bool  WARE_DIRECT      = false;      // Warehouse 通道定向策略开关
+constexpr bool  DUMMY_GOAL_HOME  = false;      // idle agent 回原始起点（Entry.cpp 机制）
 constexpr int   OPT_FLOW_TURN_PENALTY = 0;      // Flow guide path中每次转弯额外cost
 constexpr int   OPT_FLOW_START_TURN_PENALTY = 2; // Flow guide第一步相对当前朝向的转弯cost
 constexpr float OPT_FLOW_TURN_TIE = 0.1f;       // Flow guide path同分时的转弯tie-break

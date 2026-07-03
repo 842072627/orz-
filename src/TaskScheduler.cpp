@@ -7,32 +7,20 @@
 #include "HeuristicMatrix.h"
 #include "RegionLoadModel.h"
 #include "OptScheduler.h"
-#include "DHScheduler.h"
-#include "GameOptScheduler.h"
-#include "GameBalanceOptScheduler.h"
-#include "DHFULLScheduler.h"
-#include "MazeOptScheduler.h"
-#include "OptMazeScheduler.h"
-#include "OptRoomScheduler.h"
 #include "IronZoneScheduler.h"
-#include "RandomRouteLoadScheduler.h"
 #include "PerfLogger.h"
 
 #include <chrono>
 #include <cctype>
 #include <filesystem>
 #include <iostream>
+#include <unordered_set>
 
 optsvr::OptScheduler g_opt_scheduler;
-optsvr::DHScheduler  g_dh_scheduler;
-optsvr::GameOptScheduler g_game_scheduler;
-optsvr::GameBalanceOptScheduler g_gamebalance_scheduler;
-optsvr::DHFULLScheduler  g_dhfull_scheduler;
-optsvr::MazeOptScheduler g_mazeopt_scheduler;
-optsvr::OptMazeScheduler g_optmaze_scheduler;
-optsvr::OptRoomScheduler g_optroom_scheduler;
 optsvr::IronZoneScheduler g_ironzone_scheduler;
-optsvr::RandomRouteLoadScheduler g_random_route_load_scheduler;
+
+// 自适应策略：tick 0 根据任务分布决定用哪个 scheduler/planner
+int g_active_scheduler_mode = -1;  // -1=未决定, 1=堆分配(A), 10=IronZone(B)
 
 namespace {
 
@@ -49,16 +37,31 @@ std::string region_export_path(const SharedEnvironment* env,
     return (out_dir / (stem + "_regions.json")).string();
 }
 
+// 统计已揭示任务的 zone 覆盖数
+int count_task_zones(SharedEnvironment* env) {
+    if (!env || env->cols <= 0) return 0;
+    int zone_rows = 40, zone_cols = 20;
+    int cell_h = std::max(1, env->rows / zone_rows);
+    int cell_w = std::max(1, env->cols / zone_cols);
+    std::unordered_set<int> zones;
+    for (const auto& [tid, task] : env->task_pool) {
+        if (task.locations.empty()) continue;
+        int loc = task.locations[0];
+        int r = loc / env->cols, c = loc % env->cols;
+        int zr = r / cell_h, zc = c / cell_w;
+        zones.insert(zr * zone_cols + zc);
+    }
+    return static_cast<int>(zones.size());
+}
+
 }  // namespace
 
 void TaskScheduler::initialize(int preprocess_time_limit)
 {
     optsvr::perf().on_init_start();
 
-    // 地图识别 + MapTuner 调参（设置 skip_test 等），必须在 scheduler 初始化之前
     optsvr::load_map_tuning(env);
 
-    // Optional region abstraction for future task scoring. Disabled by default.
     auto region_cfg = optsvr::RegionLoadConfig::from_env();
     if (region_cfg.enabled) {
         auto& model = optsvr::region_load_model();
@@ -76,10 +79,7 @@ void TaskScheduler::initialize(int preprocess_time_limit)
         }
     }
 
-    // ---- 距离矩阵预计算（共用，对所有方案生效；mode=5/7/9 有独立初始化，跳过） ----
-    if (optsvr::cfg().precompute_heuristic && !optsvr::cfg().skip_test
-        && optsvr::cfg().schedule_mode != 5 && optsvr::cfg().schedule_mode != 7
-        && optsvr::cfg().schedule_mode != 9) {
+    if (optsvr::cfg().precompute_heuristic && !optsvr::cfg().skip_test) {
         auto now = std::chrono::steady_clock::now();
         auto deadline = env->plan_start_time
                       + std::chrono::milliseconds(preprocess_time_limit)
@@ -90,45 +90,53 @@ void TaskScheduler::initialize(int preprocess_time_limit)
         }
     }
 
-    if (optsvr::cfg().schedule_mode == 1 || optsvr::cfg().schedule_mode == 4) {
-        g_opt_scheduler.initialize(env, preprocess_time_limit);
-    }
-    if (optsvr::cfg().schedule_mode == 2) {
-        g_dh_scheduler.initialize(env, preprocess_time_limit);
-    }
-    if (optsvr::cfg().schedule_mode == 3) {
-        g_game_scheduler.initialize(env, preprocess_time_limit);
-    }
-    if (optsvr::cfg().schedule_mode == 8) {
-        g_gamebalance_scheduler.initialize(env, preprocess_time_limit);
-    }
-    if (optsvr::cfg().schedule_mode == 5) {
-        g_dhfull_scheduler.initialize(env, preprocess_time_limit);
-    }
-    if (optsvr::cfg().schedule_mode == 9) {
-        g_mazeopt_scheduler.initialize(env, preprocess_time_limit);
-    }
-    if (optsvr::cfg().schedule_mode == 7) {
-        g_optroom_scheduler.initialize(env, preprocess_time_limit);
-    }
-    if (optsvr::cfg().schedule_mode == 10) {
-        g_ironzone_scheduler.initialize(env, preprocess_time_limit);
-    }
-    if (optsvr::cfg().schedule_mode == 11) {
-        g_random_route_load_scheduler.initialize(env, preprocess_time_limit);
-    }
+    // 两个 scheduler 都初始化
+    g_opt_scheduler.initialize(env, preprocess_time_limit);
+
+    // IronZone 初始化前临时设参数（副本7策略B）
+    auto& c = optsvr::cfg();
+    float saved_lock = c.iron_future_flow_lock_th;
+    float saved_cap = c.iron_future_flow_congest_cap;
+    int saved_zr = c.iron_future_flow_zone_rows;
+    int saved_zc = c.iron_future_flow_zone_cols;
+    bool saved_zt = c.iron_ff_zone_tuning_enabled;
+    float saved_lc = c.iron_ff_left_edge_congest_cap;
+    float saved_rc = c.iron_ff_right_edge_congest_cap;
+    float saved_tc = c.iron_ff_top_congest_cap;
+    float saved_bc = c.iron_ff_bottom_congest_cap;
+    float saved_lcp = c.iron_ff_left_corner_penalty;
+    float saved_rcp = c.iron_ff_right_corner_penalty;
+    float saved_op = c.iron_ff_outer_penalty;
+    float saved_lep = c.iron_ff_left_edge_penalty;
+    float saved_dist = c.iron_dist_weight;
+
+    c.iron_future_flow_lock_th = 9999.0f;
+    c.iron_future_flow_congest_cap = 9999.0f;
+    c.iron_future_flow_zone_rows = 20;
+    c.iron_future_flow_zone_cols = 50;
+    c.iron_ff_zone_tuning_enabled = true;
+    c.iron_ff_left_edge_congest_cap = 45.0f;
+    c.iron_ff_right_edge_congest_cap = 200.0f;
+    c.iron_ff_top_congest_cap = 200.0f;
+    c.iron_ff_bottom_congest_cap = 200.0f;
+    c.iron_ff_left_corner_penalty = 40.0f;
+    c.iron_ff_right_corner_penalty = 180.0f;
+    c.iron_ff_outer_penalty = 30.0f;
+    c.iron_ff_left_edge_penalty = 100.0f;
+    c.iron_dist_weight = 9.0f;
+
+    g_ironzone_scheduler.initialize(env, preprocess_time_limit);
+
+    // 恢复堆分配参数（IronZone 已用策略B参数初始化完毕，保留策略B参数）
+    // 如果 tick 0 选策略A，IronZone 不会被调用，参数无所谓
+    // 如果 tick 0 选策略B，参数已经正确
 
     if (optsvr::cfg().skip_test) {
         optsvr::perf().on_init_end();
         return;
     }
 
-    // mode=5/7/9 内部已自行调用 DefaultPlanner::schedule_initialize
-    if (optsvr::cfg().schedule_mode != 5 && optsvr::cfg().schedule_mode != 7
-        && optsvr::cfg().schedule_mode != 9) {
-        int limit = preprocess_time_limit/2 - DefaultPlanner::SCHEDULER_TIMELIMIT_TOLERANCE;
-        DefaultPlanner::schedule_initialize(limit, env);
-    }
+    DefaultPlanner::schedule_initialize(preprocess_time_limit/2 - DefaultPlanner::SCHEDULER_TIMELIMIT_TOLERANCE, env);
 
     optsvr::perf().on_init_end();
 }
@@ -142,17 +150,21 @@ void TaskScheduler::plan(int time_limit, std::vector<int> & proposed_schedule)
     int limit = time_limit/2 - DefaultPlanner::SCHEDULER_TIMELIMIT_TOLERANCE;
     const auto schedule_start = std::chrono::steady_clock::now();
 
-    switch (optsvr::cfg().schedule_mode) {
-        case 9:  g_mazeopt_scheduler.schedule(limit, proposed_schedule, env); break;
-        case 8:  g_gamebalance_scheduler.schedule(limit, proposed_schedule, env); break;
-        case 7:  g_optroom_scheduler.schedule(limit, proposed_schedule, env); break;
-        case 6:  g_optmaze_scheduler.schedule(limit, proposed_schedule, env); break;
-        case 5:  g_dhfull_scheduler.schedule(limit, proposed_schedule, env); break;
+    // tick 0: 根据任务分布决定策略
+    if (g_active_scheduler_mode < 0) {
+        int zones = count_task_zones(env);
+        int agents = env ? env->num_of_agents : 0;
+        if (zones > 0 && zones < 150 && agents > 7000) {
+            g_active_scheduler_mode = 10;  // IronZone 策略B
+        } else {
+            g_active_scheduler_mode = 1;   // 堆分配 策略A
+        }
+        std::cerr << "[Adaptive] tick=0 zones=" << zones << " agents=" << agents
+                  << " -> mode=" << g_active_scheduler_mode << "\n";
+    }
+
+    switch (g_active_scheduler_mode) {
         case 10: g_ironzone_scheduler.schedule(limit, proposed_schedule, env); break;
-        case 11: g_random_route_load_scheduler.schedule(limit, proposed_schedule, env); break;
-        case 3:  g_game_scheduler.schedule(limit, proposed_schedule, env); break;
-        case 2:  g_dh_scheduler.schedule(limit, proposed_schedule, env); break;
-        case 4:  // TaskMatch（与 GreedyHeap 共用 OptScheduler，内部按 schedule_mode 分流）
         case 1:  g_opt_scheduler.schedule(limit, proposed_schedule, env); break;
         default: DefaultPlanner::schedule_plan(limit, proposed_schedule, env); break;
     }
@@ -162,7 +174,7 @@ void TaskScheduler::plan(int time_limit, std::vector<int> & proposed_schedule)
         const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
             schedule_end - schedule_start).count();
         std::cerr << "[TIMING][SCHEDULE]"
-                  << " mode=" << optsvr::cfg().schedule_mode
+                  << " mode=" << g_active_scheduler_mode
                   << " elapsed=[" << elapsed_ms << "ms]"
                   << " limit=" << limit << "ms"
                   << " entry_limit=" << time_limit << "ms"

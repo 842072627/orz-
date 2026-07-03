@@ -14,6 +14,8 @@ public:
     void initialize(SharedEnvironment* env, int preprocess_time_limit_ms = 30000);
     void schedule(int time_limit_ms, std::vector<int>& proposed_schedule,
                   SharedEnvironment* env);
+    void idle_relocate(const std::vector<int>& proposed_schedule,
+                       SharedEnvironment* env, bool log = false);
 
 private:
     struct AgentMeta {
@@ -118,6 +120,7 @@ private:
     // future flow
     void print_round_stats(const RoundStats& stats, int tick) const;
     mutable int ff_locked_candidates_ = 0;
+    std::vector<float> ff_zone_congest_cap_;  // 每zone拥塞上限, -1=不限制
 };
 
 } // namespace optsvr

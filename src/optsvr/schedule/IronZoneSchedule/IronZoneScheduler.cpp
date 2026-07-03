@@ -59,6 +59,31 @@ void IronZoneScheduler::initialize(SharedEnvironment* env, int /*preprocess_time
         ff_zone_count_ = ff_zone_rows_ * ff_zone_cols_;
         ff_dir_.assign(ff_zone_count_ * 4, 0.0f);
         ff_compute_zone_adjacency(env);
+
+        // Precompute per-zone congest_cap for zone tuning
+        ff_zone_congest_cap_.assign(ff_zone_count_, -1.0f);
+        if (cfg().iron_ff_zone_tuning_enabled) {
+            for (int z = 0; z < ff_zone_count_; z++) {
+                int zr = z / ff_zone_cols_;
+                int zc = z % ff_zone_cols_;
+                bool is_edge = (zc < cfg().iron_ff_edge_cols ||
+                                zc >= ff_zone_cols_ - cfg().iron_ff_edge_cols);
+                bool is_topbot = (zr < cfg().iron_ff_topbot_rows ||
+                                  zr >= ff_zone_rows_ - cfg().iron_ff_topbot_rows);
+                if (is_edge) {
+                    if (zc < cfg().iron_ff_edge_cols)
+                        ff_zone_congest_cap_[z] = cfg().iron_ff_left_edge_congest_cap;
+                    else
+                        ff_zone_congest_cap_[z] = cfg().iron_ff_right_edge_congest_cap;
+                } else if (is_topbot) {
+                    if (zr < cfg().iron_ff_topbot_rows)
+                        ff_zone_congest_cap_[z] = cfg().iron_ff_top_congest_cap;
+                    else
+                        ff_zone_congest_cap_[z] = cfg().iron_ff_bottom_congest_cap;
+                }
+                // interior stays -1 (no restriction)
+            }
+        }
         if (!ff_load_cache("ff_cache.bin")) {
             ff_precompute_all_pairs(env);
             if (ff_path_ready_) ff_save_cache("ff_cache.bin");
@@ -775,12 +800,25 @@ void IronZoneScheduler::schedule(int time_limit_ms,
             std::fprintf(stderr, "[IronZone] pretick: zones=%d active=%d path_ready=%d\n",
                 ff_zone_count_, n_active_zone, ff_path_ready_ ? 1 : 0);
         }
+    } // end if (ff_enabled) pretick
+
+    // Compute dynamic lock threshold once, shared between pre-filter and realtime check.
+    // idle_ratio >= 50%: lock_th = 200 (same as current fixed value)
+    // idle_ratio < 50%:  ramps up to 250 as agents fill up
+    float dynamic_lock_th = 200.0f;
+    {
+        float idle_ratio = (n_agents > 0) ? static_cast<float>(free_agents.size()) / n_agents : 1.0f;
+        if (idle_ratio >= 0.50f) {
+            dynamic_lock_th = 200.0f;
+        } else {
+            dynamic_lock_th = 200.0f + 100.0f * (0.50f - idle_ratio);
+            if (dynamic_lock_th > 250.0f) dynamic_lock_th = 250.0f;
+        }
     }
 
     if (ff_enabled && ff_path_ready_ &&
         (cfg().iron_future_flow_lock_th != 0.0f ||
          cfg().iron_future_flow_congest_cap > 0.0f)) {
-        const float lock_th = cfg().iron_future_flow_lock_th;
         const float congest_cap = cfg().iron_future_flow_congest_cap;
         for (TaskMeta& task : tasks) {
             auto it = task_pool_snapshot_.find(task.tid);
@@ -808,11 +846,12 @@ void IronZoneScheduler::schedule(int time_limit_ms,
                     if (next >= ff_zone_count_) break;
                     const float* zd = &ff_dir_[cur * 4];
                     float total_flow = zd[0] + zd[1] + zd[2] + zd[3];
-                    if (congest_cap > 0.0f && total_flow >= congest_cap) {
+                    float zcap = (ff_zone_congest_cap_[cur] >= 0) ? ff_zone_congest_cap_[cur] : congest_cap;
+                    if (zcap > 0.0f && total_flow >= zcap) {
                         blocked = true;
                         break;
                     }
-                    if (lock_th > 0.0f && total_flow >= lock_th) {
+                    if (dynamic_lock_th > 0.0f && total_flow >= dynamic_lock_th) {
                         int dom = 0;
                         if (zd[1] > zd[dom]) dom = 1;
                         if (zd[2] > zd[dom]) dom = 2;
@@ -858,7 +897,7 @@ void IronZoneScheduler::schedule(int time_limit_ms,
              cfg().iron_future_flow_congest_cap <= 0.0f)) {
             return true;
         }
-        const float lock_th = cfg().iron_future_flow_lock_th;
+        const float lock_th = dynamic_lock_th;
         const float congest_cap = cfg().iron_future_flow_congest_cap;
         if (lock_th <= 0.0f && congest_cap <= 0.0f) return true;
 
@@ -887,7 +926,8 @@ void IronZoneScheduler::schedule(int time_limit_ms,
                 if (next >= ff_zone_count_) break;
                 const float* zd = &ff_dir_[cur * 4];
                 float total_flow = zd[0] + zd[1] + zd[2] + zd[3];
-                if (congest_cap > 0.0f && total_flow >= congest_cap) {
+                float zcap = (ff_zone_congest_cap_[cur] >= 0) ? ff_zone_congest_cap_[cur] : congest_cap;
+                if (zcap > 0.0f && total_flow >= zcap) {
                     ff_locked_candidates_++;
                     return false;
                 }
@@ -1028,6 +1068,142 @@ void IronZoneScheduler::schedule(int time_limit_ms,
     if (interval > 0 && cur_tick - last_stats_tick_ >= interval) {
         last_stats_tick_ = cur_tick;
         print_round_stats(stats, cur_tick);
+    }
+}
+
+void IronZoneScheduler::idle_relocate(const std::vector<int>& proposed_schedule,
+                                       SharedEnvironment* env, bool log) {
+    if (!env || ff_zone_count_ <= 0 || ff_dir_.empty()) return;
+
+    const int n_agents = env->num_of_agents;
+    const int n_zones = ff_zone_count_;
+
+    // Phase 1: count idle agents per zone
+    std::vector<int> idle_agents_in_zone(n_zones, 0);
+    std::vector<int> idle_list;
+    for (int i = 0; i < n_agents; i++) {
+        if (i >= (int)proposed_schedule.size()) break;
+        if (proposed_schedule[i] >= 0) continue;
+
+        int loc = env->curr_states[i].location;
+        if (loc < 0 || loc >= map_size_) continue;
+
+        idle_list.push_back(i);
+        int z = ff_zone_of_loc(loc);
+        if (z >= 0 && z < n_zones) {
+            idle_agents_in_zone[z]++;
+        }
+    }
+
+    if (idle_list.empty()) return;
+
+    // Constants for scoring
+    constexpr float W_DIST = 0.5f;
+    constexpr float W_REPEL = 5.0f;
+
+    if (log) {
+        std::fprintf(stderr, "[IdleRelocate] idle=%zu zones=%d W_REPEL=%.1f W_DIST=%.1f\n",
+                     idle_list.size(), n_zones, static_cast<double>(W_REPEL), static_cast<double>(W_DIST));
+    }
+
+    std::vector<int> zone_picks(n_zones, 0);
+
+    for (int ai = 0; ai < (int)idle_list.size(); ai++) {
+        int agent = idle_list[ai];
+        int a_loc = env->curr_states[agent].location;
+        if (a_loc < 0 || a_loc >= map_size_) continue;
+
+        int best_z = -1;
+        float best_score = std::numeric_limits<float>::max();
+        int a_z = ff_zone_of_loc(a_loc);
+
+        for (int z = 0; z < n_zones; z++) {
+            float total_flow = ff_dir_[z*4] + ff_dir_[z*4+1] + ff_dir_[z*4+2] + ff_dir_[z*4+3];
+
+            int zr1 = a_z / ff_zone_cols_, zc1 = a_z % ff_zone_cols_;
+            int zr2 = z   / ff_zone_cols_, zc2 = z   % ff_zone_cols_;
+            int zd = std::abs(zr1 - zr2) + std::abs(zc1 - zc2);
+
+            // 四角惩罚（含曼哈顿距离<=1的同行同列邻居）
+            float corner_penalty = 0;
+            int zr_max = ff_zone_rows_ - 1, zc_max = ff_zone_cols_ - 1;
+            bool near_left = false, near_right = false;
+            // 左角：左上邻居 (0,0)+(0,1)+(1,0)，左下邻居 (19,0)+(19,1)+(18,0)
+            if ((zr2 == 0 && (zc2 == 0 || zc2 == 1)) || (zr2 == 1 && zc2 == 0))
+                near_left = true;
+            if ((zr2 == zr_max && (zc2 == 0 || zc2 == 1)) || (zr2 == zr_max - 1 && zc2 == 0))
+                near_left = true;
+            // 右角：右上邻居 (0,max)+(0,max-1)+(1,max)，右下邻居 (max,max)+(max,max-1)+(max-1,max)
+            if ((zr2 == 0 && (zc2 == zc_max || zc2 == zc_max - 1)) || (zr2 == 1 && zc2 == zc_max))
+                near_right = true;
+            if ((zr2 == zr_max && (zc2 == zc_max || zc2 == zc_max - 1)) || (zr2 == zr_max - 1 && zc2 == zc_max))
+                near_right = true;
+            if (near_left) corner_penalty = cfg().iron_ff_left_corner_penalty;
+            if (near_right) corner_penalty = cfg().iron_ff_right_corner_penalty;
+
+            // 边缘惩罚：收敛 idle 回内部，不堵在 edge/top/bottom
+            float outer_penalty = 0;
+            if (zc2 < cfg().iron_ff_edge_cols ||
+                zc2 >= ff_zone_cols_ - cfg().iron_ff_edge_cols ||
+                zr2 < cfg().iron_ff_topbot_rows ||
+                zr2 >= ff_zone_rows_ - cfg().iron_ff_topbot_rows)
+                outer_penalty = cfg().iron_ff_outer_penalty;
+
+            // 左边缘额外惩罚
+            float left_edge_penalty = 0;
+            if (zc2 < cfg().iron_ff_edge_cols)
+                left_edge_penalty = cfg().iron_ff_left_edge_penalty;
+
+            float repulse = W_REPEL * (idle_agents_in_zone[z] + zone_picks[z]);
+            float score = total_flow + W_DIST * zd + repulse + corner_penalty + outer_penalty + left_edge_penalty;
+
+            if (score < best_score) {
+                best_score = score;
+                best_z = z;
+            }
+        }
+
+        if (best_z < 0) continue;
+
+        // Find a walkable cell in the best zone — distribute using agent_id hash
+        int zr = best_z / ff_zone_cols_;
+        int zc = best_z % ff_zone_cols_;
+        int r0 = zr * rows_ / ff_zone_rows_;
+        int r1 = std::min(rows_, (zr + 1) * rows_ / ff_zone_rows_ + 1);
+        int c0 = zc * cols_ / ff_zone_cols_;
+        int c1 = std::min(cols_, (zc + 1) * cols_ / ff_zone_cols_ + 1);
+
+        std::vector<int> candidates;
+        for (int r = r0; r < r1; r++) {
+            for (int c = c0; c < c1; c++) {
+                int loc = r * cols_ + c;
+                if (loc >= map_size_) continue;
+                if (env->map[loc] != 0) continue;
+                candidates.push_back(loc);
+            }
+        }
+
+        if (candidates.empty()) continue;
+
+        int target_cell = candidates[static_cast<size_t>(agent * 1000003u) % candidates.size()];
+
+        if (agent < (int)env->goal_locations.size()) {
+            env->goal_locations[agent].clear();
+            env->goal_locations[agent].push_back({target_cell, -1});
+        }
+
+        zone_picks[best_z]++;
+
+        if (log) {
+            float tf = ff_dir_[best_z*4]+ff_dir_[best_z*4+1]+ff_dir_[best_z*4+2]+ff_dir_[best_z*4+3];
+            int log_zd = std::abs((a_z / ff_zone_cols_) - (best_z / ff_zone_cols_))
+                       + std::abs((a_z % ff_zone_cols_) - (best_z % ff_zone_cols_));
+            std::fprintf(stderr,
+                "[IdleRelocate] agent=%d loc=%d zone=%d -> cell=%d zone=%d flow=%.1f dist=%d repulse=%.1f score=%.1f\n",
+                agent, a_loc, a_z, target_cell, best_z, tf, log_zd,
+                static_cast<double>(W_REPEL) * (idle_agents_in_zone[best_z] + zone_picks[best_z] - 1),
+                static_cast<double>(best_score));
+        }
     }
 }
 
