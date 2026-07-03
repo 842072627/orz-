@@ -62,6 +62,11 @@ private:
         int assign_dist_mid = 0;
         int assign_dist_far = 0;
         double solve_ms = 0.0;
+        // 任务分布统计
+        int task_zones_occupied = 0;
+        int task_zones_edge = 0;
+        int task_zones_cross = 0;   // start!=finish
+        double task_zone_concentration = 0.0;
     };
 
     SharedEnvironment* env_ = nullptr;
@@ -121,6 +126,9 @@ private:
     void print_round_stats(const RoundStats& stats, int tick) const;
     mutable int ff_locked_candidates_ = 0;
     std::vector<float> ff_zone_congest_cap_;  // 每zone拥塞上限, -1=不限制
+    std::vector<int>   ff_zone_walkable_count_; // 每zone可行走格子数
+    std::vector<float> ff_zone_agent_density_;  // 每zone agent密度 (0~1, EMA平滑)
+    bool ff_density_inited_ = false;
 };
 
 } // namespace optsvr

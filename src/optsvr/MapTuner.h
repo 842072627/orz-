@@ -72,7 +72,7 @@ inline void load_for_combined(const MapProfile& profile, const SharedEnvironment
             c.iron_zone_rows = 19;
             c.iron_zone_cols = 18;
             c.iron_max_radius = 1;
-            c.iron_dist_weight = 9.0f;
+            c.iron_dist_weight = 6.0f;
             c.iron_task_len_weight = 1.25f;
             c.iron_long_task_th = 1250;
             c.iron_stats_interval = 10;
@@ -81,23 +81,21 @@ inline void load_for_combined(const MapProfile& profile, const SharedEnvironment
             c.iron_future_flow_w = 1.0f;
             c.iron_future_flow_k = 1.0f;
             c.iron_future_flow_decay = 0.01f;
-            c.iron_future_flow_lock_th = 9999.0f;
-            c.iron_future_flow_congest_cap = 9999.0f;
-            c.iron_future_flow_zone_rows = 20;
-            c.iron_future_flow_zone_cols = 50;
+            c.iron_future_flow_lock_th = 250.0f;
+            c.iron_future_flow_congest_cap = 200.0f;
+            c.iron_future_flow_zone_rows = 40;
+            c.iron_future_flow_zone_cols = 20;
             c.iron_ff_zone_tuning_enabled = true;
-            // ── 四方向独立 zone congest cap (方便调参) ──
             c.iron_ff_edge_cols = 1;
-            c.iron_ff_left_edge_congest_cap = 60.0f;    // ← 左
-            c.iron_ff_right_edge_congest_cap = 300.0f;  // ← 右
-            c.iron_ff_top_congest_cap = 300.0f;         // ← 上
-            c.iron_ff_bottom_congest_cap = 300.0f;      // ← 下
+            c.iron_ff_left_edge_congest_cap = 45.0f;
+            c.iron_ff_right_edge_congest_cap = 200.0f;
+            c.iron_ff_top_congest_cap = 200.0f;
+            c.iron_ff_bottom_congest_cap = 200.0f;
             c.iron_ff_topbot_rows = 1;
-   
-            c.iron_ff_left_corner_penalty = 40.0f;     // 左上/左下角
-            c.iron_ff_right_corner_penalty = 180.0f;   // 右上/右下角
-            c.iron_ff_outer_penalty = 30.0f;            // 边缘收敛回内部
-            c.iron_ff_left_edge_penalty =100.0f;        // 左边缘额外惩罚
+            c.iron_ff_left_corner_penalty = 40.0f;
+            c.iron_ff_right_corner_penalty = 180.0f;
+            c.iron_ff_outer_penalty = 30.0f;
+            c.iron_ff_left_edge_penalty = 100.0f;
             break;
 
         default:

@@ -129,6 +129,12 @@ struct RuntimeConfig {
     float iron_ff_right_corner_penalty;        // idle_relocate 右下/右上 corner 惩罚
     float iron_ff_outer_penalty;                // idle_relocate 边缘 zone 惩罚（收敛回内部）
     float iron_ff_left_edge_penalty;            // idle_relocate 左边缘额外惩罚
+    // ── 自适应密度调节（边缘zone） ──
+    bool  iron_ff_adaptive_enabled;
+    float iron_ff_density_smoothing;            // EMA平滑 0~1
+    float iron_ff_cap_adjust_down;              // cap向下调幅
+    float iron_ff_cap_adjust_up;                // cap向上调幅
+    float iron_ff_penalty_adjust;               // 惩罚调幅
     int   iron_future_flow_zone_rows;
     int   iron_future_flow_zone_cols;
 

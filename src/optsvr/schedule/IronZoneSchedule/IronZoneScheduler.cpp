@@ -22,7 +22,7 @@ namespace {
 constexpr int H_CAP = 100000;
 constexpr uint32_t FF_CACHE_MAGIC = 0x49524646u; // "IRFF"
 constexpr uint32_t FF_CACHE_VERSION = 2u;
-constexpr bool IRON_ZONE_LOG_ENABLED = false;
+constexpr bool IRON_ZONE_LOG_ENABLED = true;
 
 double elapsed_ms(std::chrono::steady_clock::time_point a,
                   std::chrono::steady_clock::time_point b) {
@@ -84,6 +84,21 @@ void IronZoneScheduler::initialize(SharedEnvironment* env, int /*preprocess_time
                 // interior stays -1 (no restriction)
             }
         }
+
+        // Precompute walkable cells per zone for density measurement
+        ff_zone_walkable_count_.assign(ff_zone_count_, 0);
+        if (env) {
+            for (int i = 0; i < map_size_; i++) {
+                if (env->map[i] == 0) {  // walkable
+                    int z = ff_zone_of_loc(i);
+                    if (z >= 0 && z < ff_zone_count_)
+                        ff_zone_walkable_count_[z]++;
+                }
+            }
+        }
+        ff_zone_agent_density_.assign(ff_zone_count_, 0.0f);
+        ff_density_inited_ = true;
+
         if (!ff_load_cache("ff_cache.bin")) {
             ff_precompute_all_pairs(env);
             if (ff_path_ready_) ff_save_cache("ff_cache.bin");
@@ -570,7 +585,7 @@ void IronZoneScheduler::print_round_stats(const RoundStats& s, int tick) const {
     int busy_after = s.busy_before + s.assigned;
 
     std::fprintf(stderr,
-        "[IronZone] tick=%d freeA=%d freeT=%d assigned=%d busy=%d unmatched=%d avgDist=%.1f avgLen=%.1f avgComp=%.1f cross=%.1f%% avgZ=%.2f skip(comp=%d,highway=%d) freeLen(<=500=%d,<=1000=%d,<=1500=%d,>1500=%d) assignLen(<=500=%d,<=1000=%d,<=1500=%d,>1500=%d) assignDist(<=50=%d,<=150=%d,>150=%d) long>=%d=%.1f%% time(solve=%.1fms)\n",
+        "[IronZone] tick=%d freeA=%d freeT=%d assigned=%d busy=%d unmatched=%d avgDist=%.1f avgLen=%.1f avgComp=%.1f cross=%.1f%% avgZ=%.2f skip(comp=%d,highway=%d) freeLen(<=500=%d,<=1000=%d,<=1500=%d,>1500=%d) assignLen(<=500=%d,<=1000=%d,<=1500=%d,>1500=%d) assignDist(<=50=%d,<=150=%d,>150=%d) long>=%d=%.1f%% time(solve=%.1fms) taskDist(zones=%d,edge=%d/%.1f%%,cross=%d/%.1f%%,concentration=%.3f)\n",
         tick,
         s.free_agents, s.free_tasks, s.assigned, busy_after, s.unmatched_agents,
         avg_dist, avg_len, avg_completion, cross_pct, avg_zd,
@@ -578,7 +593,12 @@ void IronZoneScheduler::print_round_stats(const RoundStats& s, int tick) const {
         s.free_len_short, s.free_len_mid, s.free_len_long, s.free_len_huge,
         s.assign_len_short, s.assign_len_mid, s.assign_len_long, s.assign_len_huge,
         s.assign_dist_near, s.assign_dist_mid, s.assign_dist_far,
-        cfg().iron_long_task_th, long_pct, s.solve_ms);
+        cfg().iron_long_task_th, long_pct, s.solve_ms,
+        s.task_zones_occupied, s.task_zones_edge,
+        (s.free_tasks > 0 ? 100.0 * s.task_zones_edge / s.free_tasks : 0.0),
+        s.task_zones_cross,
+        (s.free_tasks > 0 ? 100.0 * s.task_zones_cross / s.free_tasks : 0.0),
+        s.task_zone_concentration);
     
     // FF stats
     if (!ff_dir_.empty() && ff_zone_count_ > 0) {
@@ -754,6 +774,83 @@ void IronZoneScheduler::schedule(int time_limit_ms,
     }
     stats.free_tasks = static_cast<int>(tasks.size());
 
+    // ── 任务分布统计（每10 tick打印一次） ──
+    {
+        std::vector<int> task_zone_count(ff_zone_count_, 0);
+        int edge_tasks = 0, cross_tasks = 0, total_zones = 0;
+        for (const auto& t : tasks) {
+            int sz = t.start_zone;
+            if (sz >= 0 && sz < ff_zone_count_) {
+                if (task_zone_count[sz] == 0) total_zones++;
+                task_zone_count[sz]++;
+            }
+            int zc = sz % ff_zone_cols_;
+            int zr = sz / ff_zone_cols_;
+            if (zc < cfg().iron_ff_edge_cols || zc >= ff_zone_cols_ - cfg().iron_ff_edge_cols ||
+                zr < cfg().iron_ff_topbot_rows || zr >= ff_zone_rows_ - cfg().iron_ff_topbot_rows)
+                edge_tasks++;
+            if (t.start_zone != t.finish_zone) cross_tasks++;
+        }
+        stats.task_zones_occupied = total_zones;
+        stats.task_zones_edge = edge_tasks;
+        stats.task_zones_cross = cross_tasks;
+        // Gini-like: top 10 zones concentration
+        std::sort(task_zone_count.begin(), task_zone_count.end(), std::greater<int>());
+        int top10_sum = 0;
+        for (int i = 0; i < 10 && i < ff_zone_count_; i++) top10_sum += task_zone_count[i];
+        stats.task_zone_concentration = (stats.free_tasks > 0)
+            ? static_cast<double>(top10_sum) / stats.free_tasks : 0.0;
+    }
+
+    // ── 自适应参数：根据任务 zone 覆盖数切换策略 ──
+    // zones<150 → 任务集中 → 激进(关方向锁+全局cap, 靠zone tuning)
+    // zones>=150 → 任务分散 → 保守(lock_th=250, cap=200)
+    float adaptive_cap = cfg().iron_future_flow_congest_cap;
+    float adaptive_lock = cfg().iron_future_flow_lock_th;
+    {
+        int z = stats.task_zones_occupied;
+        if (z > 0 && z < 150) {
+            adaptive_cap = 9999.0f;
+            adaptive_lock = 9999.0f;
+        } else if (z >= 150) {
+            adaptive_cap = 200.0f;
+            adaptive_lock = 250.0f;
+        }
+        if (IRON_ZONE_LOG_ENABLED) {
+            std::fprintf(stderr, " [Adaptive] zones=%d cap=%.0f lock=%.0f\n",
+                z, adaptive_cap, adaptive_lock);
+        }
+    }
+
+    // ── 自适应密度追踪（边缘zone） ──
+    const bool adaptive = cfg().iron_ff_adaptive_enabled && ff_density_inited_;
+    if (adaptive) {
+        const float alpha = std::clamp(cfg().iron_ff_density_smoothing, 0.05f, 1.0f);
+        std::vector<int> agent_count(ff_zone_count_, 0);
+        for (int a = 0; a < n_agents; a++) {
+            int loc = curr_locations_snapshot_[a];
+            if (loc < 0 || loc >= map_size_) continue;
+            int z = ff_zone_of_loc(loc);
+            if (z >= 0 && z < ff_zone_count_)
+                agent_count[z]++;
+        }
+        // 只对边缘zone更新密度（内部保持0）
+        for (int z = 0; z < ff_zone_count_; z++) {
+            int zc = z % ff_zone_cols_;
+            int zr = z / ff_zone_cols_;
+            bool is_outer = (zc < cfg().iron_ff_edge_cols ||
+                             zc >= ff_zone_cols_ - cfg().iron_ff_edge_cols ||
+                             zr < cfg().iron_ff_topbot_rows ||
+                             zr >= ff_zone_rows_ - cfg().iron_ff_topbot_rows);
+            if (!is_outer) continue;
+            float raw = (ff_zone_walkable_count_[z] > 0)
+                ? static_cast<float>(agent_count[z]) / static_cast<float>(ff_zone_walkable_count_[z])
+                : 0.0f;
+            if (raw > 1.0f) raw = 1.0f;
+            ff_zone_agent_density_[z] = alpha * raw + (1.0f - alpha) * ff_zone_agent_density_[z];
+        }
+    }
+
     // ---- pretick: reset future flow + add flow from busy agents ----
     bool ff_enabled = (!ff_dir_.empty() &&
         (cfg().iron_future_flow_lock_th != 0.0f ||
@@ -802,24 +899,13 @@ void IronZoneScheduler::schedule(int time_limit_ms,
         }
     } // end if (ff_enabled) pretick
 
-    // Compute dynamic lock threshold once, shared between pre-filter and realtime check.
-    // idle_ratio >= 50%: lock_th = 200 (same as current fixed value)
-    // idle_ratio < 50%:  ramps up to 250 as agents fill up
-    float dynamic_lock_th = 200.0f;
-    {
-        float idle_ratio = (n_agents > 0) ? static_cast<float>(free_agents.size()) / n_agents : 1.0f;
-        if (idle_ratio >= 0.50f) {
-            dynamic_lock_th = 200.0f;
-        } else {
-            dynamic_lock_th = 200.0f + 100.0f * (0.50f - idle_ratio);
-            if (dynamic_lock_th > 250.0f) dynamic_lock_th = 250.0f;
-        }
-    }
+    // Lock threshold: adaptive based on task distribution
+    const float lock_th = adaptive_lock;
 
     if (ff_enabled && ff_path_ready_ &&
-        (cfg().iron_future_flow_lock_th != 0.0f ||
-         cfg().iron_future_flow_congest_cap > 0.0f)) {
-        const float congest_cap = cfg().iron_future_flow_congest_cap;
+        (adaptive_lock != 0.0f ||
+         adaptive_cap > 0.0f)) {
+        const float congest_cap = adaptive_cap;
         for (TaskMeta& task : tasks) {
             auto it = task_pool_snapshot_.find(task.tid);
             if (it == task_pool_snapshot_.end() || it->second.locations.size() < 2) continue;
@@ -851,7 +937,7 @@ void IronZoneScheduler::schedule(int time_limit_ms,
                         blocked = true;
                         break;
                     }
-                    if (dynamic_lock_th > 0.0f && total_flow >= dynamic_lock_th) {
+                    if (lock_th > 0.0f && total_flow >= lock_th) {
                         int dom = 0;
                         if (zd[1] > zd[dom]) dom = 1;
                         if (zd[2] > zd[dom]) dom = 2;
@@ -893,12 +979,11 @@ void IronZoneScheduler::schedule(int time_limit_ms,
     auto realtime_ff_allows = [&](const AgentMeta& agent, const TaskMeta& task,
                                   bool from_agent) -> bool {
         if (!ff_enabled || !ff_path_ready_ ||
-            (cfg().iron_future_flow_lock_th == 0.0f &&
-             cfg().iron_future_flow_congest_cap <= 0.0f)) {
+            (adaptive_lock == 0.0f &&
+             adaptive_cap <= 0.0f)) {
             return true;
         }
-        const float lock_th = dynamic_lock_th;
-        const float congest_cap = cfg().iron_future_flow_congest_cap;
+        const float congest_cap = adaptive_cap;
         if (lock_th <= 0.0f && congest_cap <= 0.0f) return true;
 
         int z_prev = from_agent ? ff_zone_of_loc(agent.loc) : ff_zone_of_loc(task.start);
@@ -1155,7 +1240,13 @@ void IronZoneScheduler::idle_relocate(const std::vector<int>& proposed_schedule,
                 left_edge_penalty = cfg().iron_ff_left_edge_penalty;
 
             float repulse = W_REPEL * (idle_agents_in_zone[z] + zone_picks[z]);
-            float score = total_flow + W_DIST * zd + repulse + corner_penalty + outer_penalty + left_edge_penalty;
+
+            // 自适应密度：超过40%才加惩罚（只加不减）
+            float density_adjust = 0;
+            if (ff_density_inited_ && cfg().iron_ff_adaptive_enabled && ff_zone_agent_density_[z] > 0.4f)
+                density_adjust = ff_zone_agent_density_[z] * cfg().iron_ff_penalty_adjust;
+
+            float score = total_flow + W_DIST * zd + repulse + corner_penalty + outer_penalty + left_edge_penalty + density_adjust;
 
             if (score < best_score) {
                 best_score = score;
