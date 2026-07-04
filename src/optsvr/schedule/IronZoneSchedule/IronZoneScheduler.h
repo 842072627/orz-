@@ -104,6 +104,7 @@ private:
     std::vector<int> ff_get_zone_path_fast(int z_from, int z_to) const;
     std::vector<int> ff_get_zone_path(int z_from, int z_to);
     void ff_add_future_flow_path(int z_from, int z_to, float weight, int cumul_offset);
+    void ff_add_flow_path(float* dir, int z_from, int z_to, float weight, int cumul_offset);
     int ff_cell_size() const { return std::max(1, rows_ / std::max(1, ff_zone_rows_)); }
 
     int zone_of_loc(int loc) const;
@@ -121,8 +122,9 @@ private:
     void print_round_stats(const RoundStats& stats, int tick) const;
     mutable int ff_locked_candidates_ = 0;
     std::vector<float> ff_zone_congest_cap_;  // 每zone拥塞上限, -1=不限制
-    std::vector<float> ff_zone_flow_pct_;      // [NEW] 每zone flow百分位 (0~1), 越高越堵
-    void ff_compute_flow_percentiles();         // [NEW] 计算所有zone的flow百分位排序
+    std::vector<float> ff_zone_flow_pct_;      // 每zone flow百分位 (0~1), 越高越堵
+    std::vector<float> idle_dir_;               // [NEW] idle agent搬迁产生的方向flow
+    void ff_compute_flow_percentiles();         // 计算所有zone的flow百分位排序
 };
 
 } // namespace optsvr

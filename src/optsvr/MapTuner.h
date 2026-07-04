@@ -100,8 +100,14 @@ inline void load_for_combined(const MapProfile& profile, const SharedEnvironment
             c.iron_ff_idle_w_repel = 10.0f;
             c.iron_ff_flow_block_pct = 0.95f;
             c.iron_ff_flow_lock_pct = 0.85f;
+            c.iron_ff_idle_flow_enabled = 0;
+            c.iron_future_flow_decay = 0.01f;
+            c.iron_future_flow_congest_cap = 200.0f;
+            c.iron_future_flow_lock_th = 0.0f;
+            c.iron_lane_enabled = 0;
+            c.pibt_history_congestion_enabled = false;
+            c.flow_vertex_cost_mode = 4;
             break;
-
         default:
             c.skip_test = true;
             break;

@@ -58,6 +58,7 @@ void IronZoneScheduler::initialize(SharedEnvironment* env, int /*preprocess_time
         ff_zone_cols_ = std::max(1, cfg().iron_future_flow_zone_cols);
         ff_zone_count_ = ff_zone_rows_ * ff_zone_cols_;
         ff_dir_.assign(ff_zone_count_ * 4, 0.0f);
+        idle_dir_.assign(ff_zone_count_ * 4, 0.0f);
         ff_compute_zone_adjacency(env);
 
         // Precompute per-zone congest_cap for zone tuning
@@ -407,6 +408,12 @@ int IronZoneScheduler::ff_dir_from_delta(int dr, int dc) const {
 
 void IronZoneScheduler::ff_add_future_flow_path(int z_from, int z_to, float weight,
                                                   int cumul_offset) {
+    ff_add_flow_path(ff_dir_.data(), z_from, z_to, weight, cumul_offset);
+}
+
+// ─── Generic directional flow accumulation ──────────────────────────────
+void IronZoneScheduler::ff_add_flow_path(float* dir, int z_from, int z_to, float weight,
+                                          int cumul_offset) {
     if (z_from == z_to) return;
     auto path = ff_path_ready_ ? ff_get_zone_path_fast(z_from, z_to)
                                : ff_get_zone_path(z_from, z_to);
@@ -421,29 +428,26 @@ void IronZoneScheduler::ff_add_future_flow_path(int z_from, int z_to, float weig
         float delta = cfg().iron_future_flow_k * weight * decay;
         
         if (i == 0) {
-            // 起点zone：根据出方向记录
             int nr = path[1] / ff_zone_cols_, nc = path[1] % ff_zone_cols_;
             int cr = z / ff_zone_cols_, cc = z % ff_zone_cols_;
             int d = ff_dir_from_delta(nr - cr, nc - cc);
-            if (d >= 0) ff_dir_[z * 4 + d] += delta;
+            if (d >= 0) dir[z * 4 + d] += delta;
         } else if (i == path.size() - 1) {
-            // 终点zone：根据入方向记录
             int pr = path[i-1] / ff_zone_cols_, pc = path[i-1] % ff_zone_cols_;
             int cr = z / ff_zone_cols_, cc = z % ff_zone_cols_;
             int d = ff_dir_from_delta(cr - pr, cc - pc);
-            if (d >= 0) ff_dir_[z * 4 + d] += delta;
+            if (d >= 0) dir[z * 4 + d] += delta;
         } else {
-            // 中间zone：入方向和出方向应一致（直线路径）
             int pr = path[i-1] / ff_zone_cols_, pc = path[i-1] % ff_zone_cols_;
             int nr = path[i+1] / ff_zone_cols_, nc = path[i+1] % ff_zone_cols_;
             int cr = z / ff_zone_cols_, cc = z % ff_zone_cols_;
             int d = ff_dir_from_delta(cr - pr, cc - pc);
-            if (d >= 0) ff_dir_[z * 4 + d] += delta;
+            if (d >= 0) dir[z * 4 + d] += delta;
         }
     }
 }
 
-// ─── Percentile-based flow control ──────────────────────────────────────
+
 void IronZoneScheduler::ff_compute_flow_percentiles() {
     const int n = ff_zone_count_;
     ff_zone_flow_pct_.resize(n, 0.0f);
@@ -780,6 +784,7 @@ void IronZoneScheduler::schedule(int time_limit_ms,
     
     if (ff_enabled) {
         ff_dir_.assign(ff_zone_count_ * 4, 0.0f);
+        idle_dir_.assign(ff_zone_count_ * 4, 0.0f);
         ff_bfs_cached_source_ = -1;
 
         // Pretick: add flow from agents with ongoing tasks
@@ -1144,8 +1149,10 @@ void IronZoneScheduler::idle_relocate(const std::vector<int>& proposed_schedule,
         float best_score = std::numeric_limits<float>::max();
         int a_z = ff_zone_of_loc(a_loc);
 
+        // Read from idle_dir_ if idle flow tracking is enabled, else from task ff_dir_
+        float* flow_dir = cfg().iron_ff_idle_flow_enabled ? idle_dir_.data() : ff_dir_.data();
         for (int z = 0; z < n_zones; z++) {
-            float total_flow = ff_dir_[z*4] + ff_dir_[z*4+1] + ff_dir_[z*4+2] + ff_dir_[z*4+3];
+            float total_flow = flow_dir[z*4] + flow_dir[z*4+1] + flow_dir[z*4+2] + flow_dir[z*4+3];
 
             int zr1 = a_z / ff_zone_cols_, zc1 = a_z % ff_zone_cols_;
             int zr2 = z   / ff_zone_cols_, zc2 = z   % ff_zone_cols_;
@@ -1191,6 +1198,11 @@ void IronZoneScheduler::idle_relocate(const std::vector<int>& proposed_schedule,
         }
 
         if (best_z < 0) continue;
+
+        // Accumulate idle flow: track where this agent's relocation sends traffic
+        if (cfg().iron_ff_idle_flow_enabled && a_z >= 0 && best_z < n_zones) {
+            ff_add_flow_path(idle_dir_.data(), a_z, best_z, 1.0f, 0);
+        }
 
         // Find a walkable cell in the best zone — distribute using agent_id hash
         int zr = best_z / ff_zone_cols_;
