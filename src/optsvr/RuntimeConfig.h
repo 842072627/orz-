@@ -133,6 +133,10 @@ struct RuntimeConfig {
     float iron_ff_right_corner_penalty;
     float iron_ff_outer_penalty;
     float iron_ff_left_edge_penalty;
+    float iron_ff_idle_w_dist;
+    float iron_ff_idle_w_repel;
+    float iron_ff_flow_block_pct;
+    float iron_ff_flow_lock_pct;
 
     // ---- Iron lane traffic-light planner branch ----
     int   iron_lane_enabled;
@@ -357,6 +361,10 @@ struct RuntimeConfig {
         OVERRIDE_FLOAT("IRON_FF_RIGHT_CORNER_PENALTY", iron_ff_right_corner_penalty);
         OVERRIDE_FLOAT("IRON_FF_OUTER_PENALTY", iron_ff_outer_penalty);
         OVERRIDE_FLOAT("IRON_FF_LEFT_EDGE_PENALTY", iron_ff_left_edge_penalty);
+        OVERRIDE_FLOAT("IRON_FF_IDLE_W_DIST", iron_ff_idle_w_dist);
+        OVERRIDE_FLOAT("IRON_FF_IDLE_W_REPEL", iron_ff_idle_w_repel);
+        OVERRIDE_FLOAT("IRON_FF_FLOW_BLOCK_PCT", iron_ff_flow_block_pct);
+        OVERRIDE_FLOAT("IRON_FF_FLOW_LOCK_PCT", iron_ff_flow_lock_pct);
         OVERRIDE_INT("IRON_LANE_ENABLED", iron_lane_enabled);
         OVERRIDE_INT("IRON_LANE_GUARD_DIST", iron_lane_guard_dist);
         OVERRIDE_INT("IRON_LANE_CORE_FLIP_TH", iron_lane_core_flip_th);
@@ -595,6 +603,10 @@ private:
         iron_ff_right_corner_penalty = IRON_FF_RIGHT_CORNER_PENALTY;
         iron_ff_outer_penalty = IRON_FF_OUTER_PENALTY;
         iron_ff_left_edge_penalty = IRON_FF_LEFT_EDGE_PENALTY;
+        iron_ff_idle_w_dist = IRON_FF_IDLE_W_DIST;
+        iron_ff_idle_w_repel = IRON_FF_IDLE_W_REPEL;
+        iron_ff_flow_block_pct = IRON_FF_FLOW_BLOCK_PCT;
+        iron_ff_flow_lock_pct = IRON_FF_FLOW_LOCK_PCT;
         iron_lane_enabled = IRON_LANE_ENABLED;
         iron_lane_guard_dist = IRON_LANE_GUARD_DIST;
         iron_lane_core_flip_th = IRON_LANE_CORE_FLIP_TH;

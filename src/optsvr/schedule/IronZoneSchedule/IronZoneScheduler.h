@@ -121,6 +121,8 @@ private:
     void print_round_stats(const RoundStats& stats, int tick) const;
     mutable int ff_locked_candidates_ = 0;
     std::vector<float> ff_zone_congest_cap_;  // 每zone拥塞上限, -1=不限制
+    std::vector<float> ff_zone_flow_pct_;      // [NEW] 每zone flow百分位 (0~1), 越高越堵
+    void ff_compute_flow_percentiles();         // [NEW] 计算所有zone的flow百分位排序
 };
 
 } // namespace optsvr

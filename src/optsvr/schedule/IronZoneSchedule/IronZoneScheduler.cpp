@@ -443,6 +443,24 @@ void IronZoneScheduler::ff_add_future_flow_path(int z_from, int z_to, float weig
     }
 }
 
+// ─── Percentile-based flow control ──────────────────────────────────────
+void IronZoneScheduler::ff_compute_flow_percentiles() {
+    const int n = ff_zone_count_;
+    ff_zone_flow_pct_.resize(n, 0.0f);
+    if (n <= 0) return;
+    std::vector<std::pair<float, int>> ranked;
+    ranked.reserve(n);
+    for (int z = 0; z < n; z++) {
+        float total = ff_dir_[z*4] + ff_dir_[z*4+1] + ff_dir_[z*4+2] + ff_dir_[z*4+3];
+        ranked.emplace_back(total, z);
+    }
+    std::sort(ranked.begin(), ranked.end());
+    for (int i = 0; i < n; i++) {
+        int z = ranked[i].second;
+        ff_zone_flow_pct_[z] = (n > 1) ? static_cast<float>(i) / (n - 1) : 0.0f;
+    }
+}
+
 int IronZoneScheduler::component_of_loc(int loc) const {
     if (loc < 0 || loc >= static_cast<int>(component_id_.size())) return -1;
     return component_id_[loc];
@@ -816,6 +834,15 @@ void IronZoneScheduler::schedule(int time_limit_ms,
         }
     }
 
+    // ─── Percentile-based flow control ──────────────────────────
+    const float ff_block_pct = cfg().iron_ff_flow_block_pct;
+    const float ff_lock_pct = cfg().iron_ff_flow_lock_pct;
+    if (ff_block_pct < 1.0f || ff_lock_pct < 1.0f) {
+        if (static_cast<int>(ff_zone_flow_pct_.size()) != ff_zone_count_)
+            ff_zone_flow_pct_.resize(ff_zone_count_, 0.0f);
+        ff_compute_flow_percentiles();
+    }
+
     if (ff_enabled && ff_path_ready_ &&
         (cfg().iron_future_flow_lock_th != 0.0f ||
          cfg().iron_future_flow_congest_cap > 0.0f)) {
@@ -851,7 +878,7 @@ void IronZoneScheduler::schedule(int time_limit_ms,
                         blocked = true;
                         break;
                     }
-                    if (dynamic_lock_th > 0.0f && total_flow >= dynamic_lock_th) {
+                    if (dynamic_lock_th > 0.0f && total_flow >= dynamic_lock_th && ff_zone_flow_pct_[cur] >= ff_lock_pct) {
                         int dom = 0;
                         if (zd[1] > zd[dom]) dom = 1;
                         if (zd[2] > zd[dom]) dom = 2;
@@ -931,7 +958,7 @@ void IronZoneScheduler::schedule(int time_limit_ms,
                     ff_locked_candidates_++;
                     return false;
                 }
-                if (lock_th > 0.0f && total_flow >= lock_th) {
+                if (lock_th > 0.0f && total_flow >= lock_th && ff_zone_flow_pct_[cur] >= ff_lock_pct) {
                     int dom = 0;
                     if (zd[1] > zd[dom]) dom = 1;
                     if (zd[2] > zd[dom]) dom = 2;
@@ -1098,8 +1125,8 @@ void IronZoneScheduler::idle_relocate(const std::vector<int>& proposed_schedule,
     if (idle_list.empty()) return;
 
     // Constants for scoring
-    constexpr float W_DIST = 0.5f;
-    constexpr float W_REPEL = 5.0f;
+    const float W_DIST = cfg().iron_ff_idle_w_dist;
+    const float W_REPEL = cfg().iron_ff_idle_w_repel;
 
     if (log) {
         std::fprintf(stderr, "[IdleRelocate] idle=%zu zones=%d W_REPEL=%.1f W_DIST=%.1f\n",
