@@ -805,14 +805,14 @@ void IronZoneScheduler::schedule(int time_limit_ms,
     // Compute dynamic lock threshold once, shared between pre-filter and realtime check.
     // idle_ratio >= 50%: lock_th = 200 (same as current fixed value)
     // idle_ratio < 50%:  ramps up to 250 as agents fill up
-    float dynamic_lock_th = 200.0f;
-    {
+    float lock_th_base = std::max(0.0f, cfg().iron_future_flow_lock_th);
+    float dynamic_lock_th = lock_th_base;
+    if (lock_th_base > 0.0f) {
         float idle_ratio = (n_agents > 0) ? static_cast<float>(free_agents.size()) / n_agents : 1.0f;
-        if (idle_ratio >= 0.50f) {
-            dynamic_lock_th = 200.0f;
-        } else {
-            dynamic_lock_th = 200.0f + 100.0f * (0.50f - idle_ratio);
-            if (dynamic_lock_th > 250.0f) dynamic_lock_th = 250.0f;
+        if (idle_ratio < 0.50f) {
+            dynamic_lock_th = lock_th_base + 100.0f * (0.50f - idle_ratio);
+            if (dynamic_lock_th > lock_th_base + 50.0f)
+                dynamic_lock_th = lock_th_base + 50.0f;
         }
     }
 

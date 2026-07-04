@@ -1,4 +1,4 @@
-// optsvr/MapTuner.h — 地图类型识别 + 自动设置 schedule_mode
+// optsvr/MapTuner.h — 地图类型识别 + 自动设置 schedule_mode (fullfill only)
 #pragma once
 
 #include "RuntimeConfig.h"
@@ -54,7 +54,7 @@ inline void remember_map_tuning_target(MapTuningState& s,
     s.map_name = map_tuning_target_name(profile, env);
 }
 
-// 第一轮：按地图类型加载 Combined 赛道使用的完整 S/P/E 参数组合。
+// 按地图类型加载参数（仅保留 warehouse/fullfill）
 inline void load_for_combined(const MapProfile& profile, const SharedEnvironment* /*env*/) {
     auto& c = cfg();
 
@@ -62,33 +62,39 @@ inline void load_for_combined(const MapProfile& profile, const SharedEnvironment
 
         case MapType::WAREHOUSE_DOMAIN:
             c.skip_test = false;
-            c.schedule_mode = 1;
-            c.planner_mode = 11;  // test_useful FlowDecay copy
+            c.schedule_mode = 10;  // IronZone (含 future flow 方向锁)
+            c.planner_mode = 11;   // TestUsefulFlowDecay
             c.ware_direct = true;
+            c.dummy_goal_home = true;
+            c.executor_mode = 3;   // DHExecutor
 
-            c.executor_mode = 3;  // 3
+            // IronZone scheduler + future flow settings
+            c.iron_zone_rows = 19;
+            c.iron_zone_cols = 18;
+            c.iron_max_radius = 1;
+            c.iron_dist_weight = 6.0f;
+            c.iron_task_len_weight = 1.25f;
+            c.iron_long_task_th = 1250;
+            c.iron_stats_interval = 10;
+            c.iron_lane_enabled = 0;
 
-            // PIBT history congestion: weak_band2, validated on warehouse_10000/7000
-            // against history-off baseline. Keep it light so it mostly acts as a
-            // local tie-break without increasing wait preference.
-
-            // c.pibt_history_congestion_enabled = false;
-            // c.pibt_history_window = 500;
-            // c.pibt_history_free_threshold = 0.06f;
-            // c.pibt_history_quad_threshold = 0.30f;
-            // c.pibt_history_linear_weight = 0.30f;
-            // c.pibt_history_quad_weight = 1.00f;
-            // c.pibt_history_cap = 2.0f;
-            // c.pibt_history_quad_power = 2.5f;
-            // c.pibt_history_sort_mode = 2;
-            // c.pibt_history_tie_base_eps = 2.0f;
-            // c.pibt_history_apply_to_wait = true;
-            // c.pibt_history_goal_exempt_dist = -1;
-
-            //c.reassign_keep_bias = 14;
-            //c.reassign_keep_bias = 5;
-            //c.reassign_enabled = false;
-
+            c.iron_future_flow_w = 1.0f;
+            c.iron_future_flow_k = 1.0f;
+            c.iron_future_flow_decay = 0.01f;
+            c.iron_future_flow_lock_th = 200.0f;
+            c.iron_future_flow_congest_cap = 200.0f;
+            c.iron_future_flow_zone_rows = 40;
+            c.iron_future_flow_zone_cols = 20;
+            c.iron_ff_zone_tuning_enabled = true;
+            c.iron_ff_edge_cols = 1;
+            c.iron_ff_left_edge_congest_cap = 80.0f;
+            c.iron_ff_right_edge_congest_cap = 200.0f;
+            c.iron_ff_top_congest_cap = 200.0f;
+            c.iron_ff_bottom_congest_cap = 200.0f;
+            c.iron_ff_left_corner_penalty = 0.0f;
+            c.iron_ff_right_corner_penalty = 0.0f;
+            c.iron_ff_outer_penalty = 0.0f;
+            c.iron_ff_left_edge_penalty = 0.0f;
             break;
 
         default:
@@ -97,6 +103,7 @@ inline void load_for_combined(const MapProfile& profile, const SharedEnvironment
     }
 }
 
+// 根据地图类型自动调整 RuntimeConfig
 inline void apply_map_tuning(const MapProfile& profile, const SharedEnvironment* env) {
     std::lock_guard<std::mutex> lock(map_tuning_mutex());
     auto& state = map_tuning_state();
@@ -104,14 +111,9 @@ inline void apply_map_tuning(const MapProfile& profile, const SharedEnvironment*
 
     map_profile() = profile;
     auto& c = cfg();
-
     load_for_combined(profile, env);
 
-    // 提交赛道切换点：默认 Combined。下面两个函数也按地图保留定制入口。
-    // load_for_schedule(profile, env);  // Scheduler track
-    // load_for_executor(profile, env);  // Executor track
-
-    // 环境变量最高优先级：仅在设置时覆盖 MapTuner 的选择
+    // 环境变量最高优先级
     c.override_from_env();
     remember_map_tuning_target(state, profile, env);
 

@@ -4,6 +4,7 @@
 #include "heuristics.h"
 #include "RuntimeConfig.h"
 #include "PerfStats.h"
+#include "home_return.h"
 #include <algorithm>
 #include <chrono>
 
@@ -55,7 +56,36 @@ void Entry::compute(int time_limit, Plan & plan, std::vector<int> & proposed_sch
 
     //then update the first unfinished errand/location of tasks for planner reference
     update_goal_locations(proposed_schedule);
-    
+
+    // 回家机制：idle agent 如果在 interior+guide 之外且出生在 interior 内，派 fake task 回家
+    // 就像做真实任务一样，到家或接到真实任务后自动恢复
+    if (optsvr::cfg().dummy_goal_home && !g_home_start_locs.empty()) {
+        const int cols = env->cols;
+        for (int i = 0; i < env->num_of_agents; i++) {
+            // 已有真实任务 → 跳过
+            if (!env->goal_locations[i].empty()) continue;
+            if (i >= (int)g_home_start_locs.size()) continue;
+            int home = g_home_start_locs[i];
+            if (home < 0) continue;
+            int hr = home / cols, hc = home % cols;
+            // 出生在外部 → 不回家
+            if (!(hc > 7 && hc < 488 && hr > 7 && hr < 131)) continue;
+            // 当前在内部(含 guide zone) → 不需回家
+            int cur = env->curr_states[i].location;
+            if (cur < 0) continue;
+            int cr = cur / cols, cc = cur % cols;
+            if (cc >= 6 && cc <= 489 && cr >= 6 && cr <= 132) continue;
+            // idle + 出生在内部 + 当前在外部 → 派 fake task 回家
+            env->goal_locations[i].push_back({home, 0});
+            { FILE* f = fopen("C:/Users/Administrator/Desktop/test-studio-mapf/big-final-test/fullfill-data/home_debug.log","a");
+              if(f){fprintf(f,"HOME_TRIGGER tick=%d agent=%d home=(%d,%d) cur=(%d,%d)\n",
+                         env->curr_timestep,i,hr,hc,cr,cc);fclose(f);} }
+        }
+    }
+
+    // idle agent relocation: move idle agents toward low-flow zones
+    scheduler->idle_relocate(proposed_schedule);
+
     //call the planner to compute the actions
     planner->plan(time_limit,plan);
 

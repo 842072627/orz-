@@ -13,4 +13,5 @@ class TaskScheduler
         virtual ~TaskScheduler(){delete env;};
         virtual void initialize(int preprocess_time_limit);
         virtual void plan(int time_limit, std::vector<int> & proposed_schedule);
+        virtual void idle_relocate(std::vector<int> & proposed_schedule);
 };

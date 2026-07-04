@@ -17,103 +17,8 @@
 namespace blog = boost::log;
 extern blog::sources::severity_logger<blog::trivial::severity_level> lg;
 
-// DHExecutor 执行器实例
+// DHExecutor 执行器实例 (warehouse fullfill, EXECUTOR_MODE=3)
 static optsvr::DHExecutor g_dh_executor;
-
-namespace {
-
-struct TpgTraceConfig {
-    bool enabled = false;
-    int row = 992;
-    int col = 1624;
-    int agent = -1;
-    int max_lines = 20000;
-};
-
-TpgTraceConfig load_tpg_trace_config()
-{
-    TpgTraceConfig cfg;
-    if (const char* v = std::getenv("OPT_TPG_TRACE")) {
-        std::string s(v);
-        cfg.enabled = (s == "1" || s == "true" || s == "TRUE" || s == "on" || s == "ON");
-    }
-    if (const char* v = std::getenv("OPT_TPG_TRACE_ROW")) cfg.row = std::atoi(v);
-    if (const char* v = std::getenv("OPT_TPG_TRACE_COL")) cfg.col = std::atoi(v);
-    if (const char* v = std::getenv("OPT_TPG_TRACE_AGENT")) cfg.agent = std::atoi(v);
-    if (const char* v = std::getenv("OPT_TPG_TRACE_MAX_LINES")) cfg.max_lines = std::max(1, std::atoi(v));
-    return cfg;
-}
-
-const TpgTraceConfig& tpg_trace_cfg()
-{
-    static TpgTraceConfig cfg = load_tpg_trace_config();
-    return cfg;
-}
-
-bool tpg_trace_consume_line()
-{
-    static int lines = 0;
-    const auto& cfg = tpg_trace_cfg();
-    if (!cfg.enabled || lines >= cfg.max_lines) return false;
-    lines++;
-    return true;
-}
-
-char action_to_char(Action action)
-{
-    switch (action) {
-        case Action::FW: return 'F';
-        case Action::CR: return 'R';
-        case Action::CCR: return 'C';
-        case Action::W: return 'W';
-        case Action::NA: return 'T';
-        default: return '?';
-    }
-}
-
-int trace_target_loc(const SharedEnvironment* env)
-{
-    const auto& cfg = tpg_trace_cfg();
-    if (!cfg.enabled || env == nullptr || env->cols <= 0) return -1;
-    return cfg.row * env->cols + cfg.col;
-}
-
-bool trace_agent_or_loc(const SharedEnvironment* env, int agent_id, int loc_a, int loc_b = -1)
-{
-    const auto& cfg = tpg_trace_cfg();
-    if (!cfg.enabled) return false;
-    if (cfg.agent >= 0 && cfg.agent != agent_id) return false;
-    const int target = trace_target_loc(env);
-    if (target < 0) return false;
-    const int south = target + env->cols;
-    return loc_a == target || loc_b == target || loc_a == south || loc_b == south;
-}
-
-std::string queue_summary(const std::list<int>& q)
-{
-    std::ostringstream os;
-    os << "[";
-    int shown = 0;
-    for (int id : q) {
-        if (shown > 0) os << ",";
-        os << id;
-        shown++;
-        if (shown >= 4) break;
-    }
-    if ((int)q.size() > shown) os << ",...";
-    os << "]";
-    return os.str();
-}
-
-std::string loc_to_rc(const SharedEnvironment* env, int loc)
-{
-    if (env == nullptr || env->cols <= 0 || loc < 0) return "(-,-)";
-    std::ostringstream os;
-    os << "(" << loc / env->cols << "," << loc % env->cols << ")";
-    return os.str();
-}
-
-} // namespace
 
 void Executor::initialize(int preprocess_time_limit)
 {
@@ -138,6 +43,7 @@ void Executor::initialize(int preprocess_time_limit)
 
     optsvr::load_map_tuning(env);
 
+    // 初始化 DHExecutor（warehouse fullfill）
     int exec_mode = optsvr::cfg().executor_mode;
     if (const char* v = std::getenv("OPT_EXECUTOR_MODE")) exec_mode = std::atoi(v);
     if (exec_mode == 3) {
@@ -292,6 +198,9 @@ vector<State> Executor::process_new_plan_official(int sync_time_limit, Plan& pla
     return predicted_states;
 }
 
+// ════════════════════════════════════════════════════════════════════
+// 分流入口
+// ════════════════════════════════════════════════════════════════════
 vector<State> Executor::process_new_plan(int sync_time_limit, Plan& plan_struct,
                                          vector<vector<Action>>& staged_actions)
 {
@@ -305,12 +214,14 @@ vector<State> Executor::process_new_plan(int sync_time_limit, Plan& plan_struct,
 
 void Executor::next_command(int exec_time_limit, std::vector<ExecutionCommand>& agent_command)
 {
+    // DHExecutor 维护自己的 TPG，跳过官方 TPG 更新
     if (optsvr::cfg().executor_mode == 3) {
         if (!g_dh_executor.is_initialized()) g_dh_executor.initialize(this);
         g_dh_executor.next_command(exec_time_limit, agent_command);
         return;
     }
 
+    // 更新 TPG
     for (int i = 0; i < (int)env->system_states.size(); i++) {
         int prev_location = previous_locations[i];
         int curr_location = env->system_states[i].location;
@@ -324,6 +235,7 @@ void Executor::next_command(int exec_time_limit, std::vector<ExecutionCommand>& 
         }
     }
 
+    // Default: 基础 MCP
     for (int i = 0; i < (int)env->system_states.size(); i++)
         mcp_default_executor(i, agent_command);
 }
@@ -340,13 +252,32 @@ bool Executor::mcp_default_executor(int agent_id, std::vector<ExecutionCommand>&
     if (env->staged_actions[agent_id].empty()) {
         agent_command[agent_id] = ExecutionCommand::STOP; return false;
     } else if (env->staged_actions[agent_id].front() != Action::FW) {
-        agent_command[agent_id] = ExecutionCommand::GO; return true;
+        // 旋转
+        agent_command[agent_id] = ExecutionCommand::STOP; return false;
     }
 
-    if (is_valid_location(curr_location) && !tpg[curr_location].empty() && tpg[curr_location].front() == agent_id) {
-        if (is_valid_location(next_location) && !tpg[next_location].empty() && tpg[next_location].front() == agent_id) {
-            agent_command[agent_id] = ExecutionCommand::GO; return true;
-        }
+    // 尝试前进
+    if (!is_valid_location(next_location)) {
+        agent_command[agent_id] = ExecutionCommand::STOP; return false;
     }
-    agent_command[agent_id] = ExecutionCommand::STOP; return false;
+
+    const auto& next_queue = tpg[next_location];
+    if (!is_valid_location(curr_location)) {
+        agent_command[agent_id] = ExecutionCommand::STOP; return false;
+    }
+    const auto& curr_queue = tpg[curr_location];
+
+    // 当前格不在队首时等待
+    if (curr_queue.empty() || curr_queue.front() != agent_id) {
+        agent_command[agent_id] = ExecutionCommand::STOP; return false;
+    }
+
+    // 目标格无 agent 或自己在队首则前进
+    if (next_queue.empty() || next_queue.front() == agent_id) {
+        agent_command[agent_id] = ExecutionCommand::GO;
+        return true;
+    }
+
+    agent_command[agent_id] = ExecutionCommand::STOP;
+    return false;
 }

@@ -2,7 +2,7 @@
 
 mkdir -p build
 
-cmake -B build ./ -DCMAKE_BUILD_TYPE=Release
+cmake -B build ./ -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=OFF
 make -C build -j
 
 # Runtime Python component selection via CLI flags:

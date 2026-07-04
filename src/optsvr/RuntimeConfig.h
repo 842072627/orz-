@@ -376,7 +376,6 @@ struct RuntimeConfig {
         OVERRIDE_INT("GUIDE_FLOW_OPPOSITE_W", guide_flow_opposite_w);
         OVERRIDE_INT("GUIDE_FLOW_SAME_W", guide_flow_same_w);
         OVERRIDE_BOOL("OPT_WARE_DIRECT", ware_direct);
-        OVERRIDE_BOOL("OPT_DUMMY_GOAL_HOME", dummy_goal_home);
         OVERRIDE_INT("OPT_FLOW_TURN_PENALTY", flow_turn_penalty);
         OVERRIDE_INT("OPT_FLOW_START_TURN_PENALTY", flow_start_turn_penalty);
         OVERRIDE_FLOAT("OPT_FLOW_TURN_TIE", flow_turn_tie);

@@ -6,7 +6,7 @@ namespace optsvr {
 // ═══════════════════════════════════════════════════════════════════
 // 全局控制
 // ═══════════════════════════════════════════════════════════════════
-constexpr bool  SKIP_TEST       = false;  // 默认不跳过（MapTuner 按地图类型设为 true）
+constexpr bool  SKIP_TEST       = true;   // 默认跳过，MapTuner 按地图类型设为 false
 constexpr int   DEBUG_LEVEL     = 0;       // 0=静默, 1=概要, 2=细节
 constexpr int   NUM_THREADS     = 0;       // 0=自动检测
 constexpr bool  OPT_TIMING_TRACE = false;  // 每个规划周期输出 schedule/guide/pibt 耗时
@@ -199,14 +199,14 @@ constexpr float IRON_FUTURE_FLOW_CONGEST_CAP = 300.0f; // 拥塞上限: zone总�
 constexpr bool  IRON_FF_ZONE_TUNING_ENABLED     = false;
 constexpr int   IRON_FF_EDGE_COLS               = 1;
 constexpr int   IRON_FF_TOPBOT_ROWS             = 1;
-constexpr float IRON_FF_LEFT_EDGE_CONGEST_CAP   = 60.0f;
+constexpr float IRON_FF_LEFT_EDGE_CONGEST_CAP   = 80.0f;
 constexpr float IRON_FF_RIGHT_EDGE_CONGEST_CAP  = 150.0f;
 constexpr float IRON_FF_TOP_CONGEST_CAP         = 150.0f;
-constexpr float IRON_FF_BOTTOM_CONGEST_CAP      = 120.0f;
+constexpr float IRON_FF_BOTTOM_CONGEST_CAP      = 150.0f;
 constexpr float IRON_FF_LEFT_CORNER_PENALTY     = 30.0f;
 constexpr float IRON_FF_RIGHT_CORNER_PENALTY    = 150.0f;
-constexpr float IRON_FF_OUTER_PENALTY           = 0.0f;
-constexpr float IRON_FF_LEFT_EDGE_PENALTY       = 150.0f;
+constexpr float IRON_FF_OUTER_PENALTY           = 50.0f;
+constexpr float IRON_FF_LEFT_EDGE_PENALTY       = 0.0f;
 
 // ═══════════════════════════════════════════════════════════════════
 // Room 部分分配（SCHEDULE_MODE=5 的 Room 分支）
@@ -281,6 +281,7 @@ constexpr float OPT_FLOW_TURN_TIE = 0.1f;       // Flow guide path同分时的�
 constexpr int   OPT_FLOW_VERTEX_COST_MODE = 4;  // 0=原版base,1=二次,2=指数,3=线性+指数,4=线性+二次尾部
 constexpr int   OPT_FLOW_VERTEX_COST_THRESHOLD = 0;
 constexpr int   OPT_FLOW_VERTEX_COST_WEIGHT = 45;
+
 constexpr int   OPT_FLOW_VERTEX_COST_CAP = 100000;
 constexpr float OPT_FLOW_VERTEX_COST_EXP_BASE = 3.0f;
 constexpr int   OPT_FLOW_VERTEX_COST_LINEAR_END = 4;
@@ -322,7 +323,7 @@ constexpr int   OPT_PIBT_HISTORY_STATS_INTERVAL = 500;
 // ═══════════════════════════════════════════════════════════════════
 // 距离矩阵预计算（共用）
 // ═══════════════════════════════════════════════════════════════════
-constexpr bool  PRECOMPUTE_HEURISTIC = true;
+constexpr bool  PRECOMPUTE_HEURISTIC = false;
 constexpr int   MAX_PRECOMPUTE_CELLS = 100000000;
 constexpr bool  TURN_AWARE_HEURISTIC = false;
 
