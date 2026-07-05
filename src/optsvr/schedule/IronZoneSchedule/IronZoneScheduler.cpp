@@ -1185,8 +1185,10 @@ void IronZoneScheduler::idle_relocate(const std::vector<int>& proposed_schedule,
 
             // 左边缘额外惩罚
             float left_edge_penalty = 0;
-            if (zc2 < cfg().iron_ff_edge_cols)
-                left_edge_penalty = cfg().iron_ff_left_edge_penalty;
+            if (zc2 < cfg().iron_ff_edge_cols) {
+                float occ_penalty = cfg().iron_ff_idle_edge_repulse * (idle_agents_in_zone[z] + zone_picks[z]);
+                left_edge_penalty = cfg().iron_ff_left_edge_penalty + occ_penalty;
+            }
 
             float repulse = W_REPEL * (idle_agents_in_zone[z] + zone_picks[z]);
             float score = total_flow + W_DIST * zd + repulse + corner_penalty + outer_penalty + left_edge_penalty;
