@@ -10,6 +10,7 @@
 #include "RuntimeConfig.h"
 #include "HeuristicMatrix.h"
 #include "MapProfile.h"
+#include "SharedEnv.h"
 
 // TestUsefulFlowDecayPlan 命名空间下的副本（从 default_planner 复制，可自由修改）
 #include "heuristics.h"
@@ -751,6 +752,30 @@ void TestUsefulFlowDecayPlanner::plan(int time_limit, std::vector<std::vector<Ac
     env->curr_states = original_states;
     env->curr_timestep = original_timestep;
     decided_ = original_decided;
+
+    // ⟶ 写 planner guide-path traj 缓存 → scheduler 路径修正
+    // 格式: [n_agents, agent0_len, task_id0, goal0, cell0, ..., agent1_len, task_id1, goal1, ...]
+    static std::vector<int> s_traj_cache_buf;
+    s_traj_cache_buf.clear();
+    const int n = env->num_of_agents;
+    s_traj_cache_buf.push_back(n);
+    for (int i = 0; i < n; i++) {
+        const auto& traj = trajLNS_.trajs[i];
+        int len = static_cast<int>(traj.size());
+        int task_id = -1;
+        int goal = -1;
+        if (!env->goal_locations[i].empty()) {
+            task_id = env->goal_locations[i].front().second;
+            goal = env->goal_locations[i].front().first;
+        }
+        s_traj_cache_buf.push_back(len);
+        s_traj_cache_buf.push_back(task_id);
+        s_traj_cache_buf.push_back(goal);
+        for (int j = 0; j < len; j++)
+            s_traj_cache_buf.push_back(traj[j]);
+    }
+    optsvr::g_planner_traj_cache = s_traj_cache_buf.data();
+    optsvr::g_planner_traj_cache_size = static_cast<int>(s_traj_cache_buf.size());
 }
 
 // ============ build_fullfill_highway (runtime computation) ============
@@ -877,6 +902,7 @@ void TestUsefulFlowDecayPlanner::build_fullfill_highway(SharedEnvironment* env)
 
     // Initialize forbid mask for BFS and PIBT (derived from extra_weights_)
     TestUsefulFlowDecayPlan::init_highway_forbid_mask_from_weights(extra_weights_, map_size);
+
 
     if (cfg().debug_level > 0) {
         int count = 0;

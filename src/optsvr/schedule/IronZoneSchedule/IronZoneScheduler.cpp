@@ -17,6 +17,20 @@
 
 namespace optsvr {
 
+// Scheduler → Planner shared flow data
+const float* g_sched_ff_dir = nullptr;
+int   g_sched_ff_zone_rows = 40;
+int   g_sched_ff_zone_cols = 20;
+int   g_sched_ff_zone_count = 800;
+
+// Planner → Scheduler real flow data
+float* g_planner_zone_flow = nullptr;
+int   g_planner_zone_flow_count = 0;
+
+// Planner guide-path traj cache
+int*  g_planner_traj_cache = nullptr;
+int   g_planner_traj_cache_size = 0;
+
 namespace {
 
 constexpr int H_CAP = 100000;
@@ -651,7 +665,15 @@ void IronZoneScheduler::schedule(int time_limit_ms,
     env_ = env;
     const int cur_tick = effective_tick(env);
 
-    auto start_time = std::chrono::steady_clock::now();
+    // Share ff_dir_ with planner for guide path correction
+    g_sched_ff_dir = ff_dir_.data();
+    g_sched_ff_zone_rows = ff_zone_rows_;
+    g_sched_ff_zone_cols = ff_zone_cols_;
+    g_sched_ff_zone_count = ff_zone_count_;
+
+    // [DISABLED] traj cache injection - baseline test
+
+        auto start_time = std::chrono::steady_clock::now();
     auto deadline = start_time + std::chrono::milliseconds(std::max(1, time_limit_ms));
 
     const int n_agents = env->num_of_agents;

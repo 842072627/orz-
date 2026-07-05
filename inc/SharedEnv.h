@@ -52,3 +52,21 @@ public:
 
     SharedEnvironment(){}
 };
+
+// ─── Scheduler → Planner shared flow data (set by scheduler, read by planner) ───
+namespace optsvr {
+extern const float* g_sched_ff_dir;       // pointer to scheduler's ff_dir_ data (4*zone_count floats)
+extern int   g_sched_ff_zone_rows;       // 40
+extern int   g_sched_ff_zone_cols;       // 20
+extern int   g_sched_ff_zone_count;      // rows * cols
+
+// Planner → Scheduler shared real-flow data (set by planner after plan, read by scheduler before schedule)
+extern float* g_planner_zone_flow;        // [zone_count] real-aggregated flow per zone
+extern int   g_planner_zone_flow_count;  // must match g_sched_ff_zone_count
+
+// Planner guide-path traj cache (clean, per-agent zone-level paths)
+// Format: flat array [n_agents, agent0_len, z0, z1, ..., agent1_len, z0, z1, ...]
+// Set by planner at end of plan(); cleared at start of next plan()
+extern int*  g_planner_traj_cache;        // flat int array
+extern int   g_planner_traj_cache_size;   // total ints in the array
+}

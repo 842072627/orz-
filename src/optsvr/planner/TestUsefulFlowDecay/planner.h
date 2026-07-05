@@ -57,6 +57,10 @@ private:
     std::vector<std::vector<int>> extra_weights_;  // [loc][direction] penalty
     void build_fullfill_highway(SharedEnvironment* env);
 
+    // ---- Planner zone heat (real flow → zone congestion feedback) ----
+    std::vector<float> planner_zone_heat_;
+    void update_planner_zone_heat(SharedEnvironment* env, const std::vector<TestUsefulFlowDecayPlan::Int4>& flow);
+
 
     // ============ 内部子步骤（与 DefaultPlanner::planner.cpp 对应） ============
     static State rollout_next_state(const State& state, Action action, const SharedEnvironment* env);
