@@ -210,8 +210,7 @@ constexpr float IRON_FF_LEFT_EDGE_PENALTY       = 0.0f;
 constexpr float IRON_FF_IDLE_W_DIST             = 0.5f;
 constexpr float IRON_FF_IDLE_W_REPEL            = 5.0f;
 constexpr float IRON_FF_FLOW_BLOCK_PCT          = 1.0f;   // >=此百分位的zone被block(default 1.0=关闭)
-constexpr float IRON_FF_FLOW_LOCK_PCT           = 1.0f;
-constexpr int   IRON_FF_IDLE_FLOW_ENABLED       = 0;       // idle flow独立追踪（默认关）
+constexpr float IRON_FF_FLOW_LOCK_PCT           = 1.0f;   // >=此百分位的zone激活方向锁
 
 // ═══════════════════════════════════════════════════════════════════
 // Room 部分分配（SCHEDULE_MODE=5 的 Room 分支）
