@@ -878,7 +878,9 @@ void IronZoneScheduler::schedule(int time_limit_ms,
                         blocked = true;
                         break;
                     }
-                    if (dynamic_lock_th > 0.0f && total_flow >= dynamic_lock_th && ff_zone_flow_pct_[cur] >= ff_lock_pct) {
+                    // Direction lock: only for interior zones (skips edge/topbot which have custom caps)
+                    bool z_is_interior = (ff_zone_congest_cap_.size() > (size_t)cur && ff_zone_congest_cap_[cur] < 0);
+                    if (z_is_interior && dynamic_lock_th > 0.0f && total_flow >= dynamic_lock_th && ff_zone_flow_pct_[cur] >= ff_lock_pct) {
                         int dom = 0;
                         if (zd[1] > zd[dom]) dom = 1;
                         if (zd[2] > zd[dom]) dom = 2;
@@ -958,7 +960,8 @@ void IronZoneScheduler::schedule(int time_limit_ms,
                     ff_locked_candidates_++;
                     return false;
                 }
-                if (lock_th > 0.0f && total_flow >= lock_th && ff_zone_flow_pct_[cur] >= ff_lock_pct) {
+                bool z_interior = (ff_zone_congest_cap_.size() > (size_t)cur && ff_zone_congest_cap_[cur] < 0);
+                if (z_interior && lock_th > 0.0f && total_flow >= lock_th && ff_zone_flow_pct_[cur] >= ff_lock_pct) {
                     int dom = 0;
                     if (zd[1] > zd[dom]) dom = 1;
                     if (zd[2] > zd[dom]) dom = 2;
