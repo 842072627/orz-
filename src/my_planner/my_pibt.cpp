@@ -3,6 +3,7 @@
 
 #include "my_pibt.h"
 #include "../pibt_lock.h"
+#include "../orz_highway.h"
 #include <cstdint>
 
 namespace MyPlanner{
@@ -101,6 +102,25 @@ bool causalMY_PIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
 	std::vector<int> neighbors;
 	std::vector<MY_PIBT_C> successors;
 	getNeighborLocs(&(lns.neighbors),neighbors,prev_loc);
+	// ORZ highway forbid: filter forbidden directions
+	{
+	    uint8_t f = ORZ_Highway::get_forbid(prev_loc);
+	    if (f) {
+	        static bool diag_once = false; if (!diag_once) { diag_once = true;
+	            printf("PIBT forbid check: loc=%d, mask=%u (0x%x), #neighbors=%zu\n", prev_loc, f, f, neighbors.size());
+	        }
+	        std::vector<int> filtered;
+	        for (int nb : neighbors) {
+	            if (nb == prev_loc) { filtered.push_back(nb); continue; } // wait is always allowed
+	            int dr = nb / lns.env->cols - prev_loc / lns.env->cols;
+	            int dc = nb % lns.env->cols - prev_loc % lns.env->cols;
+	            int dd = (dr == -1) ? 3 : (dr == 1) ? 1 : (dc == -1) ? 2 : (dc == 1) ? 0 : -1;
+	            if (dd >= 0 && ((f & 1 && dd == 2) || (f & 2 && dd == 0) || (f & 4 && dd == 3) || (f & 8 && dd == 1))) continue;
+	            filtered.push_back(nb);
+	        }
+	        neighbors.swap(filtered);
+	    }
+	}
 	for (auto& neighbor: neighbors){
 
 		assert(validateMove(prev_loc, neighbor, lns.env));
@@ -113,6 +133,38 @@ bool causalMY_PIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
 	int wait_heuristic = get_gp_h(lns, curr_id, prev_loc);
 
 	successors.emplace_back(prev_loc, wait_heuristic,-1,rand());
+
+#if ORZ_HIGHWAY_FORCE_MOVE
+	// Highway force move: single-direction cell, target free -> force move
+	{
+	    uint8_t forbid = ORZ_Highway::get_forbid(prev_loc);
+	    if (forbid == 7 || forbid == 11 || forbid == 13 || forbid == 14) {
+	        int cols = lns.env->cols;
+	        for (auto& s : successors) {
+	            if (s.location == prev_loc) continue;
+	            int delta = s.location - prev_loc;
+	            int dir = (delta == 1) ? 0 : (delta == -1) ? 2 : (delta == cols) ? 1 : 3;
+	            bool hw_allow = false;
+	            if (dir == 0 && !(forbid & 2)) hw_allow = true;
+	            if (dir == 1 && !(forbid & 8)) hw_allow = true;
+	            if (dir == 2 && !(forbid & 1)) hw_allow = true;
+	            if (dir == 3 && !(forbid & 4)) hw_allow = true;
+	            if (!hw_allow) continue;
+	            int occupant = prev_decision[s.location];
+	            bool target_free = (occupant == -1 || occupant == curr_id);
+	            if (!target_free && next_states[occupant].location != -1 &&
+	                next_states[occupant].location != s.location) {
+	                target_free = true;
+	            }
+	            if (target_free) {
+	                next_states.at(curr_id) = State(s.location,-1,-1);
+	                decision.at(s.location) = curr_id;
+	                return true;
+	            }
+	        }
+	    }
+	}
+#endif
 
 
 

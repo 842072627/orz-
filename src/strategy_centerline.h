@@ -6,6 +6,7 @@
 #include "config.h"
 #include "centerline.h"
 #include "pibt_lock.h"
+#include "orz_highway.h"
 #include "idle_cap.h"
 #include "corridor_log.h"
 #include <unordered_set>
@@ -131,6 +132,7 @@ static inline void add_agent_future_flow(
 
 void init(SharedEnvironment* env) {
     g_env = env;
+    ORZ_Highway::init();  // loads forbid + guide + task_forbid data
     Centerline::init(env);
     // Centerline::compute_cell_width(env);  // already called inside Centerline::init()
 #if USE_DIAG_LOG
@@ -154,6 +156,15 @@ static inline float base_score(int a_loc, int tid, SharedEnvironment* env, int s
     auto it = env->task_pool.find(tid);
     if (it == env->task_pool.end() || it->second.locations.empty())
         return -1e9f;
+    // ORZ highway: reject tasks in forbidden zones
+    {
+        auto& locs_check = it->second.locations;
+        bool any_forbidden = false;
+        for (auto& loc : locs_check) {
+            if (ORZ_Highway::is_task_forbidden(loc)) { any_forbidden = true; break; }
+        }
+        if (any_forbidden) return -1e9f;
+    }
     if (!Centerline::g_ready) return 1.0f;
     auto& locs = it->second.locations;
 
@@ -278,6 +289,22 @@ static inline float base_score(int a_loc, int tid, SharedEnvironment* env, int s
             }
 #endif
             int d = Centerline::g_mp_density[si];
+            // ORZ highway forbid: penalize but don't hard block opposite-direction assignments
+            {
+                int mloc = Centerline::g_mp_loc[si];
+                if (mloc >= 0) {
+                    uint8_t fb = ORZ_Highway::get_forbid(mloc);
+                    if (fb) {
+                        int intent_mask = 0;
+                        if (intent == 1) intent_mask = 2;
+                        else intent_mask = 1;
+                        if (fb & intent_mask) {
+                            // Penalize, don't hard block - let future flow + density handle it
+                            return -50000.0f - d_max_seg;
+                        }
+                    }
+                }
+            }
             if (Centerline::g_mp_lock_dir[si] != 0 && Centerline::g_mp_lock_dir[si] != intent) {
                 g_dbg_dirlock++;
                 return -1e9f;

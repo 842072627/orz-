@@ -1,5 +1,6 @@
 
 #include "my_heuristics.h"
+#include "../orz_highway.h"
 #include <queue>
 
 
@@ -152,6 +153,20 @@ std::pair<int,int> get_source_2_path(Dist2Path& dp, SharedEnvironment* env, int 
 		getNeighborLocs(ns,neighbors,curr.id);
 		for (int next_location : neighbors)
 		{
+			// ORZ highway forbid check (same as fullfill's heuristics.cpp)
+			{
+			    uint8_t forbid = ORZ_Highway::get_forbid(curr.id);
+			    if (forbid != 0) {
+			        int delta = next_location - curr.id;
+			        int dir = (delta == 1) ? 0 : (delta == -1) ? 2 : (delta == env->cols) ? 1 : 3;
+			        bool blocked = false;
+			        if (dir == 0 && (forbid & 2)) blocked = true;
+			        if (dir == 1 && (forbid & 8)) blocked = true;
+			        if (dir == 2 && (forbid & 1)) blocked = true;
+			        if (dir == 3 && (forbid & 4)) blocked = true;
+			        if (blocked) continue;
+			    }
+			}
 			cost = curr.cost + 1;
 			auto it_next = dp.dist2path.find(next_location);
             if (it_next != dp.dist2path.end() && it_next->second.label == dp.label && cost >= it_next->second.cost)

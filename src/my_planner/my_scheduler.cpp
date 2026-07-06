@@ -42,8 +42,7 @@ static int get_zone_id(int loc, int cols) {
     return zy * num_zones_x + zx;
 }
 
-void schedule_initialize(int preprocess_time_limit, SharedEnvironment* env)
-{
+void schedule_initialize(int preprocess_time_limit, SharedEnvironment* env) {
     mt.seed(0);
     
     // Initialize zone grid

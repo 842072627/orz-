@@ -20,6 +20,7 @@
 #include "my_pibt.h"
 #include "my_flow.h"
 #include "my_const.h"
+#include "../orz_highway.h"
 #include <chrono>
 #include <iostream>
 
@@ -97,6 +98,10 @@ namespace MyPlanner{
         for(int i=0; i<env->num_of_agents; i++)
         {
             dummy_goals.at(i) = env->start_states.at(i).location;
+            if (ORZ_Highway::get_forbid(env->start_states.at(i).location)) {
+                int ex = ORZ_Highway::get_exit(env->start_states.at(i).location);
+                if (ex >= 0) dummy_goals.at(i) = ex;
+            }
         }
     }
 
@@ -121,7 +126,12 @@ namespace MyPlanner{
 
             // set goals/tasks
             if (env->goal_locations[i].empty()){
-                trajLNS.tasks[i] = dummy_goals.at(i);
+                int g = dummy_goals.at(i);
+                if (ORZ_Highway::get_forbid(env->curr_states[i].location)) {
+                    int ex = ORZ_Highway::get_exit(env->curr_states[i].location);
+                    if (ex >= 0) g = ex;
+                }
+                trajLNS.tasks[i] = g;
                 local_priority[i] = p_copy[i];
             }
             else{
@@ -158,6 +168,15 @@ namespace MyPlanner{
 
             if (!env->goal_locations[i].empty() && trajLNS.neighbors[env->start_states[i].location].size() == 1){
                 local_priority[i] = local_priority[i] + 10;
+            }
+            if (ORZ_Highway::get_forbid(env->curr_states[i].location)) {
+                local_priority[i] += 5000;
+            }
+            if (ORZ_Highway::is_exit_cell(env->curr_states[i].location)) {
+                local_priority[i] = 1e9;
+            }
+            if (ORZ_Highway::get_forbid(env->curr_states[i].location)) {
+                local_priority[i] += 5000;
             }
         }
     }
@@ -218,6 +237,18 @@ namespace MyPlanner{
 
             if (!env->goal_locations[i].empty() && trajLNS.neighbors[env->start_states[i].location].size() == 1){
                 local_priority[i] = local_priority[i] + 10;
+            }
+            if (ORZ_Highway::get_forbid(env->curr_states[i].location)) {
+                local_priority[i] += 5000;
+            }
+            if (ORZ_Highway::is_exit_cell(env->curr_states[i].location)) {
+                local_priority[i] = 1e9;
+            }
+            if (ORZ_Highway::get_forbid(env->curr_states[i].location)) {
+                local_priority[i] += 5000;
+            }
+            if (ORZ_Highway::get_forbid(env->curr_states[i].location)) {
+                local_priority[i] += 5000;
             }
         }
     }

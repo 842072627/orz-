@@ -14,8 +14,11 @@
 # EXTERNAL cache entries
 ########################
 
+//Build planner tests
+BUILD_TESTS:BOOL=ON
+
 //The directory containing a CMake configuration file for Boost.
-Boost_DIR:PATH=C:/msys64/ucrt64/lib/cmake/Boost-1.90.0
+Boost_DIR:PATH=C:/msys64/ucrt64/lib/cmake/Boost-1.91.0
 
 Boost_FILESYSTEM_LIBRARY_RELEASE:STRING=C:/msys64/ucrt64/lib/libboost_filesystem-mt.a
 
@@ -29,25 +32,26 @@ Boost_LOG_SETUP_LIBRARY_RELEASE:STRING=C:/msys64/ucrt64/lib/libboost_log_setup-m
 Boost_PROGRAM_OPTIONS_LIBRARY_RELEASE:STRING=C:/msys64/ucrt64/lib/libboost_program_options-mt.a
 
 //Path to a program.
-CMAKE_ADDR2LINE:FILEPATH=C:/msys64/ucrt64/bin/addr2line.exe
+CMAKE_ADDR2LINE:FILEPATH=C:/Users/Administrator/AppData/Local/Microsoft/WinGet/Packages/MartinStorsjo.LLVM-MinGW.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe/llvm-mingw-20260324-ucrt-x86_64/bin/llvm-addr2line.exe
 
 //Path to a program.
-CMAKE_AR:FILEPATH=C:/msys64/ucrt64/bin/ar.exe
+CMAKE_AR:FILEPATH=C:/Users/Administrator/AppData/Local/Microsoft/WinGet/Packages/MartinStorsjo.LLVM-MinGW.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe/llvm-mingw-20260324-ucrt-x86_64/bin/llvm-ar.exe
 
 //Choose the type of build, options are: None Debug Release RelWithDebInfo
 // MinSizeRel ...
-CMAKE_BUILD_TYPE:STRING=Release
+CMAKE_BUILD_TYPE:STRING=
 
 //CXX compiler
-CMAKE_CXX_COMPILER:FILEPATH=C:/msys64/ucrt64/bin/c++.exe
+CMAKE_CXX_COMPILER:FILEPATH=C:/Users/Administrator/AppData/Local/Microsoft/WinGet/Packages/MartinStorsjo.LLVM-MinGW.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe/llvm-mingw-20260324-ucrt-x86_64/bin/c++.exe
 
-//A wrapper around 'ar' adding the appropriate '--plugin' option
-// for the GCC compiler
-CMAKE_CXX_COMPILER_AR:FILEPATH=C:/msys64/ucrt64/bin/gcc-ar.exe
+//LLVM archiver
+CMAKE_CXX_COMPILER_AR:FILEPATH=C:/Users/Administrator/AppData/Local/Microsoft/WinGet/Packages/MartinStorsjo.LLVM-MinGW.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe/llvm-mingw-20260324-ucrt-x86_64/bin/llvm-ar.exe
 
-//A wrapper around 'ranlib' adding the appropriate '--plugin' option
-// for the GCC compiler
-CMAKE_CXX_COMPILER_RANLIB:FILEPATH=C:/msys64/ucrt64/bin/gcc-ranlib.exe
+//`clang-scan-deps` dependency scanner
+CMAKE_CXX_COMPILER_CLANG_SCAN_DEPS:FILEPATH=C:/Users/Administrator/AppData/Local/Microsoft/WinGet/Packages/MartinStorsjo.LLVM-MinGW.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe/llvm-mingw-20260324-ucrt-x86_64/bin/clang-scan-deps.exe
+
+//Generate index for LLVM archive
+CMAKE_CXX_COMPILER_RANLIB:FILEPATH=C:/Users/Administrator/AppData/Local/Microsoft/WinGet/Packages/MartinStorsjo.LLVM-MinGW.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe/llvm-mingw-20260324-ucrt-x86_64/bin/llvm-ranlib.exe
 
 //Flags used by the CXX compiler during all build types.
 CMAKE_CXX_FLAGS:STRING=
@@ -68,15 +72,16 @@ CMAKE_CXX_FLAGS_RELWITHDEBINFO:STRING=-O2 -g -DNDEBUG
 CMAKE_CXX_STANDARD_LIBRARIES:STRING=-lkernel32 -luser32 -lgdi32 -lwinspool -lshell32 -lole32 -loleaut32 -luuid -lcomdlg32 -ladvapi32
 
 //C compiler
-CMAKE_C_COMPILER:FILEPATH=C:/msys64/ucrt64/bin/cc.exe
+CMAKE_C_COMPILER:FILEPATH=C:/Users/Administrator/AppData/Local/Microsoft/WinGet/Packages/MartinStorsjo.LLVM-MinGW.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe/llvm-mingw-20260324-ucrt-x86_64/bin/cc.exe
 
-//A wrapper around 'ar' adding the appropriate '--plugin' option
-// for the GCC compiler
-CMAKE_C_COMPILER_AR:FILEPATH=C:/msys64/ucrt64/bin/gcc-ar.exe
+//LLVM archiver
+CMAKE_C_COMPILER_AR:FILEPATH=C:/Users/Administrator/AppData/Local/Microsoft/WinGet/Packages/MartinStorsjo.LLVM-MinGW.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe/llvm-mingw-20260324-ucrt-x86_64/bin/llvm-ar.exe
 
-//A wrapper around 'ranlib' adding the appropriate '--plugin' option
-// for the GCC compiler
-CMAKE_C_COMPILER_RANLIB:FILEPATH=C:/msys64/ucrt64/bin/gcc-ranlib.exe
+//`clang-scan-deps` dependency scanner
+CMAKE_C_COMPILER_CLANG_SCAN_DEPS:FILEPATH=C:/Users/Administrator/AppData/Local/Microsoft/WinGet/Packages/MartinStorsjo.LLVM-MinGW.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe/llvm-mingw-20260324-ucrt-x86_64/bin/clang-scan-deps.exe
+
+//Generate index for LLVM archive
+CMAKE_C_COMPILER_RANLIB:FILEPATH=C:/Users/Administrator/AppData/Local/Microsoft/WinGet/Packages/MartinStorsjo.LLVM-MinGW.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe/llvm-mingw-20260324-ucrt-x86_64/bin/llvm-ranlib.exe
 
 //Flags used by the C compiler during all build types.
 CMAKE_C_FLAGS:STRING=
@@ -97,7 +102,7 @@ CMAKE_C_FLAGS_RELWITHDEBINFO:STRING=-O2 -g -DNDEBUG
 CMAKE_C_STANDARD_LIBRARIES:STRING=-lkernel32 -luser32 -lgdi32 -lwinspool -lshell32 -lole32 -loleaut32 -luuid -lcomdlg32 -ladvapi32
 
 //Path to a program.
-CMAKE_DLLTOOL:FILEPATH=C:/msys64/ucrt64/bin/dlltool.exe
+CMAKE_DLLTOOL:FILEPATH=C:/Users/Administrator/AppData/Local/Microsoft/WinGet/Packages/MartinStorsjo.LLVM-MinGW.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe/llvm-mingw-20260324-ucrt-x86_64/bin/llvm-dlltool.exe
 
 //Flags used by the linker during all build types.
 CMAKE_EXE_LINKER_FLAGS:STRING=
@@ -130,10 +135,10 @@ CMAKE_GNUtoMS:BOOL=OFF
 CMAKE_INSTALL_PREFIX:PATH=C:/Program Files (x86)/lifelong
 
 //Path to a program.
-CMAKE_LINKER:FILEPATH=C:/msys64/ucrt64/bin/ld.exe
+CMAKE_LINKER:FILEPATH=C:/Users/Administrator/AppData/Local/Microsoft/WinGet/Packages/MartinStorsjo.LLVM-MinGW.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe/llvm-mingw-20260324-ucrt-x86_64/bin/ld.lld.exe
 
 //Program used to build from build.ninja files.
-CMAKE_MAKE_PROGRAM:FILEPATH=C:/msys64/ucrt64/bin/ninja.exe
+CMAKE_MAKE_PROGRAM:FILEPATH=C:/ProgramData/chocolatey/bin/ninja.exe
 
 //Flags used by the linker during the creation of modules during
 // all build types.
@@ -156,13 +161,13 @@ CMAKE_MODULE_LINKER_FLAGS_RELEASE:STRING=
 CMAKE_MODULE_LINKER_FLAGS_RELWITHDEBINFO:STRING=
 
 //Path to a program.
-CMAKE_NM:FILEPATH=C:/msys64/ucrt64/bin/nm.exe
+CMAKE_NM:FILEPATH=C:/Users/Administrator/AppData/Local/Microsoft/WinGet/Packages/MartinStorsjo.LLVM-MinGW.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe/llvm-mingw-20260324-ucrt-x86_64/bin/llvm-nm.exe
 
 //Path to a program.
-CMAKE_OBJCOPY:FILEPATH=C:/msys64/ucrt64/bin/objcopy.exe
+CMAKE_OBJCOPY:FILEPATH=C:/Users/Administrator/AppData/Local/Microsoft/WinGet/Packages/MartinStorsjo.LLVM-MinGW.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe/llvm-mingw-20260324-ucrt-x86_64/bin/llvm-objcopy.exe
 
 //Path to a program.
-CMAKE_OBJDUMP:FILEPATH=C:/msys64/ucrt64/bin/objdump.exe
+CMAKE_OBJDUMP:FILEPATH=C:/Users/Administrator/AppData/Local/Microsoft/WinGet/Packages/MartinStorsjo.LLVM-MinGW.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe/llvm-mingw-20260324-ucrt-x86_64/bin/llvm-objdump.exe
 
 //Value Computed by CMake
 CMAKE_PROJECT_COMPAT_VERSION:STATIC=
@@ -180,10 +185,10 @@ CMAKE_PROJECT_NAME:STATIC=lifelong
 CMAKE_PROJECT_SPDX_LICENSE:STATIC=
 
 //Path to a program.
-CMAKE_RANLIB:FILEPATH=C:/msys64/ucrt64/bin/ranlib.exe
+CMAKE_RANLIB:FILEPATH=C:/Users/Administrator/AppData/Local/Microsoft/WinGet/Packages/MartinStorsjo.LLVM-MinGW.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe/llvm-mingw-20260324-ucrt-x86_64/bin/llvm-ranlib.exe
 
 //RC compiler
-CMAKE_RC_COMPILER:FILEPATH=C:/msys64/ucrt64/bin/windres.exe
+CMAKE_RC_COMPILER:FILEPATH=C:/Users/Administrator/AppData/Local/Microsoft/WinGet/Packages/MartinStorsjo.LLVM-MinGW.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe/llvm-mingw-20260324-ucrt-x86_64/bin/windres.exe
 
 //Flags for Windows Resource Compiler during all build types.
 CMAKE_RC_FLAGS:STRING=
@@ -201,7 +206,7 @@ CMAKE_RC_FLAGS_RELEASE:STRING=
 CMAKE_RC_FLAGS_RELWITHDEBINFO:STRING=
 
 //Path to a program.
-CMAKE_READELF:FILEPATH=C:/msys64/ucrt64/bin/readelf.exe
+CMAKE_READELF:FILEPATH=C:/Users/Administrator/AppData/Local/Microsoft/WinGet/Packages/MartinStorsjo.LLVM-MinGW.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe/llvm-mingw-20260324-ucrt-x86_64/bin/llvm-readelf.exe
 
 //Flags used by the linker during the creation of shared libraries
 // during all build types.
@@ -251,7 +256,7 @@ CMAKE_STATIC_LINKER_FLAGS_RELEASE:STRING=
 CMAKE_STATIC_LINKER_FLAGS_RELWITHDEBINFO:STRING=
 
 //Path to a program.
-CMAKE_STRIP:FILEPATH=C:/msys64/ucrt64/bin/strip.exe
+CMAKE_STRIP:FILEPATH=C:/Users/Administrator/AppData/Local/Microsoft/WinGet/Packages/MartinStorsjo.LLVM-MinGW.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe/llvm-mingw-20260324-ucrt-x86_64/bin/llvm-strip.exe
 
 //Path to a program.
 CMAKE_TAPI:FILEPATH=CMAKE_TAPI-NOTFOUND
@@ -272,212 +277,218 @@ PYBIND11_PYTHON_VERSION:STRING=
 //Path to a program.
 PYTHON_EXECUTABLE:FILEPATH=C:/msys64/ucrt64/bin/python3.exe
 
+//Path to a library.
+PYTHON_LIBRARY:FILEPATH=C:/msys64/ucrt64/lib/libpython3.14.dll.a
+
 //The directory containing a CMake configuration file for boost_algorithm.
-boost_algorithm_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_algorithm-1.90.0
+boost_algorithm_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_algorithm-1.91.0
 
 //The directory containing a CMake configuration file for boost_align.
-boost_align_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_align-1.90.0
+boost_align_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_align-1.91.0
 
 //The directory containing a CMake configuration file for boost_any.
-boost_any_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_any-1.90.0
+boost_any_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_any-1.91.0
 
 //The directory containing a CMake configuration file for boost_array.
-boost_array_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_array-1.90.0
+boost_array_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_array-1.91.0
 
 //The directory containing a CMake configuration file for boost_asio_core.
-boost_asio_core_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_asio_core-1.90.0
+boost_asio_core_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_asio_core-1.91.0
 
 //The directory containing a CMake configuration file for boost_assert.
-boost_assert_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_assert-1.90.0
+boost_assert_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_assert-1.91.0
 
 //The directory containing a CMake configuration file for boost_atomic.
-boost_atomic_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_atomic-1.90.0-static
+boost_atomic_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_atomic-1.91.0-static
 
 //The directory containing a CMake configuration file for boost_bind.
-boost_bind_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_bind-1.90.0
+boost_bind_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_bind-1.91.0
 
 //The directory containing a CMake configuration file for boost_chrono.
-boost_chrono_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_chrono-1.90.0-static
+boost_chrono_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_chrono-1.91.0-static
+
+//The directory containing a CMake configuration file for boost_compat.
+boost_compat_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_compat-1.91.0
 
 //The directory containing a CMake configuration file for boost_concept_check.
-boost_concept_check_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_concept_check-1.90.0
+boost_concept_check_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_concept_check-1.91.0
 
 //The directory containing a CMake configuration file for boost_config.
-boost_config_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_config-1.90.0
+boost_config_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_config-1.91.0
 
 //The directory containing a CMake configuration file for boost_container.
-boost_container_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_container-1.90.0-static
+boost_container_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_container-1.91.0-static
 
 //The directory containing a CMake configuration file for boost_container_hash.
-boost_container_hash_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_container_hash-1.90.0
+boost_container_hash_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_container_hash-1.91.0
 
 //The directory containing a CMake configuration file for boost_conversion.
-boost_conversion_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_conversion-1.90.0
+boost_conversion_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_conversion-1.91.0
 
 //The directory containing a CMake configuration file for boost_core.
-boost_core_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_core-1.90.0
+boost_core_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_core-1.91.0
 
 //The directory containing a CMake configuration file for boost_date_time.
-boost_date_time_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_date_time-1.90.0-static
+boost_date_time_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_date_time-1.91.0-static
 
 //The directory containing a CMake configuration file for boost_describe.
-boost_describe_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_describe-1.90.0
+boost_describe_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_describe-1.91.0
 
 //The directory containing a CMake configuration file for boost_detail.
-boost_detail_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_detail-1.90.0
+boost_detail_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_detail-1.91.0
 
 //The directory containing a CMake configuration file for boost_endian.
-boost_endian_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_endian-1.90.0
+boost_endian_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_endian-1.91.0
 
 //The directory containing a CMake configuration file for boost_exception.
-boost_exception_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_exception-1.90.0
+boost_exception_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_exception-1.91.0
 
 //The directory containing a CMake configuration file for boost_filesystem.
-boost_filesystem_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_filesystem-1.90.0-static
+boost_filesystem_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_filesystem-1.91.0-static
 
 //The directory containing a CMake configuration file for boost_function.
-boost_function_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_function-1.90.0
+boost_function_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_function-1.91.0
 
 //The directory containing a CMake configuration file for boost_function_types.
-boost_function_types_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_function_types-1.90.0
+boost_function_types_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_function_types-1.91.0
 
 //The directory containing a CMake configuration file for boost_functional.
-boost_functional_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_functional-1.90.0
+boost_functional_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_functional-1.91.0
 
 //The directory containing a CMake configuration file for boost_fusion.
-boost_fusion_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_fusion-1.90.0
+boost_fusion_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_fusion-1.91.0
 
 //The directory containing a CMake configuration file for boost_headers.
-boost_headers_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_headers-1.90.0
+boost_headers_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_headers-1.91.0
 
 //The directory containing a CMake configuration file for boost_integer.
-boost_integer_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_integer-1.90.0
+boost_integer_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_integer-1.91.0
 
 //The directory containing a CMake configuration file for boost_interprocess.
-boost_interprocess_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_interprocess-1.90.0
+boost_interprocess_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_interprocess-1.91.0
 
 //The directory containing a CMake configuration file for boost_intrusive.
-boost_intrusive_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_intrusive-1.90.0
+boost_intrusive_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_intrusive-1.91.0
 
 //The directory containing a CMake configuration file for boost_io.
-boost_io_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_io-1.90.0
+boost_io_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_io-1.91.0
 
 //The directory containing a CMake configuration file for boost_iterator.
-boost_iterator_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_iterator-1.90.0
+boost_iterator_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_iterator-1.91.0
 
 //The directory containing a CMake configuration file for boost_lexical_cast.
-boost_lexical_cast_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_lexical_cast-1.90.0
+boost_lexical_cast_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_lexical_cast-1.91.0
 
 //The directory containing a CMake configuration file for boost_log.
-boost_log_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_log-1.90.0-static
+boost_log_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_log-1.91.0-static
 
 //The directory containing a CMake configuration file for boost_log_setup.
-boost_log_setup_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_log_setup-1.90.0-static
+boost_log_setup_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_log_setup-1.91.0-static
 
 //The directory containing a CMake configuration file for boost_move.
-boost_move_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_move-1.90.0
+boost_move_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_move-1.91.0
 
 //The directory containing a CMake configuration file for boost_mp11.
-boost_mp11_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_mp11-1.90.0
+boost_mp11_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_mp11-1.91.0
 
 //The directory containing a CMake configuration file for boost_mpl.
-boost_mpl_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_mpl-1.90.0
+boost_mpl_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_mpl-1.91.0
 
 //The directory containing a CMake configuration file for boost_multi_index.
-boost_multi_index_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_multi_index-1.90.0
+boost_multi_index_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_multi_index-1.91.0
 
 //The directory containing a CMake configuration file for boost_numeric_conversion.
-boost_numeric_conversion_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_numeric_conversion-1.90.0
+boost_numeric_conversion_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_numeric_conversion-1.91.0
 
 //The directory containing a CMake configuration file for boost_optional.
-boost_optional_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_optional-1.90.0
+boost_optional_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_optional-1.91.0
 
 //The directory containing a CMake configuration file for boost_parameter.
-boost_parameter_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_parameter-1.90.0
+boost_parameter_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_parameter-1.91.0
 
 //The directory containing a CMake configuration file for boost_phoenix.
-boost_phoenix_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_phoenix-1.90.0
+boost_phoenix_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_phoenix-1.91.0
 
 //The directory containing a CMake configuration file for boost_pool.
-boost_pool_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_pool-1.90.0
+boost_pool_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_pool-1.91.0
 
 //The directory containing a CMake configuration file for boost_predef.
-boost_predef_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_predef-1.90.0
+boost_predef_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_predef-1.91.0
 
 //The directory containing a CMake configuration file for boost_preprocessor.
-boost_preprocessor_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_preprocessor-1.90.0
+boost_preprocessor_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_preprocessor-1.91.0
 
 //The directory containing a CMake configuration file for boost_program_options.
-boost_program_options_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_program_options-1.90.0-static
+boost_program_options_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_program_options-1.91.0-static
 
 //The directory containing a CMake configuration file for boost_property_tree.
-boost_property_tree_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_property_tree-1.90.0
+boost_property_tree_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_property_tree-1.91.0
 
 //The directory containing a CMake configuration file for boost_proto.
-boost_proto_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_proto-1.90.0
+boost_proto_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_proto-1.91.0
 
 //The directory containing a CMake configuration file for boost_range.
-boost_range_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_range-1.90.0
+boost_range_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_range-1.91.0
 
 //The directory containing a CMake configuration file for boost_ratio.
-boost_ratio_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_ratio-1.90.0
+boost_ratio_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_ratio-1.91.0
 
 //The directory containing a CMake configuration file for boost_regex.
-boost_regex_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_regex-1.90.0
+boost_regex_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_regex-1.91.0
 
 //The directory containing a CMake configuration file for boost_scope.
-boost_scope_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_scope-1.90.0
+boost_scope_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_scope-1.91.0
 
 //The directory containing a CMake configuration file for boost_serialization.
-boost_serialization_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_serialization-1.90.0-static
+boost_serialization_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_serialization-1.91.0-static
 
 //The directory containing a CMake configuration file for boost_smart_ptr.
-boost_smart_ptr_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_smart_ptr-1.90.0
+boost_smart_ptr_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_smart_ptr-1.91.0
 
 //The directory containing a CMake configuration file for boost_spirit.
-boost_spirit_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_spirit-1.90.0
+boost_spirit_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_spirit-1.91.0
 
 //The directory containing a CMake configuration file for boost_static_assert.
-boost_static_assert_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_static_assert-1.90.0
+boost_static_assert_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_static_assert-1.91.0
 
 //The directory containing a CMake configuration file for boost_system.
-boost_system_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_system-1.90.0
+boost_system_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_system-1.91.0
 
 //The directory containing a CMake configuration file for boost_thread.
-boost_thread_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_thread-1.90.0-static
+boost_thread_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_thread-1.91.0-static
 
 //The directory containing a CMake configuration file for boost_throw_exception.
-boost_throw_exception_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_throw_exception-1.90.0
+boost_throw_exception_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_throw_exception-1.91.0
 
 //The directory containing a CMake configuration file for boost_tokenizer.
-boost_tokenizer_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_tokenizer-1.90.0
+boost_tokenizer_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_tokenizer-1.91.0
 
 //The directory containing a CMake configuration file for boost_tuple.
-boost_tuple_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_tuple-1.90.0
+boost_tuple_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_tuple-1.91.0
 
 //The directory containing a CMake configuration file for boost_type_index.
-boost_type_index_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_type_index-1.90.0
+boost_type_index_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_type_index-1.91.0
 
 //The directory containing a CMake configuration file for boost_type_traits.
-boost_type_traits_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_type_traits-1.90.0
+boost_type_traits_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_type_traits-1.91.0
 
 //The directory containing a CMake configuration file for boost_typeof.
-boost_typeof_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_typeof-1.90.0
+boost_typeof_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_typeof-1.91.0
 
 //The directory containing a CMake configuration file for boost_unordered.
-boost_unordered_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_unordered-1.90.0
+boost_unordered_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_unordered-1.91.0
 
 //The directory containing a CMake configuration file for boost_utility.
-boost_utility_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_utility-1.90.0
+boost_utility_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_utility-1.91.0
 
 //The directory containing a CMake configuration file for boost_variant2.
-boost_variant2_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_variant2-1.90.0
+boost_variant2_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_variant2-1.91.0
 
 //The directory containing a CMake configuration file for boost_variant.
-boost_variant_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_variant-1.90.0
+boost_variant_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_variant-1.91.0
 
 //The directory containing a CMake configuration file for boost_winapi.
-boost_winapi_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_winapi-1.90.0
+boost_winapi_DIR:PATH=C:/msys64/ucrt64/lib/cmake/boost_winapi-1.91.0
 
 //Value Computed by CMake
 lifelong_BINARY_DIR:STATIC=C:/Users/Administrator/Desktop/test-studio-mapf/LORR26_842072627/bld_temp
@@ -507,7 +518,7 @@ CMAKE_CACHEFILE_DIR:INTERNAL=c:/Users/Administrator/Desktop/test-studio-mapf/LOR
 //Major version of cmake used to create the current loaded cache
 CMAKE_CACHE_MAJOR_VERSION:INTERNAL=4
 //Minor version of cmake used to create the current loaded cache
-CMAKE_CACHE_MINOR_VERSION:INTERNAL=2
+CMAKE_CACHE_MINOR_VERSION:INTERNAL=3
 //Patch version of cmake used to create the current loaded cache
 CMAKE_CACHE_PATCH_VERSION:INTERNAL=3
 //Path to CMake executable.
@@ -520,6 +531,8 @@ CMAKE_CTEST_COMMAND:INTERNAL=C:/msys64/ucrt64/bin/ctest.exe
 CMAKE_CXX_COMPILER-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: CMAKE_CXX_COMPILER_AR
 CMAKE_CXX_COMPILER_AR-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_CXX_COMPILER_CLANG_SCAN_DEPS
+CMAKE_CXX_COMPILER_CLANG_SCAN_DEPS-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: CMAKE_CXX_COMPILER_RANLIB
 CMAKE_CXX_COMPILER_RANLIB-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: CMAKE_CXX_FLAGS
@@ -538,6 +551,8 @@ CMAKE_CXX_STANDARD_LIBRARIES-ADVANCED:INTERNAL=1
 CMAKE_C_COMPILER-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: CMAKE_C_COMPILER_AR
 CMAKE_C_COMPILER_AR-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_C_COMPILER_CLANG_SCAN_DEPS
+CMAKE_C_COMPILER_CLANG_SCAN_DEPS-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: CMAKE_C_COMPILER_RANLIB
 CMAKE_C_COMPILER_RANLIB-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: CMAKE_C_FLAGS
@@ -581,7 +596,7 @@ CMAKE_GENERATOR_PLATFORM:INTERNAL=
 //Name of generator toolset.
 CMAKE_GENERATOR_TOOLSET:INTERNAL=
 //Test CMAKE_HAVE_LIBC_PTHREAD
-CMAKE_HAVE_LIBC_PTHREAD:INTERNAL=1
+CMAKE_HAVE_LIBC_PTHREAD:INTERNAL=
 //Source directory with the top level CMakeLists.txt file for this
 // project
 CMAKE_HOME_DIRECTORY:INTERNAL=C:/Users/Administrator/Desktop/test-studio-mapf/LORR26_842072627
@@ -661,13 +676,29 @@ CMAKE_TAPI-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: CMAKE_VERBOSE_MAKEFILE
 CMAKE_VERBOSE_MAKEFILE-ADVANCED:INTERNAL=1
 //Details about finding Boost
-FIND_PACKAGE_MESSAGE_DETAILS_Boost:INTERNAL=[C:/msys64/ucrt64/lib/cmake/Boost-1.90.0/BoostConfig.cmake][found components: program_options system filesystem log log_setup ][v1.90.0(1.49.0)]
+FIND_PACKAGE_MESSAGE_DETAILS_Boost:INTERNAL=[C:/msys64/ucrt64/lib/cmake/Boost-1.91.0/BoostConfig.cmake][found components: program_options system filesystem log log_setup ][v1.91.0(1.49.0)]
+//Details about finding PYTHON
+FIND_PACKAGE_MESSAGE_DETAILS_PYTHON:INTERNAL=C:/msys64/ucrt64/bin/python3.exe3.14.6
 //Details about finding PythonInterp
-FIND_PACKAGE_MESSAGE_DETAILS_PythonInterp:INTERNAL=[C:/msys64/ucrt64/bin/python3.exe][v3.14.4(3.8)]
+FIND_PACKAGE_MESSAGE_DETAILS_PythonInterp:INTERNAL=[C:/msys64/ucrt64/bin/python3.exe][v3.14.6(3.8)]
 //ADVANCED property for variable: PYTHON_EXECUTABLE
 PYTHON_EXECUTABLE-ADVANCED:INTERNAL=1
+PYTHON_INCLUDE_DIRS:INTERNAL=C:/msys64/ucrt64/include/python3.14
+PYTHON_IS_DEBUG:INTERNAL=0
+PYTHON_LIBRARIES:INTERNAL=C:/msys64/ucrt64/lib/libpython3.14.dll.a
+//ADVANCED property for variable: PYTHON_LIBRARY
+PYTHON_LIBRARY-ADVANCED:INTERNAL=1
+PYTHON_MODULE_DEBUG_POSTFIX:INTERNAL=
+PYTHON_MODULE_EXTENSION:INTERNAL=.cp314-mingw_x86_64_ucrt_gnu.pyd
+PYTHON_MODULE_PREFIX:INTERNAL=
+PYTHON_VERSION:INTERNAL=3.14.6
+PYTHON_VERSION_MAJOR:INTERNAL=3
+PYTHON_VERSION_MINOR:INTERNAL=14
 Python_ADDITIONAL_VERSIONS:INTERNAL=3.12;3.11;3.10;3.9;3.8
+//Result of TRY_COMPILE
+THREADS_HAVE_PTHREAD_ARG:INTERNAL=TRUE
 _PYBIND11_CROSSCOMPILING:INTERNAL=OFF
-//Include directory for pybind11 (Python not requested)
-pybind11_INCLUDE_DIRS:INTERNAL=C:/msys64/ucrt64/include
+_Python:INTERNAL=PYTHON
+//Directories where pybind11 and possibly Python headers are located
+pybind11_INCLUDE_DIRS:INTERNAL=C:/msys64/ucrt64/include;C:/msys64/ucrt64/include/python3.14
 

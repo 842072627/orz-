@@ -38,10 +38,10 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define WIDTH_BAND_1          4       // width < 4: very narrow
 #define WIDTH_BAND_2          12       // width 4-8: narrow
 #define WIDTH_BAND_3          18      // width 9-15: moderate
-#define FF_TH_BAND_1          1.48f   // threshold for width < 4 (very narrow)
-#define FF_TH_BAND_2          1.48f   // threshold for width 4-12 (narrow)
-#define FF_TH_BAND_3          3.52f    // threshold for width 12-18 (moderate)
-#define FF_TH_BAND_4          5.72f // threshold for width >= 16 (wide, never lock by default)
+#define FF_TH_BAND_1          9999.0f   // threshold for width < 4 (very narrow)
+#define FF_TH_BAND_2          9999.0f   // threshold for width 4-12 (narrow)
+#define FF_TH_BAND_3          9999.0f    // threshold for width 12-18 (moderate)
+#define FF_TH_BAND_4          9999.0f // threshold for width >= 16 (wide, never lock by default)
 
 // ========== Active agent ratio lock relaxation ==========
 #define USE_ACTIVE_RATIO_RELAX   true
@@ -61,13 +61,14 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define DENSITY_HARD_CAP      100     // zones at this density block ALL tasks (regardless of direction)
 
 // ========== Feature flags ==========
-#define ORZ_PIBT_DIRECTION_BLOCK  false    // scheduler + PIBT direction block linkage
+#define ORZ_PIBT_DIRECTION_BLOCK  false
+#define ORZ_HIGHWAY_FORCE_MOVE     true // 3方向封禁时强制agent走唯一通道(默认关)    // scheduler + PIBT direction block linkage
 
 // ========== Density exclusion ==========
 #define USE_DENSITY_EXCLUDE_IDLE  false    // 排除无任务/被截停agent的密度贡献
 
 // ========== Wall-hugging in corridors (PIBT tie-breaker + A* guide path) ==========
-#define USE_WALL_HUGGING        true    // master switch for all wall-hugging features
+#define USE_WALL_HUGGING        false    // master switch for all wall-hugging features
 #define USE_WALL_HUGGING_PIBT    true    // PIBT successor tie-breaker wall-hugging
 #define USE_WALL_HUGGING_ASTAR   true    // A* guide path branch-dist bias
 #define WALL_HUG_WIDTH_MAX       20      // max corridor width (cells) for wall-hugging
