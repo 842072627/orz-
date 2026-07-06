@@ -82,13 +82,13 @@ inline void load_for_combined(const MapProfile& profile, const SharedEnvironment
             c.iron_future_flow_k = 1.0f;
             c.iron_future_flow_decay = 0.01f;
             c.iron_future_flow_lock_th = 0.0f;
-            c.iron_future_flow_congest_cap = 300.0f;
+            c.iron_future_flow_congest_cap = 250.0f;
             c.iron_future_flow_zone_rows = 40;
             c.iron_future_flow_zone_cols = 20;
             c.iron_ff_zone_tuning_enabled = true;
             c.iron_ff_edge_cols = 1;
             c.iron_ff_topbot_rows = 1;
-            c.iron_ff_left_edge_congest_cap = 80.0f;
+            c.iron_ff_left_edge_congest_cap = 75.0f;
             c.iron_ff_right_edge_congest_cap = 200.0f;
             c.iron_ff_top_congest_cap = 200.0f;
             c.iron_ff_bottom_congest_cap = 200.0f;

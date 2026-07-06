@@ -54,7 +54,8 @@ private:
     std::vector<State> last_step_states_;
 
     // ---- Fullfill highway (from fullfill_highway.h, hard constraints) ----
-    std::vector<std::vector<int>> extra_weights_;  // [loc][direction] penalty
+    std::vector<std::vector<int>> extra_weights_;
+    std::vector<std::vector<int>> combined_weights_;  // [loc][direction] penalty
     void build_fullfill_highway(SharedEnvironment* env);
 
 

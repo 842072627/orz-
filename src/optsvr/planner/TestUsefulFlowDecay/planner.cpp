@@ -474,9 +474,43 @@ void TestUsefulFlowDecayPlanner::setup_multistep_episode_state(
 // ============ update_guide_paths_once_for_multistep ============
 void TestUsefulFlowDecayPlanner::update_guide_paths_once_for_multistep(SharedEnvironment* env, TimePoint flow_end_time)
 {
-    // Determine extra_weights pointer: only pass if WARE_DIRECT is enabled and weights are built
-    const std::vector<std::vector<int>>* ew_ptr =
-        (!extra_weights_.empty()) ? &extra_weights_ : nullptr;
+    // Determine extra_weights pointer: build combined_weights_ = extra_weights_ + flow radiation
+    combined_weights_ = extra_weights_;
+    // ─── Flow radiation: 8-directional ray-casting, stops at walls ───
+    if (!trajLNS_.flow.empty() && env != nullptr && 
+        (int)combined_weights_.size() == env->map.size() && env->cols > 0) {
+        const int R = env->rows, C = env->cols, M = R * C;
+        const int di[8] = {-1,1,0,0,-1,-1,1,1};
+        const int dj[8] = {0,0,-1,1,-1,1,-1,1};
+        const float kernel[9] = {0.18f,0.16f,0.14f,0.12f,0.10f,0.08f,0.06f,0.04f,0.02f};
+        // Precompute total flow per cell
+        std::vector<int> heat(M, 0);
+        for (int i = 0; i < M; i++)
+            for (int k = 0; k < 4; k++) heat[i] += trajLNS_.flow[i].d[k];
+        for (int i = 0; i < R; i++) {
+            for (int j = 0; j < C; j++) {
+                int idx = i * C + j;
+                if (!env->map[idx]) {
+                    float total = heat[idx] * kernel[0];
+                    for (int d = 0; d < 8; d++) {
+                        for (int k = 1; k <= 8; k++) {
+                            int ni = i + di[d] * k, nj = j + dj[d] * k;
+                            if (ni < 0 || ni >= R || nj < 0 || nj >= C) break;
+                            int nidx = ni * C + nj;
+                            if (env->map[nidx]) break;
+                            total += heat[nidx] * kernel[k];
+                        }
+                    }
+                    int final_heat = (int)(total + 0.5f);
+                    int w = (heat[idx] + final_heat) / 2 / 600;
+                    if (w > 0)
+                        for (int d = 0; d < 4; d++)
+                            combined_weights_[idx][d] += w;
+                }
+            }
+        }
+    }
+    const std::vector<std::vector<int>>* ew_ptr = &combined_weights_;
     const int prewarm_radius =
         cfg().dist2path_prewarm_enabled ? cfg().dist2path_prewarm_radius : 0;
     Dist2PathPrewarmer prewarmer(env, &(trajLNS_.neighbors),
