@@ -21,14 +21,6 @@
 
 namespace strategy_centerline {
 
-static constexpr int ROUTE_THRESHOLD = 20;
-static constexpr float DIVISOR_TABLE[21] = {
-    1.0f, 1.1f, 1.2f, 1.3f, 1.4f,
-    1.5f, 1.6f, 1.7f, 1.8f, 1.9f,
-    2.0f, 2.1f, 2.2f, 2.3f, 2.4f,
-    2.5f, 2.6f, 2.7f, 2.8f, 2.9f,
-    3.0f
-};
 
 static SharedEnvironment* g_env = nullptr;
 static std::vector<int> g_parked_task;
@@ -255,8 +247,6 @@ static inline float base_score(int a_loc, int tid, SharedEnvironment* env, int s
     Centerline::project(a_loc, a_m, a_b);
     if (a_m < 0) return 1.0f;
     float weighted_dist = 0.0f;
-    int global_d_max = 0;
-    float global_worst_align = 1.0f;
     int prev_m = a_m, prev_b = a_b;
     int prev_loc = a_loc;
     int a_zone = -1;
@@ -273,8 +263,6 @@ static inline float base_score(int a_loc, int tid, SharedEnvironment* env, int s
         int hi = std::max(prev_m, tm);
         int intent = (tm > prev_m) ? +1 : -1;
 
-        int d_max_seg = 0;
-        float best_align = 1.0f;
         auto lo_it = std::lower_bound(Centerline::g_mp_main_dist.begin(), Centerline::g_mp_main_dist.end(), lo);
         auto hi_it = std::upper_bound(Centerline::g_mp_main_dist.begin(), Centerline::g_mp_main_dist.end(), hi);
         for (int si = (int)(lo_it - Centerline::g_mp_main_dist.begin());
@@ -300,7 +288,7 @@ static inline float base_score(int a_loc, int tid, SharedEnvironment* env, int s
                         else intent_mask = 1;
                         if (fb & intent_mask) {
                             // Penalize, don't hard block - let future flow + density handle it
-                            return -50000.0f - d_max_seg;
+                            return -50000.0f;
                         }
                     }
                 }
@@ -311,14 +299,6 @@ static inline float base_score(int a_loc, int tid, SharedEnvironment* env, int s
             }
             if (USE_DENSITY_HARD_CAP && d >= DENSITY_HARD_CAP)
                 return -1e9f;
-            if (d > d_max_seg) d_max_seg = d;
-            float fr = Centerline::g_mp_future_right[si];
-            float fl = Centerline::g_mp_future_left[si];
-            float ftotal = fr + fl;
-            if (ftotal >= 2.0f) {
-                float align = (intent > 0) ? (fr / ftotal) : (fl / ftotal);
-                if (align < best_align) best_align = align;
-            }
         }
 
         // 统一加权距离累加
@@ -326,8 +306,6 @@ static inline float base_score(int a_loc, int tid, SharedEnvironment* env, int s
         float coeff = (ei == (size_t)start_idx) ? COEFF_AGENT_TASK1 : COEFF_TASK_SEGMENT;
         weighted_dist += seg_dist * coeff;
 
-        if (d_max_seg > global_d_max) global_d_max = d_max_seg;
-        if (best_align < global_worst_align) global_worst_align = best_align;
 
         prev_m = tm; prev_b = tb;
         prev_loc = locs[ei];
@@ -338,15 +316,6 @@ static inline float base_score(int a_loc, int tid, SharedEnvironment* env, int s
     if (weighted_dist > MAX_TASK_SEGMENT_DIST) {
         float penalty = (float)MAX_TASK_SEGMENT_DIST / weighted_dist;
         final_score *= penalty * penalty;
-    }
-    if (global_d_max > ROUTE_THRESHOLD) {
-        int idx = (global_d_max > 40) ? 40 : global_d_max;
-        final_score /= DIVISOR_TABLE[idx - ROUTE_THRESHOLD];
-    }
-    if (global_worst_align < 0.7f) {
-        float pen = (0.7f - global_worst_align) * 0.5f;
-        if (pen > 0.35f) pen = 0.35f;
-        final_score *= (1.0f - pen);
     }
     return final_score;
 }

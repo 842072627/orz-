@@ -2,6 +2,7 @@
 #include "Tasks.h"
 #include "utils.h"
 #include "heuristics.h"
+#include "orz_highway.h"
 
 // The initialize function will be called by competition system at the preprocessing stage.
 // Implement the initialize functions of the planner and scheduler to load or compute auxiliary data.
@@ -25,6 +26,27 @@ void Entry::compute(int time_limit, Plan & plan, std::vector<int> & proposed_sch
 
     //then update the first unfinished errand/location of tasks for planner reference
     update_goal_locations(proposed_schedule);
+    
+    // idle agent relocation: move idle agents on forbid/guide cells to highway exit
+    for (size_t i = 0; i < proposed_schedule.size(); i++) {
+        if (proposed_schedule[i] != -1) continue;
+        int loc = env->curr_states[i].location;
+        uint8_t _fb = ORZ_Highway::get_forbid(loc);
+        uint8_t _pd = 0;
+        bool _has_guide = ORZ_Highway::get_guide(loc, _pd);
+        if (_fb || _has_guide) {
+            int exit_loc = -1;
+            if (_fb) {
+                exit_loc = ORZ_Highway::get_exit(loc);
+            } else {
+                exit_loc = ORZ_Highway::get_guide_exit(loc);
+            }
+            if (exit_loc >= 0) {
+                env->goal_locations[i].clear();
+                env->goal_locations[i].push_back({exit_loc, -1});
+            }
+        }
+    }
     
     //call the planner to compute the actions
     planner->plan(time_limit,plan);

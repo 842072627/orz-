@@ -125,14 +125,21 @@ bool causalMY_PIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
 
 		assert(validateMove(prev_loc, neighbor, lns.env));
 
-		int min_heuristic = get_gp_h(lns, curr_id, neighbor);
+		auto _res = get_source_2_path(lns.traj_dists[curr_id], lns.env, neighbor, &(lns.neighbors));
+		int min_heuristic = _res.first;
+		int nh_togo = _res.second;
 
-		successors.emplace_back(neighbor,min_heuristic,-1,rand());
+		successors.emplace_back(neighbor, min_heuristic, nh_togo, -1, rand());
 	}
 
 	int wait_heuristic = get_gp_h(lns, curr_id, prev_loc);
+	int wait_togo = -1;
+	{
+	    auto _wr = get_source_2_path(lns.traj_dists[curr_id], lns.env, prev_loc, &(lns.neighbors));
+	    wait_togo = _wr.second;
+	}
 
-	successors.emplace_back(prev_loc, wait_heuristic,-1,rand());
+	successors.emplace_back(prev_loc, wait_heuristic, wait_togo, -1, rand());
 
 #if ORZ_HIGHWAY_FORCE_MOVE
 	// Highway force move: single-direction cell, target free -> force move
@@ -192,6 +199,9 @@ bool causalMY_PIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
 		{
 			int diff[4] = {1,lns.env->cols,-1,-lns.env->cols};
 			if (a.heuristic == b.heuristic){
+					// prefer smaller togo (closer to goal along A* path)
+					if (a.togo != b.togo)
+					    return a.togo < b.togo;
 					//tie break on prefer moving forward
 					if (a.location==orien_next_v && b.location!=orien_next_v)
 						return true;

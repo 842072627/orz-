@@ -153,7 +153,6 @@ std::pair<int,int> get_source_2_path(Dist2Path& dp, SharedEnvironment* env, int 
 		getNeighborLocs(ns,neighbors,curr.id);
 		for (int next_location : neighbors)
 		{
-			cost = curr.cost + 1;
 			// ORZ highway forbid: soft penalty (+1e6) like A*, NOT hard continue
 			{
 			    uint8_t forbid = ORZ_Highway::get_forbid(curr.id);
@@ -165,9 +164,10 @@ std::pair<int,int> get_source_2_path(Dist2Path& dp, SharedEnvironment* env, int 
 			        if (dir == 1 && (forbid & 8)) blocked = true;
 			        if (dir == 2 && (forbid & 1)) blocked = true;
 			        if (dir == 3 && (forbid & 4)) blocked = true;
-			        if (blocked) cost += 1000000;
+			        if (blocked) continue;
 			    }
 			}
+			cost = curr.cost + 1;
 			auto it_next = dp.dist2path.find(next_location);
             if (it_next != dp.dist2path.end() && it_next->second.label == dp.label && cost >= it_next->second.cost)
                 continue;
