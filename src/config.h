@@ -54,7 +54,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 
 // ========== Task segment distance limit ==========
 #define MAX_TASK_SEGMENT_DIST  99999   // max main+branch distance for a single errand transition
-#define GARBAGE_TASK_RATIO      0.05f  // bottom fraction of free tasks deferred each tick (0.0-1.0)
+#define GARBAGE_TASK_RATIO      0.00f  // bottom fraction of free tasks deferred each tick (0.0-1.0)
 
 // ========== Hard density limit ==========
 #define USE_DENSITY_HARD_CAP  true    // enable hard density cap
@@ -64,6 +64,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define ORZ_PIBT_DIRECTION_BLOCK  false
 #define ORZ_HIGHWAY_FORCE_MOVE     true // 3方向封禁时强制agent走唯一通道(默认关)    // scheduler + PIBT direction block linkage
 #define ORZ_HIGHWAY_IDLE_EXIT    true // idle agent on labeled cell -> BFS to nearest unlabeled cell
+#define ORZ_HIGHWAY_IDLE_FOLLOW  true // idle agent on forbid cell -> follow highway direction to exit
 
 // ========== Density exclusion ==========
 #define USE_DENSITY_EXCLUDE_IDLE  false    // 排除无任务/被截停agent的密度贡献

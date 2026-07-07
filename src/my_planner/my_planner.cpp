@@ -145,6 +145,19 @@ namespace MyPlanner{
             }
             // set goals/tasks
             if (env->goal_locations[i].empty()){
+#if ORZ_HIGHWAY_IDLE_FOLLOW
+               int _aloc = env->curr_states[i].location;
+               if (ORZ_Highway::is_labeled(_aloc)) {
+                   int _ex = -1;
+                   uint8_t _pd;
+                   if (ORZ_Highway::get_forbid(_aloc)) {
+                       _ex = ORZ_Highway::get_exit(_aloc);
+                   } else if (ORZ_Highway::get_guide(_aloc, _pd)) {
+                       _ex = ORZ_Highway::get_guide_exit(_aloc);
+                   }
+                   if (_ex >= 0) dummy_goals.at(i) = _ex;
+               }
+#endif
                int g = dummy_goals.at(i);
                trajLNS.tasks[i] = g;
                 local_priority[i] = p_copy[i];
@@ -271,8 +284,8 @@ namespace MyPlanner{
                   if (fb && fb != 15) pb += 5000; }
                 if (ORZ_Highway::is_exit_cell(env->curr_states[a].location)) pa = 1e9;
                 if (ORZ_Highway::is_exit_cell(env->curr_states[b].location)) pb = 1e9;
-                if (env->goal_locations[a].empty()) pa -= 100;
-                if (env->goal_locations[b].empty()) pb -= 100;
+                if (env->goal_locations[a].empty()) pa += 0;
+                if (env->goal_locations[b].empty()) pb += 0;
                 return pa > pb;
             }
         );
