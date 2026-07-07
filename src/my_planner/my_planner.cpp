@@ -98,10 +98,30 @@ namespace MyPlanner{
         for(int i=0; i<env->num_of_agents; i++)
         {
             dummy_goals.at(i) = env->start_states.at(i).location;
-            if (ORZ_Highway::get_forbid(env->start_states.at(i).location)) {
-                int ex = ORZ_Highway::get_exit(env->start_states.at(i).location);
-                if (ex >= 0) dummy_goals.at(i) = ex;
+#if ORZ_HIGHWAY_IDLE_EXIT
+            if (ORZ_Highway::is_labeled(dummy_goals.at(i))) {
+                // BFS to nearest unlabeled walkable cell
+                std::queue<int> q; std::unordered_set<int> vis;
+                q.push(dummy_goals.at(i)); vis.insert(dummy_goals.at(i));
+                while (!q.empty()) {
+                    int cur = q.front(); q.pop();
+                    if (!ORZ_Highway::is_labeled(cur)) {
+                        dummy_goals.at(i) = cur; break;
+                    }
+                    int col = cur % env->cols, row = cur / env->cols;
+                    int nbs[4]; int nn = 0;
+                    if (row > 0 && env->map[cur - env->cols] == 0) nbs[nn++] = cur - env->cols;
+                    if (row < env->rows - 1 && env->map[cur + env->cols] == 0) nbs[nn++] = cur + env->cols;
+                    if (col > 0 && env->map[cur - 1] == 0) nbs[nn++] = cur - 1;
+                    if (col < env->cols - 1 && env->map[cur + 1] == 0) nbs[nn++] = cur + 1;
+                    for (int ni = 0; ni < nn; ni++) {
+                        if (vis.find(nbs[ni]) == vis.end()) {
+                            vis.insert(nbs[ni]); q.push(nbs[ni]);
+                        }
+                    }
+                }
             }
+#endif
         }
     }
 
@@ -123,16 +143,21 @@ namespace MyPlanner{
                     }
                 }
             }
-
             // set goals/tasks
             if (env->goal_locations[i].empty()){
-                int g = dummy_goals.at(i);
-                if (ORZ_Highway::get_forbid(env->curr_states[i].location)) {
-                    int ex = ORZ_Highway::get_exit(env->curr_states[i].location);
-                    if (ex >= 0) g = ex;
-                }
-                trajLNS.tasks[i] = g;
+               int g = dummy_goals.at(i);
+               trajLNS.tasks[i] = g;
                 local_priority[i] = p_copy[i];
+                if (i == 667 || i == 695) {
+                    static int _cnt_667_695 = 0; _cnt_667_695++;
+                    if (_cnt_667_695 % 100 == 1) {
+                        printf("[DBG_667_695] t=%d agent=%d idle goal=(%d,%d) dummy=(%d,%d) curr=(%d,%d)\n",
+                            env->curr_timestep, i,
+                            g % env->cols, g / env->cols,
+                            dummy_goals.at(i) % env->cols, dummy_goals.at(i) / env->cols,
+                            env->curr_states[i].location % env->cols, env->curr_states[i].location / env->cols);
+                    }
+                }
             }
             else{
                 trajLNS.tasks[i] = env->goal_locations[i].front().first;
@@ -168,15 +193,6 @@ namespace MyPlanner{
 
             if (!env->goal_locations[i].empty() && trajLNS.neighbors[env->start_states[i].location].size() == 1){
                 local_priority[i] = local_priority[i] + 10;
-            }
-            if (ORZ_Highway::get_forbid(env->curr_states[i].location)) {
-                local_priority[i] += 5000;
-            }
-            if (ORZ_Highway::is_exit_cell(env->curr_states[i].location)) {
-                local_priority[i] = 1e9;
-            }
-            if (ORZ_Highway::get_forbid(env->curr_states[i].location)) {
-                local_priority[i] += 5000;
             }
         }
     }
@@ -238,18 +254,7 @@ namespace MyPlanner{
             if (!env->goal_locations[i].empty() && trajLNS.neighbors[env->start_states[i].location].size() == 1){
                 local_priority[i] = local_priority[i] + 10;
             }
-            if (ORZ_Highway::get_forbid(env->curr_states[i].location)) {
-                local_priority[i] += 5000;
-            }
-            if (ORZ_Highway::is_exit_cell(env->curr_states[i].location)) {
-                local_priority[i] = 1e9;
-            }
-            if (ORZ_Highway::get_forbid(env->curr_states[i].location)) {
-                local_priority[i] += 5000;
-            }
-            if (ORZ_Highway::get_forbid(env->curr_states[i].location)) {
-                local_priority[i] += 5000;
-            }
+
         }
     }
 
@@ -258,7 +263,17 @@ namespace MyPlanner{
     {
         const auto start_time = std::chrono::steady_clock::now();
         std::sort(ids.begin(), ids.end(), [&](int a, int b) {
-                return local_priority.at(a) > local_priority.at(b);
+                double pa = local_priority.at(a);
+                double pb = local_priority.at(b);
+                { uint8_t fb = ORZ_Highway::get_forbid(env->curr_states[a].location);
+                  if (fb && fb != 15) pa += 5000; }
+                { uint8_t fb = ORZ_Highway::get_forbid(env->curr_states[b].location);
+                  if (fb && fb != 15) pb += 5000; }
+                if (ORZ_Highway::is_exit_cell(env->curr_states[a].location)) pa = 1e9;
+                if (ORZ_Highway::is_exit_cell(env->curr_states[b].location)) pb = 1e9;
+                if (env->goal_locations[a].empty()) pa -= 100;
+                if (env->goal_locations[b].empty()) pb -= 100;
+                return pa > pb;
             }
         );
         //clear reset occupied
@@ -285,6 +300,21 @@ namespace MyPlanner{
             }
             one_step_actions.at(id) = getAction(prev_states.at(id),decided.at(id).loc, env);
             checked.at(id) = false;
+            if (id == 667 || id == 695) {
+                static int _cnt2 = 0; _cnt2++;
+                if (_cnt2 % 100 == 1) {
+                    char act = 'W';
+                    if (one_step_actions.at(id) == Action::FW) {
+                        int delta = decided.at(id).loc - env->curr_states[id].location;
+                        act = (delta == 1) ? 'R' : (delta == -1) ? 'L' : (delta == env->cols) ? 'D' : 'U';
+                    }
+                    printf("[DBG_667_695_ACT] t=%d agent=%d act=%c from=(%d,%d) to=(%d,%d) forbid=%u\n",
+                        env->curr_timestep, id, act,
+                        env->curr_states[id].location % env->cols, env->curr_states[id].location / env->cols,
+                        decided.at(id).loc % env->cols, decided.at(id).loc / env->cols,
+                        ORZ_Highway::get_forbid(env->curr_states[id].location));
+                }
+            }
         }
 
         for (int id=0;id < env->num_of_agents ; id++){

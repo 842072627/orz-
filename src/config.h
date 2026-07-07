@@ -63,6 +63,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 // ========== Feature flags ==========
 #define ORZ_PIBT_DIRECTION_BLOCK  false
 #define ORZ_HIGHWAY_FORCE_MOVE     true // 3方向封禁时强制agent走唯一通道(默认关)    // scheduler + PIBT direction block linkage
+#define ORZ_HIGHWAY_IDLE_EXIT    true // idle agent on labeled cell -> BFS to nearest unlabeled cell
 
 // ========== Density exclusion ==========
 #define USE_DENSITY_EXCLUDE_IDLE  false    // 排除无任务/被截停agent的密度贡献
