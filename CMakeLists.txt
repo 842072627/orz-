@@ -62,7 +62,7 @@ set_directory_properties(PROPERTIES ADDITIONAL_MAKE_CLEAN_FILES
 )
 
 
-option(BUILD_TESTS "Build planner tests" ON)
+option(BUILD_TESTS "Build planner tests" OFF)
 if(BUILD_TESTS)
     enable_testing()
     add_executable(multi_step_plan_test

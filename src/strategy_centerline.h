@@ -148,6 +148,14 @@ static inline float base_score(int a_loc, int tid, SharedEnvironment* env, int s
     auto it = env->task_pool.find(tid);
     if (it == env->task_pool.end() || it->second.locations.empty())
         return -1e9f;
+
+#if ORZ_HIGHWAY_SKIP_LABELED_TASK
+    // Skip tasks with any location on a labeled (forbid/guide/task/exit) cell
+    for (int loc : it->second.locations) {
+        if (ORZ_Highway::is_highway_cell(loc))
+            return -1e9f;
+    }
+#endif
     // ORZ highway: reject tasks in forbidden zones
     {
         auto& locs_check = it->second.locations;

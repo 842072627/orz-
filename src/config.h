@@ -65,6 +65,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define ORZ_HIGHWAY_FORCE_MOVE     false // 3方向封禁时强制agent走唯一通道(默认关)    // scheduler + PIBT direction block linkage
 #define ORZ_HIGHWAY_IDLE_EXIT    true // idle agent on labeled cell -> BFS to nearest unlabeled cell
 #define ORZ_HIGHWAY_IDLE_FOLLOW  true // idle agent on forbid cell -> follow highway direction to exit
+#define ORZ_HIGHWAY_SKIP_LABELED_TASK true // skip tasks with any location on labeled (forbid/guide/task/exit) cell
 
 // ========== Density exclusion ==========
 #define USE_DENSITY_EXCLUDE_IDLE  false    // 排除无任务/被截停agent的密度贡献
@@ -77,8 +78,8 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define WALL_HUG_BRANCH_BIAS_MAX 2       // max per-step branch bias for A* (0-5, larger = stronger)
 
 // ========== Idle capacity control ==========
-#define USE_IDLE_CAP         false   // 空载容量控制开关
-#define IDLE_RATIO           0.4f  // 最大活跃 agent 比例 (0~1.0)
+#define USE_IDLE_CAP         true   // 空载容量控制开关
+#define IDLE_RATIO           0.6f  // 最大活跃 agent 比例 (0~1.0)
 
 // ========== Migration flags ==========
 #define USE_MP_CENTERLINE   1   // widest path centerline
