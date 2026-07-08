@@ -7,6 +7,7 @@
 #include "traffic_config.h"
 #include "centerline.h"
 #include "orz_highway.h"
+#include "idle_cap.h"
 #include <unordered_set>
 #include <unordered_map>
 #include <algorithm>
@@ -90,6 +91,11 @@ void add_highway_future_flow(int agent_loc, const std::vector<int>& task_locs,
     int prev_loc = agent_loc;
     int cumul_si = 0;
 
+    // 分支距离衰减（agent 在 branch 深处时流贡献衰减）
+    float adj_branch = (float)(b_curr > FUTURE_FLOW_BRANCH_OFFSET
+                               ? b_curr - FUTURE_FLOW_BRANCH_OFFSET : 0);
+    float d_branch = FUTURE_FLOW_BRANCH_PENALTY * adj_branch;
+
     for (int loc : task_locs) {
         int tm, tb;
         Centerline::project(loc, tm, tb);
@@ -121,12 +127,13 @@ void add_highway_future_flow(int agent_loc, const std::vector<int>& task_locs,
             if ((dir > 0 && sm <= prev_m) || (dir < 0 && sm >= prev_m)) continue;
 
             cumul_si += std::abs(sm - prev_m);
-            float decay = 1.0f / (1.0f + (float)cumul_si * FF_DECAY_K);
+            float d_main = (float)cumul_si;
+            float w = 1.0f / (1.0f + d_main * 0.005f + d_branch * 0.05f);
 
             if (dir > 0)
-                Centerline::g_mp_future_right[si] += decay;
+                Centerline::g_mp_future_right[si] += w;
             else
-                Centerline::g_mp_future_left[si] += decay;
+                Centerline::g_mp_future_left[si] += w;
         }
         prev_m = tm;
         prev_loc = loc;
@@ -211,6 +218,11 @@ float base_score(int a_loc, int tid, SharedEnvironment* env, float avg_flow) {
     int prev_m = a_m;
     int prev_loc = a_loc;
     float penalty = 0;
+    float dir_mult = 1.0f;
+    int score_cumul = 0;
+    // agent 分支距离衰减
+    float _adj_b = (float)(a_b > FUTURE_FLOW_BRANCH_OFFSET ? a_b - FUTURE_FLOW_BRANCH_OFFSET : 0);
+    float d_branch = FUTURE_FLOW_BRANCH_PENALTY * _adj_b;
 
     for (size_t ei = 0; ei < locs.size(); ei++) {
         int tm, tb;
@@ -223,6 +235,7 @@ float base_score(int a_loc, int tid, SharedEnvironment* env, float avg_flow) {
 
         int lo = std::min(prev_m, tm);
         int hi = std::max(prev_m, tm);
+        int seg_len = std::abs(tm - prev_m);
         int intent = (tm > prev_m) ? +1 : -1;
 
         auto lo_it = std::lower_bound(Centerline::g_mp_main_dist.begin(),
@@ -235,29 +248,40 @@ float base_score(int a_loc, int tid, SharedEnvironment* env, float avg_flow) {
 
             if (!g_mp_highway_flag[si]) continue;
 
+            int sm = Centerline::g_mp_main_dist[si];
+            if ((intent > 0 && sm <= prev_m) || (intent < 0 && sm >= prev_m)) continue;
+
+            score_cumul += std::abs(sm - prev_m);
+            float dist_w = 1.0f / (1.0f + (float)score_cumul * 0.005f + d_branch * 0.05f);  // 越远权重越小
+
             float fr = Centerline::g_mp_future_right[si];
             float fl = Centerline::g_mp_future_left[si];
             float ftotal = fr + fl;
 
-            // ① 全局均衡：高于平均就扣
+            // ① 全局均衡：高于平均就扣（只减分，不增益）
+            float overload = 0;
             if (avg_flow > 0 && ftotal > avg_flow) {
-                float overload = (ftotal - avg_flow) / avg_flow;
-                penalty += overload * FF_GLOBAL_W;
+                overload = (ftotal - avg_flow) / avg_flow;
             }
 
-            // ② 局部均衡：方向失衡
+            // ② 局部均衡：方向失衡 → 走满的方向扣分，填空的方向加分
+            float dir_factor = 1.0f;
             if (fr + fl > 0) {
                 float dir_balance = (fr - fl) / (fr + fl);        // [-1,+1]
                 float direction_score = (float)intent * dir_balance;
-                penalty += direction_score * FF_DIR_W;
+                dir_factor = 1.0f - direction_score * FF_DIR_W * dist_w;
+                dir_factor = std::max(0.1f, dir_factor);
             }
+
+            penalty += overload * FF_GLOBAL_W;
+            dir_mult *= dir_factor;
         }
         prev_m = tm;
         prev_loc = locs[ei];
     }
 
     float baseline = 1.0f / (weighted_dist + 1.0f);
-    return baseline / (1.0f + penalty);
+    return baseline * dir_mult / (1.0f + penalty);
 }
 
 // ====== 从不同列随机挑 agent ======
@@ -382,7 +406,12 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
     int max_active = (int)(total_agents * BM_MAX_ACTIVE_RATIO);
     int cur_active = total_agents - (int)free_agents.size();
 
-    // 预计算每个 free agent 和 free task 的 zone
+    // IdleCap：每段独立限制活跃 agent
+    int idle_budgets[IDLE_NUM_BUCKETS] = {0};
+    if (USE_IDLE_CAP) {
+        IdleCap::compute_budgets(env, idle_budgets);
+    }
+
     std::unordered_map<int, int> agent_zone_map;
     for (int a : free_agents) {
         int a_loc = env->curr_states[a].location;
@@ -421,6 +450,11 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
 
             for (int a : batch) {
                 if (batch_done_a.count(a)) continue;
+                // IdleCap：本段已满→跳过
+                if (USE_IDLE_CAP) {
+                    int b = IdleCap::get_bucket(env, a);
+                    if (idle_budgets[b] <= 0) continue;
+                }
                 int a_loc = env->curr_states[a].location;
                 int a_zone = agent_zone_map.count(a) ? agent_zone_map[a] : -1;
                 for (int tid : free_tasks) {
@@ -447,6 +481,10 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
             batch_done_t.insert(best_tid);
             batch_allocated++;
             cur_active++;
+            if (USE_IDLE_CAP) {
+                int b = IdleCap::get_bucket(env, best_a);
+                idle_budgets[b]--;
+            }
 
             // 实时更新 flow + avg_flow
             int a_loc = env->curr_states[best_a].location;

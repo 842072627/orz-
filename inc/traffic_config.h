@@ -12,6 +12,6 @@
 #define TRAFFIC_ZONE_RANGE      100     // agent 只看 ±N 段内的任务
 
 // ====== Traffic Scoring ======
-#define FF_GLOBAL_W             0.2f    // 全局超载惩罚系数
-#define FF_DIR_W                0.1f    // 方向失衡惩罚系数
+#define FF_GLOBAL_W             0.5f    // 全局超载惩罚系数
+#define FF_DIR_W                2.0f    // 方向失衡惩罚系数
 #define FF_DECAY_K              0.01f   // future flow 衰减
