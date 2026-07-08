@@ -5,6 +5,7 @@
 #include "const.h"
 #include "config.h"
 #include "strategy_centerline.h"
+#include "strategy_traffic.h"
 #include "pibt_lock.h"
 
 
@@ -69,9 +70,9 @@ void TaskScheduler::initialize(int preprocess_time_limit)
         {
             strategy_centerline::init(env);
         }
-        else
+        else if (strat == "traffic")
         {
-            // strategy_tidal disabled
+            strategy_traffic::init(env);
         }
     }
     else
@@ -97,6 +98,11 @@ void TaskScheduler::plan(int time_limit, std::vector<int> &proposed_schedule)
         {
             int limit = time_limit / 2 - DefaultPlanner::SCHEDULER_TIMELIMIT_TOLERANCE;
             strategy_centerline::plan(limit, env, proposed_schedule);
+        }
+        else if (strat == "traffic")
+        {
+            int limit = time_limit / 2 - DefaultPlanner::SCHEDULER_TIMELIMIT_TOLERANCE;
+            strategy_traffic::plan(limit, env, proposed_schedule);
         }
     }
     else

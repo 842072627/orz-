@@ -21,7 +21,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 }
 
 // ========== Strategy selection ==========
-#define ORZ_SCHEDULER   "centerline"    // ORZ scheduler: centerline heatmap + greedy match (v2)
+#define ORZ_SCHEDULER   "traffic"    // ORZ scheduler: centerline heatmap + greedy match (v2)
 #define ORZ_PLANNER     "default"       // ORZ planner: default PIBT
 #define ORZ_EXECUTOR    "default"       // ORZ executor: default
 
