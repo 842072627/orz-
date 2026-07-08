@@ -18,10 +18,15 @@ static constexpr float TRAFFIC_COEFF_AGENT_TASK1 = 1.0f;
 static constexpr float TRAFFIC_COEFF_TASK_SEGMENT = 0.5f;
 
 static inline int unified_dist(int loc_a, int loc_b) {
-    int cols = Centerline::g_n24c * 24;
-    int ax = loc_a % cols, ay = loc_a / cols;
-    int bx = loc_b % cols, by = loc_b / cols;
-    return std::abs(ax - bx) + std::abs(ay - by);
+    int d = BFSTable::get_dist(loc_a, loc_b);
+    if (d > 0) return d;
+    int a_m, a_b, b_m, b_b;
+    Centerline::project(loc_a, a_m, a_b);
+    Centerline::project(loc_b, b_m, b_b);
+    if (a_m >= 0 && b_m >= 0)
+        return std::abs(b_m - a_m) + std::abs(b_b - a_b);
+    return std::abs(loc_a % Centerline::g_cols - loc_b % Centerline::g_cols) +
+           std::abs(loc_a / Centerline::g_cols - loc_b / Centerline::g_cols);
 }
 
 
@@ -37,6 +42,8 @@ inline int zid(int loc, int cols) {
 
 // ====== Init ======
 void init(SharedEnvironment* env) {
+    Centerline::init(env);
+    ORZ_Highway::init();
     g_mp_highway_flag.assign(Centerline::g_mp_count, false);
     g_highway_mp_count = 0;
 
@@ -80,6 +87,7 @@ void add_highway_future_flow(int agent_loc, const std::vector<int>& task_locs,
     if (m_curr < 0) return;
 
     int prev_m = m_curr;
+    int prev_loc = agent_loc;
     int cumul_si = 0;
 
     for (int loc : task_locs) {
@@ -88,9 +96,10 @@ void add_highway_future_flow(int agent_loc, const std::vector<int>& task_locs,
         if (tm < 0) continue;
 
         // 分支路径：不经过 main point，跳过
-        if (BFSTable::is_branch_path(prev_m == m_curr ? agent_loc : prev_m, loc)) {
+        if (BFSTable::is_branch_path(prev_loc, loc)) {
             cumul_si += std::abs(tm - prev_m);
             prev_m = tm;
+            prev_loc = loc;
             continue;
         }
 
@@ -120,6 +129,7 @@ void add_highway_future_flow(int agent_loc, const std::vector<int>& task_locs,
                 Centerline::g_mp_future_left[si] += decay;
         }
         prev_m = tm;
+        prev_loc = loc;
     }
 }
 
@@ -247,7 +257,7 @@ float base_score(int a_loc, int tid, SharedEnvironment* env, float avg_flow) {
     }
 
     float baseline = 1.0f / (weighted_dist + 1.0f);
-    return baseline - penalty;
+    return baseline / (1.0f + penalty);
 }
 
 // ====== 从不同列随机挑 agent ======
@@ -306,7 +316,7 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
 
     static std::mt19937 rng((std::random_device())());
 
-    // 3. Phase 1: Branch tasks first
+    // 3. Phase 1: Branch tasks first (no main-line traffic)
     for (auto it = free_agents.begin(); it != free_agents.end();) {
         int a = *it;
         int a_loc = env->curr_states[a].location;
@@ -350,67 +360,107 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
     }
 
     // 4. Phase 2: Batch matching
-    std::unordered_set<int> processed_agents;
+    // 提前过滤标注格上的任务（只过滤一次，后面不用再检查）
+    {
+        std::unordered_set<int> to_remove;
+        for (int tid : free_tasks) {
+            auto tk = env->task_pool.find(tid);
+            if (tk == env->task_pool.end()) continue;
+            for (int loc : tk->second.locations) {
+                if (ORZ_Highway::is_highway_cell(loc)) {
+                    to_remove.insert(tid);
+                    break;
+                }
+            }
+        }
+        for (int tid : to_remove)
+            free_tasks.erase(tid);
+    }
+
+    // 计算活跃率上限 + zone 映射
+    int total_agents = env->num_of_agents;
+    int max_active = (int)(total_agents * BM_MAX_ACTIVE_RATIO);
+    int cur_active = total_agents - (int)free_agents.size();
+
+    // 预计算每个 free agent 和 free task 的 zone
+    std::unordered_map<int, int> agent_zone_map;
+    for (int a : free_agents) {
+        int a_loc = env->curr_states[a].location;
+        int a_m, a_b;
+        Centerline::project(a_loc, a_m, a_b);
+        agent_zone_map[a] = (a_m >= 0) ? a_m / TRAFFIC_ZONE_STEP : -1;
+    }
+    std::unordered_map<int, int> task_zone_map;
+    for (int tid : free_tasks) {
+        auto it = env->task_pool.find(tid);
+        if (it != env->task_pool.end() && !it->second.locations.empty()) {
+            int tm, tb;
+            Centerline::project(it->second.locations[0], tm, tb);
+            task_zone_map[tid] = (tm >= 0) ? tm / TRAFFIC_ZONE_STEP : -1;
+        }
+    }
+
     int batch_size = BM_BATCH_SIZE;
     if (batch_size > (int)free_agents.size()) batch_size = (int)free_agents.size();
 
     while (!free_agents.empty() && !free_tasks.empty() &&
+           cur_active < max_active &&
            std::chrono::steady_clock::now() <= endtime) {
 
         auto batch = pick_diverse_agents(free_agents, batch_size, env);
         if (batch.empty()) break;
 
-        struct Candidate {
-            int a, tid; float score;
-        };
-        std::vector<Candidate> candidates;
-        std::unordered_set<int> batch_set(batch.begin(), batch.end());
-
-        for (int a : batch) {
-            int a_loc = env->curr_states[a].location;
-            for (int tid : free_tasks) {
-                float s = base_score(a_loc, tid, env, avg_flow);
-                if (s > -1e8f)
-                    candidates.push_back({a, tid, s});
-            }
-        }
-
-        // 冲突消解：按分数降序排，先到先得
-        std::sort(candidates.begin(), candidates.end(),
-                  [](const Candidate& x, const Candidate& y) { return x.score > y.score; });
-
-        std::unordered_set<int> used_a, used_t;
-        int alloc_count = 0;
         int alloc_target = std::max(1, (int)(batch.size() * BM_ALLOC_RATIO));
-        std::vector<int> newly_allocated;
+        int batch_allocated = 0;
+        std::unordered_set<int> batch_done_a, batch_done_t;
 
-        for (auto& c : candidates) {
-            if (alloc_count >= alloc_target) break;
-            if (used_a.count(c.a) || used_t.count(c.tid)) continue;
-            if (processed_agents.count(c.a)) continue;
+        // 每分配一个 agent，重算全部剩余 agent × 全部剩余 task 的分
+        while (batch_allocated < alloc_target && batch_done_a.size() < batch.size()) {
+            int best_a = -1, best_tid = -1;
+            float best_score = -1e9f;
 
-            proposed_schedule[c.a] = c.tid;
-            used_a.insert(c.a);
-            used_t.insert(c.tid);
-            processed_agents.insert(c.a);
-            newly_allocated.push_back(c.a);
-            alloc_count++;
-        }
+            for (int a : batch) {
+                if (batch_done_a.count(a)) continue;
+                int a_loc = env->curr_states[a].location;
+                int a_zone = agent_zone_map.count(a) ? agent_zone_map[a] : -1;
+                for (int tid : free_tasks) {
+                    if (batch_done_t.count(tid)) continue;
+                    // zone 范围过滤（无法投影的不限）
+                    int t_zone = task_zone_map.count(tid) ? task_zone_map[tid] : -1;
+                    if (a_zone >= 0 && t_zone >= 0 &&
+                        std::abs(a_zone - t_zone) > TRAFFIC_ZONE_RANGE)
+                        continue;
+                    float s = base_score(a_loc, tid, env, avg_flow);
+                    if (s > best_score) {
+                        best_score = s;
+                        best_a = a;
+                        best_tid = tid;
+                    }
+                }
+            }
 
-        // 更新 future flow
-        for (int a : newly_allocated) {
-            int a_loc = env->curr_states[a].location;
-            int tid = proposed_schedule[a];
-            auto tk = env->task_pool.find(tid);
+            if (best_a < 0 || best_score <= 0) break;  // 无可用分配
+
+            // 分配最佳 pair
+            proposed_schedule[best_a] = best_tid;
+            batch_done_a.insert(best_a);
+            batch_done_t.insert(best_tid);
+            batch_allocated++;
+            cur_active++;
+
+            // 实时更新 flow + avg_flow
+            int a_loc = env->curr_states[best_a].location;
+            auto tk = env->task_pool.find(best_tid);
             if (tk != env->task_pool.end())
                 add_highway_future_flow(a_loc, tk->second.locations, env, false);
+            avg_flow = compute_avg_flow();
         }
 
         // 从池中移除已分配
-        for (int a : newly_allocated)
+        for (int a : batch_done_a)
             free_agents.erase(std::remove(free_agents.begin(), free_agents.end(), a),
                               free_agents.end());
-        for (int tid : used_t)
+        for (int tid : batch_done_t)
             free_tasks.erase(tid);
 
         // shuffle 其余

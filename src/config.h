@@ -65,6 +65,8 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define ORZ_HIGHWAY_FORCE_MOVE     false // 3方向封禁时强制agent走唯一通道(默认关)    // scheduler + PIBT direction block linkage
 #define ORZ_HIGHWAY_IDLE_EXIT    true // idle agent on labeled cell -> BFS to nearest unlabeled cell
 #define ORZ_HIGHWAY_IDLE_FOLLOW  true // idle agent on forbid cell -> follow highway direction to exit
+#define ORZ_HIGHWAY_IDLE_BFS_EXIT true  // idle agent on highway: BFS shortest exit instead of greedy walk
+#define ORZ_HIGHWAY_IDLE_FREEDOM  true  // idle agent on highway:不受 forbid 方向约束，可向任意方向退出
 #define ORZ_HIGHWAY_SKIP_LABELED_TASK true // skip tasks with any location on labeled (forbid/guide/task/exit) cell
 
 // ========== Density exclusion ==========

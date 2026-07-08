@@ -103,15 +103,18 @@ bool causalMY_PIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
 	std::vector<MY_PIBT_C> successors;
 	getNeighborLocs(&(lns.neighbors),neighbors,prev_loc);
 	// ORZ highway forbid: filter forbidden directions
+	// idle in highway: 不受 forbid 约束，可向任何方向退出
+#if ORZ_HIGHWAY_IDLE_FREEDOM
+	int _tid = lns.env->curr_task_schedule[curr_id];
+	bool _skip_forbid = (_tid < 0 && ORZ_Highway::is_highway_cell(prev_loc));
+	if (!_skip_forbid)
+#endif
 	{
 	    uint8_t f = ORZ_Highway::get_forbid(prev_loc);
 	    if (f) {
-	        static bool diag_once = false; if (!diag_once) { diag_once = true;
-	            printf("PIBT forbid check: loc=%d, mask=%u (0x%x), #neighbors=%zu\n", prev_loc, f, f, neighbors.size());
-	        }
-	        std::vector<int> filtered;
+	    	std::vector<int> filtered;
 	        for (int nb : neighbors) {
-	            if (nb == prev_loc) { filtered.push_back(nb); continue; } // wait is always allowed
+	            if (nb == prev_loc) { filtered.push_back(nb); continue; }
 	            int dr = nb / lns.env->cols - prev_loc / lns.env->cols;
 	            int dc = nb % lns.env->cols - prev_loc % lns.env->cols;
 	            int dd = (dr == -1) ? 3 : (dr == 1) ? 1 : (dc == -1) ? 2 : (dc == 1) ? 0 : -1;
