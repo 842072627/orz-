@@ -67,7 +67,7 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define ORZ_HIGHWAY_IDLE_FOLLOW  true // idle agent on forbid cell -> follow highway direction to exit
 #define ORZ_HIGHWAY_IDLE_BFS_EXIT true  // idle agent on highway: BFS shortest exit instead of greedy walk
 #define ORZ_HIGHWAY_IDLE_FREEDOM  true  // idle agent on highway:不受 forbid 方向约束，可向任意方向退出
-#define ORZ_HIGHWAY_SKIP_LABELED_TASK true // skip tasks with any location on labeled (forbid/guide/task/exit) cell
+#define ORZ_HIGHWAY_SKIP_LABELED_TASK false // skip tasks with any location on labeled (forbid/guide/task/exit) cell
 
 // ========== Density exclusion ==========
 #define USE_DENSITY_EXCLUDE_IDLE  false    // 排除无任务/被截停agent的密度贡献

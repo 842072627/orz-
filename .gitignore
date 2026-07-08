@@ -21,3 +21,6 @@ task_trend.txt
 test*.json
 cmake-build-*/
 .codex
+
+# Hermes temp files
+.hermes-tmp.*

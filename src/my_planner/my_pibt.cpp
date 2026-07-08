@@ -37,7 +37,22 @@ static int find_mp_si(int a_m) {
 #endif
 
 int get_gp_h(TrajLNS& lns, int ai, int target){
-    int min_heuristic;
+	// Highway cell shortcut: skip BFS, use A* path remaining steps
+	if (ORZ_Highway::is_highway_cell(target) && !lns.trajs[ai].empty()) {
+		auto& traj = lns.trajs[ai];
+		int cols = lns.env->cols;
+		int best_idx = -1, best_d = 2;
+		for (int i = (int)traj.size() - 1; i >= 0 && best_d > 0; i--) {
+			int dr = target / cols - traj[i] / cols;
+			int dc = target % cols - traj[i] % cols;
+			int d = abs(dr) + abs(dc);
+			if (d < best_d) { best_d = d; best_idx = i; if (d == 0) break; }
+		}
+		if (best_idx >= 0)
+			return (int)traj.size() - 1 - best_idx;
+	}
+
+	int min_heuristic;
 
 	if (is_large_map(lns.env)){
 		if (!lns.traj_dists.empty() && !lns.traj_dists[ai].empty())

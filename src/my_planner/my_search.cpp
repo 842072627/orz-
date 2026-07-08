@@ -95,10 +95,10 @@ s_node astar(SharedEnvironment* env, std::vector<Int4>& flow,
             cost = curr->g+1;
             // ORZ highway forbid (soft) — add FORBID_COST matching dist2path
             { uint8_t fb = ORZ_Highway::get_forbid(curr->id);
-                if (fb & 1 && i == 2) { cost += 1000000; }
-                if (fb & 2 && i == 3) { cost += 1000000; }
-                if (fb & 4 && i == 0) { cost += 1000000; }
-                if (fb & 8 && i == 1) { cost += 1000000; } }
+                if (fb & 1 && i == 2) { cost += 100000; }
+                if (fb & 2 && i == 3) { cost += 100000; }
+                if (fb & 4 && i == 0) { cost += 100000; }
+                if (fb & 8 && i == 1) { cost += 100000; } }
             // ORZ highway guide (soft penalty)
             { uint8_t pd; if (ORZ_Highway::get_guide(curr->id, pd) && i == pd) cost += 50000; }
 

@@ -384,7 +384,8 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
     }
 
     // 4. Phase 2: Batch matching
-    // 提前过滤标注格上的任务（只过滤一次，后面不用再检查）
+#if ORZ_HIGHWAY_SKIP_LABELED_TASK
+    // 提前过滤标注格上的任务
     {
         std::unordered_set<int> to_remove;
         for (int tid : free_tasks) {
@@ -392,15 +393,13 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
             if (tk == env->task_pool.end()) continue;
             for (int loc : tk->second.locations) {
                 if (ORZ_Highway::is_highway_cell(loc)) {
-                    to_remove.insert(tid);
-                    break;
+                    to_remove.insert(tid); break;
                 }
             }
         }
-        for (int tid : to_remove)
-            free_tasks.erase(tid);
+        for (int tid : to_remove) free_tasks.erase(tid);
     }
-
+#endif
     // 计算活跃率上限 + zone 映射
     int total_agents = env->num_of_agents;
     int max_active = (int)(total_agents * BM_MAX_ACTIVE_RATIO);
