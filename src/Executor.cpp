@@ -1,13 +1,7 @@
 #include "Executor.h"
 #include "RuntimeConfig.h"
 #include "MapTuner.h"
-#include "OriginExecutor.h"
-#include "DHExecutor.h"
-#include "RoomOptExecutor.h"
-#include "RoomExecutor.h"
 #include "GameExecutor.h"
-#include "IncrementalTpgExecutor.h"
-#include "ConservativeIncrementalTpgExecutor.h"
 #include <algorithm>
 #include <climits>
 #include <cmath>
@@ -23,20 +17,8 @@
 namespace blog = boost::log;
 extern blog::sources::severity_logger<blog::trivial::severity_level> lg;
 
-// Origin 执行器实例
-static optsvr::OriginExecutor g_origin_executor;
-// DHExecutor 执行器实例
-static optsvr::DHExecutor g_dh_executor;
-// RoomOptExecutor 执行器实例 (v10.25 连续STOP截断)
-static optsvr::RoomOptExecutor g_roomopt_executor;
-// RoomExecutor 执行器实例 (Room专用TPG, EXECUTOR_MODE=5)
-static optsvr::RoomExecutor g_room_executor;
 // GameExecutor 执行器实例 (Game专用: 对流检测+截断, EXECUTOR_MODE=6)
 static optsvr::GameExecutor g_game_executor;
-// IncrementalTpgExecutor 执行器实例 (Default MCP + 增量 TPG 裁剪, EXECUTOR_MODE=7)
-static optsvr::IncrementalTpgExecutor g_incremental_tpg_executor;
-// ConservativeIncrementalTpgExecutor 执行器实例 (9f9bf33 保守版, EXECUTOR_MODE=8)
-static optsvr::ConservativeIncrementalTpgExecutor g_conservative_incremental_tpg_executor;
 
 namespace {
 
@@ -166,20 +148,8 @@ void Executor::initialize(int preprocess_time_limit)
     }
 
     // 初始化各模式执行器。Executor::initialize 与 Entry::initialize 并行执行。
-    if (exec_mode == 1) {
-        g_origin_executor.initialize(this);
-    } else if (exec_mode == 3) {
-        g_dh_executor.initialize(this);
-    } else if (exec_mode == 4) {
-        g_roomopt_executor.initialize(this);
-    } else if (exec_mode == 5) {
-        g_room_executor.initialize(this);
-    } else if (exec_mode == 6) {
+    if (exec_mode == 6) {
         g_game_executor.initialize(this);
-    } else if (exec_mode == 7) {
-        g_incremental_tpg_executor.initialize(this);
-    } else if (exec_mode == 8) {
-        g_conservative_incremental_tpg_executor.initialize(this);
     }
 }
 
@@ -393,30 +363,11 @@ vector<State> Executor::process_new_plan(int sync_time_limit, Plan& plan_struct,
         return predicted_states;
     }
 
-    switch (optsvr::cfg().executor_mode) {
-        case 1:
-            if (!g_origin_executor.is_initialized()) g_origin_executor.initialize(this);
-            return g_origin_executor.process_new_plan(sync_time_limit, plan_struct, staged_actions);
-        case 3:
-            if (!g_dh_executor.is_initialized()) g_dh_executor.initialize(this);
-            return g_dh_executor.process_new_plan(sync_time_limit, plan_struct, staged_actions);
-        case 4:
-            if (!g_roomopt_executor.is_initialized()) g_roomopt_executor.initialize(this);
-            return g_roomopt_executor.process_new_plan(sync_time_limit, plan_struct, staged_actions);
-        case 5:
-            if (!g_room_executor.is_initialized()) g_room_executor.initialize(this);
-            return g_room_executor.process_new_plan(sync_time_limit, plan_struct, staged_actions);
-        case 6:
-            if (!g_game_executor.is_initialized()) g_game_executor.initialize(this);
-            return g_game_executor.process_new_plan(sync_time_limit, plan_struct, staged_actions);
-        case 7:
-            if (!g_incremental_tpg_executor.is_initialized()) g_incremental_tpg_executor.initialize(this);
-            return g_incremental_tpg_executor.process_new_plan(sync_time_limit, plan_struct, staged_actions);
-        case 8:
-            if (!g_conservative_incremental_tpg_executor.is_initialized()) g_conservative_incremental_tpg_executor.initialize(this);
-            return g_conservative_incremental_tpg_executor.process_new_plan(sync_time_limit, plan_struct, staged_actions);
-        default: return process_new_plan_official(sync_time_limit, plan_struct, staged_actions);
+    if (optsvr::cfg().executor_mode == 6) {
+        if (!g_game_executor.is_initialized()) g_game_executor.initialize(this);
+        return g_game_executor.process_new_plan(sync_time_limit, plan_struct, staged_actions);
     }
+    return process_new_plan_official(sync_time_limit, plan_struct, staged_actions);
 }
 
 void Executor::next_command(int exec_time_limit, std::vector<ExecutionCommand>& agent_command)
@@ -427,28 +378,6 @@ void Executor::next_command(int exec_time_limit, std::vector<ExecutionCommand>& 
         return;
     }
 
-    // DHExecutor 维护自己的 TPG，跳过官方 TPG 更新
-    if (optsvr::cfg().executor_mode == 3) {
-        if (!g_dh_executor.is_initialized()) g_dh_executor.initialize(this);
-        g_dh_executor.next_command(exec_time_limit, agent_command);
-        return;
-    }
-
-    // RoomOptExecutor 维护自己的 TPG + 连续STOP截断
-    if (optsvr::cfg().executor_mode == 4) {
-        if (!g_roomopt_executor.is_initialized()) g_roomopt_executor.initialize(this);
-        g_roomopt_executor.next_command(exec_time_limit, agent_command);
-        return;
-    }
-
-    // RoomExecutor 维护自己的 TPG (Room专用)
-    if (optsvr::cfg().executor_mode == 5) {
-        if (!g_room_executor.is_initialized()) g_room_executor.initialize(this);
-        g_room_executor.next_command(exec_time_limit, agent_command);
-        return;
-    }
-
-    // GameExecutor 维护自己的 TPG + 对流检测 + 截断
     if (optsvr::cfg().executor_mode == 6) {
         if (!g_game_executor.is_initialized()) g_game_executor.initialize(this);
         g_game_executor.next_command(exec_time_limit, agent_command);
@@ -470,25 +399,9 @@ void Executor::next_command(int exec_time_limit, std::vector<ExecutionCommand>& 
     }
 
     // 按模式分流 MCP 决策
-    switch (optsvr::cfg().executor_mode) {
-        case 1:
-            if (!g_origin_executor.is_initialized()) g_origin_executor.initialize(this);
-            g_origin_executor.next_command(exec_time_limit, agent_command);
-            break;
-        case 7:
-            if (!g_incremental_tpg_executor.is_initialized()) g_incremental_tpg_executor.initialize(this);
-            g_incremental_tpg_executor.next_command(exec_time_limit, agent_command);
-            break;
-        case 8:
-            if (!g_conservative_incremental_tpg_executor.is_initialized()) g_conservative_incremental_tpg_executor.initialize(this);
-            g_conservative_incremental_tpg_executor.next_command(exec_time_limit, agent_command);
-            break;
-        default:
-            // Default: 基础 MCP（无跟随）
-            for (int i = 0; i < (int)env->system_states.size(); i++)
-                mcp_default_executor(i, agent_command);
-            break;
-    }
+    // Default: 基础 MCP（无跟随）
+    for (int i = 0; i < (int)env->system_states.size(); i++)
+        mcp_default_executor(i, agent_command);
 }
 
 bool Executor::mcp_default_executor(int agent_id, std::vector<ExecutionCommand>& agent_command)
