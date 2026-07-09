@@ -6,7 +6,7 @@
 #include "ActionModel.h"
 #include <vector>
 
-namespace optsvr {
+namespace nz {
 
 class GameDirectionalPlanner {
 public:
@@ -19,5 +19,5 @@ private:
     bool initialized_ = false;
 };
 
-} // namespace optsvr
+} // namespace nz
 

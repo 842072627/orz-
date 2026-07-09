@@ -13,11 +13,11 @@ include_directories("inc")
 include_directories("default_planner")
 
 # OptScheduler / custom modules
-include_directories("optsvr")
-include_directories("optsvr/planner/GameDirectionalPlanner")
-include_directories("optsvr/schedule/GameBalanceOpt")
-include_directories("optsvr/executor/GameExecutor")
-include_directories("optsvr/schedule/GameBalanceOpt")
+include_directories("nz")
+include_directories("nz/planner/GameDirectionalPlanner")
+include_directories("nz/schedule/GameBalanceOpt")
+include_directories("nz/executor/GameExecutor")
+include_directories("nz/schedule/GameBalanceOpt")
 
 set(SUBMISSION_TRACK "AUTO" CACHE STRING "Submission track: AUTO, SCHEDULER, EXECUTOR, or COMBINED")
 string(TOUPPER "${SUBMISSION_TRACK}" SUBMISSION_TRACK)
@@ -48,12 +48,12 @@ else()
     message(FATAL_ERROR "Unknown SUBMISSION_TRACK=${SUBMISSION_TRACK}")
 endif()
 
-file(GLOB_RECURSE SOURCES "src/*.cpp" "default_planner/*.cpp" "optsvr/*.cpp")
+file(GLOB_RECURSE SOURCES "src/*.cpp" "default_planner/*.cpp" "nz/*.cpp")
 if(NOT BUILD_OPTSVR_EXECUTOR)
-    list(FILTER SOURCES EXCLUDE REGEX ".*/optsvr/executor/.*\\.cpp$")
+    list(FILTER SOURCES EXCLUDE REGEX ".*/nz/executor/.*\\.cpp$")
 endif()
 if(NOT BUILD_OPTSVR_PLANNER)
-    list(FILTER SOURCES EXCLUDE REGEX ".*/optsvr/planner/.*\\.cpp$")
+    list(FILTER SOURCES EXCLUDE REGEX ".*/nz/planner/.*\\.cpp$")
 endif()
 file(GLOB DEFAULT_PLANNER_SOURCES "default_planner/*.cpp")
 
@@ -66,7 +66,7 @@ add_definitions(-DBOOST_LOG_DYN_LINK)
 find_package(Boost 1.49.0 REQUIRED COMPONENTS program_options filesystem log log_setup)
 include_directories(${Boost_INCLUDE_DIRS})
 
-# Threads (for optsvr multi-threaded helpers)
+# Threads (for nz multi-threaded helpers)
 find_package(Threads REQUIRED)
 
 # Compatibility note:

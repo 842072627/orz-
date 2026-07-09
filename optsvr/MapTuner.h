@@ -8,7 +8,7 @@
 #include <mutex>
 #include <string>
 
-namespace optsvr {
+namespace nz {
 
 struct MapTuningState {
     bool loaded = false;
@@ -102,4 +102,4 @@ inline void load_map_tuning(const SharedEnvironment* env) {
     apply_map_tuning(analyze_map(env), env);
 }
 
-} // namespace optsvr
+} // namespace nz

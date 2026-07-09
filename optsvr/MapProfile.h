@@ -9,7 +9,7 @@
 #include <algorithm>
 #include <numeric>
 
-namespace optsvr {
+namespace nz {
 
 enum class MapType {
     GAME_DOMAIN,
@@ -93,4 +93,4 @@ inline void load_map_tuning(SharedEnvironment* env) {
     }
 }
 
-}  // namespace optsvr
+}  // namespace nz

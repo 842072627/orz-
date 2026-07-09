@@ -4,7 +4,7 @@
 
 #include "nlohmann/json.hpp"
 
-namespace optsvr {
+namespace nz {
 
 // 获取调度统计 JSON（由当前活跃的 Scheduler 实现）
 // 如果没有数据返回 nullptr
@@ -31,4 +31,4 @@ struct GamePrefilterStats {
 void set_game_prefilter_stats(const GamePrefilterStats& stats);
 GamePrefilterStats get_game_prefilter_stats();
 
-} // namespace optsvr
+} // namespace nz

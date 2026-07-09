@@ -8,7 +8,7 @@
 #include <algorithm>
 #include "nlohmann/json.hpp"
 
-namespace optsvr {
+namespace nz {
 
 struct PerfStats {
     bool enabled = false;
@@ -81,4 +81,4 @@ private:
 
 inline PerfStats& perf() { return PerfStats::instance(); }
 
-} // namespace optsvr
+} // namespace nz

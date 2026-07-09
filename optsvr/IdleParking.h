@@ -4,7 +4,7 @@
 
 #include <vector>
 
-namespace optsvr {
+namespace nz {
 
 class IdleParking {
 public:
@@ -34,4 +34,4 @@ private:
 
 IdleParking& idle_parking();
 
-}  // namespace optsvr
+}  // namespace nz

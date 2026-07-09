@@ -8,7 +8,7 @@
 #include <numeric>
 #include <random>
 
-namespace optsvr {
+namespace nz {
 
 IdleParking& idle_parking() {
     static IdleParking parking;
@@ -140,4 +140,4 @@ void IdleParking::apply_goal_locations(SharedEnvironment* env) const {
     }
 }
 
-}  // namespace optsvr
+}  // namespace nz

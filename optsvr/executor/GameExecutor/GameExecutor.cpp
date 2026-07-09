@@ -7,7 +7,7 @@
 #include <cassert>
 #include <cstdlib>
 
-namespace optsvr {
+namespace nz {
 
 namespace {
 
@@ -344,4 +344,4 @@ void GameExecutor::mcp(int agent_id, std::vector<ExecutionCommand>& agent_comman
     }
 }
 
-} // namespace optsvr
+} // namespace nz

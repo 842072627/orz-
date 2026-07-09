@@ -10,7 +10,7 @@
 
 #include <iostream>
 
-namespace optsvr {
+namespace nz {
 
 void GameDirectionalPlanner::initialize(int preprocess_time_limit, SharedEnvironment* env) {
     enabled_for_map_ = is_ORZ(env);
@@ -39,4 +39,4 @@ void GameDirectionalPlanner::plan(int time_limit,
     MyPlanner::plan(time_limit, actions, env, num_steps);
 }
 
-} // namespace optsvr
+} // namespace nz

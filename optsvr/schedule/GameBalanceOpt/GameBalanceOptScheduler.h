@@ -16,7 +16,7 @@
 #include <climits>
 #include <cstdio>
 
-namespace optsvr {
+namespace nz {
 
 class GameBalanceOptScheduler {
 public:
@@ -109,4 +109,4 @@ private:
     }
 };
 
-} // namespace optsvr
+} // namespace nz

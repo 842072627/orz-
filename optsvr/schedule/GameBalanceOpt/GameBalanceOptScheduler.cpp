@@ -7,7 +7,7 @@
 #include <cmath>
 #include <iostream>
 
-namespace optsvr {
+namespace nz {
 
 // ================================================================
 // 常量（对应 IDEA/GameOpt 的 config.h 宏 + RuntimeConfig 参数）
@@ -1715,4 +1715,4 @@ float GameBalanceOptScheduler::base_score_ex(int a_loc, int tid, int step,
     return total_score;
 }
 
-} // namespace optsvr
+} // namespace nz

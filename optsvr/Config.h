@@ -1,7 +1,7 @@
 // optsvr/Config.h — 编译期默认参数
 #pragma once
 
-namespace optsvr {
+namespace nz {
 
 // ═══════════════════════════════════════════════════════════════════
 // 全局控制
@@ -423,4 +423,4 @@ constexpr bool  CONGESTION_ADAPTIVE_APPEND = false;
 // ═══════════════════════════════════════════════════════════════════
 constexpr bool  DH_EXECUTOR_CEIL_WINDOW = true; // ceil(comm/action_duration)+1 instead of floor+1
 
-} // namespace optsvr
+} // namespace nz

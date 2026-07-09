@@ -141,8 +141,8 @@ int nearby_random_non_highway_goal(SharedEnvironment* env, int start_loc, int ag
 
 void apply_game_directional_idle_relocation(
     SharedEnvironment* env, const std::vector<int>& proposed_schedule) {
-    if (env == nullptr || optsvr::cfg().planner_mode != 16 ||
-        !optsvr::cfg().game_idle_highway_relocate) return;
+    if (env == nullptr || nz::cfg().planner_mode != 16 ||
+        !nz::cfg().game_idle_highway_relocate) return;
 
     std::vector<unsigned char> occupied(env->map.size(), 0);
     for (const auto& state : env->curr_states) {
@@ -175,7 +175,7 @@ void apply_game_directional_idle_relocation(
 // This is an offline step, after it completes then evaluation begins.
 void Entry::initialize(int preprocess_time_limit)
 {
-    optsvr::perf().init();
+    nz::perf().init();
     scheduler->initialize(preprocess_time_limit);
     planner->initialize(preprocess_time_limit);
 }
@@ -195,13 +195,13 @@ void Entry::compute(int time_limit, Plan & plan, std::vector<int> & proposed_sch
     //     float task_ratio = static_cast<float>(env->task_pool.size())
     //                      / std::max(1, env->num_of_agents);
     //     if (task_ratio > 1.05) {
-    //         optsvr::cfg().skip_test = true;
+    //         nz::cfg().skip_test = true;
     //     }
     // }
-    //optsvr::cfg().skip_test = false;
+    //nz::cfg().skip_test = false;
 
     // 跳过当前算例：不做任务分配和路径规划，所有 agent 保持静止
-    if (optsvr::cfg().skip_test) {
+    if (nz::cfg().skip_test) {
         // 必须设置正确大小的空 plan，否则 Simulator 的 validate_staged_actions_prefix 校验会抛异常
         plan.actions.resize(env->num_of_agents);
         return;
@@ -217,7 +217,7 @@ void Entry::compute(int time_limit, Plan & plan, std::vector<int> & proposed_sch
 
     //then update the first unfinished errand/location of tasks for planner reference
     update_goal_locations(proposed_schedule);
-    optsvr::idle_parking().apply_goal_locations(env);
+    nz::idle_parking().apply_goal_locations(env);
     apply_game_directional_idle_relocation(env, proposed_schedule);
 
     //call the planner to compute the actions
@@ -227,7 +227,7 @@ void Entry::compute(int time_limit, Plan & plan, std::vector<int> & proposed_sch
 
     // 记录性能统计
     auto us = [](auto d){ return std::chrono::duration_cast<std::chrono::microseconds>(d).count(); };
-    optsvr::perf().record(us(t1-t0), us(t2-t1), us(t2-t0));
+    nz::perf().record(us(t1-t0), us(t2-t1), us(t2-t0));
 
 }
 

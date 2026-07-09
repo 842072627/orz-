@@ -6,7 +6,7 @@
 #include <iostream>
 #include "Config.h"
 
-namespace optsvr {
+namespace nz {
 
 struct RuntimeConfig {
     // Executor 执行模式枚举（Executor.cpp 直接使用）
@@ -605,7 +605,7 @@ struct RuntimeConfig {
 #undef OVERRIDE_FLOAT
 
         if (debug_level >= 1) {
-            std::cerr << "[optsvr] schedule_mode=" << schedule_mode
+            std::cerr << "[nz] schedule_mode=" << schedule_mode
                       << " planner_mode=" << planner_mode << "\n";
         }
     }
@@ -886,4 +886,4 @@ private:
 
 inline RuntimeConfig& cfg() { return RuntimeConfig::instance(); }
 
-} // namespace optsvr
+} // namespace nz

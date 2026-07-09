@@ -31,7 +31,7 @@
 #include "HeuristicStats.h"
 #endif
 
-namespace optsvr {
+namespace nz {
 
 using PerfClock = std::chrono::steady_clock;
 using PerfTimePoint = PerfClock::time_point;
@@ -229,4 +229,4 @@ private:
 // 便捷访问
 inline PerfLogger& perf() { return PerfLogger::instance(); }
 
-} // namespace optsvr
+} // namespace nz

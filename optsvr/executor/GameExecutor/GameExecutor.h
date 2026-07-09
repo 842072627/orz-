@@ -9,7 +9,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace optsvr {
+namespace nz {
 
 class GameExecutor {
 public:
@@ -75,4 +75,4 @@ private:
     void mcp(int agent_id, std::vector<ExecutionCommand>& agent_command);
 };
 
-} // namespace optsvr
+} // namespace nz

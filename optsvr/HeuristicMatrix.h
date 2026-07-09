@@ -28,7 +28,7 @@
 #include <cstdint>
 #include <chrono>
 
-namespace optsvr {
+namespace nz {
 
 // 无效距离标记（对应 uint16_t 最大值）
 constexpr uint16_t DIST_UNREACHABLE = 0xFFFF;
@@ -135,4 +135,4 @@ HeuristicMatrix& heuristic_matrix();
 // source_orient 默认 -1 表示不传朝向
 int get_h_fast(SharedEnvironment* env, int source, int target, int source_orient = -1);
 
-} // namespace optsvr
+} // namespace nz

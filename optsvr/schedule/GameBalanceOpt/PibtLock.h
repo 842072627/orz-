@@ -4,7 +4,7 @@
 
 #include <cstring>
 
-namespace optsvr {
+namespace nz {
 
 struct PibtLock {
     static constexpr int MAX_SEGMENTS = 1024;
@@ -45,4 +45,4 @@ private:
 
 inline PibtLock& pibt_lock() { return PibtLock::instance(); }
 
-} // namespace optsvr
+} // namespace nz
