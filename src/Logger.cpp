@@ -1,4 +1,3 @@
-// #define BOOST_LOG_DYN_LINK  // not needed, cmake links static
 #include "Logger.h"
 
 namespace logging = boost::log;
