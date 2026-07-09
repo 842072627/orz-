@@ -7,13 +7,24 @@
 #include "Config.h"
 #include "RuntimeConfig.h"
 #include "MapProfile.h"
-#include "WarehouseRailConstraints.h"
 #include "planner/GameDirectionalPlanner/orz_highway.h"
+
+// ORZ-only stub (was in WarehouseRailConstraints.h)
+namespace optsvr {
+struct WarehouseRailConstraintStats { int passage_rows = 0; int passage_cols = 0; int forbidden_edges = 0; };
+WarehouseRailConstraintStats build_warehouse_planner_rail_constraints(
+    SharedEnvironment*, std::vector<std::array<unsigned char,4>>*, std::vector<int>*);
+inline WarehouseRailConstraintStats build_warehouse_planner_rail_constraints(
+    SharedEnvironment*, std::vector<std::array<unsigned char,4>>*, std::vector<int>*) {
+    return {0, 0, 0};
+}
+}  // namespace optsvr
 
 #include <thread>
 #include <atomic>
 #include <deque>
 #include <algorithm>
+#include <array>
 #include <cstdlib>
 #include <iostream>
 #include <cstdio>
