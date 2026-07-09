@@ -5,7 +5,6 @@
 #include "RuntimeConfig.h"
 #include "IdleParking.h"
 #include "PerfStats.h"
-#include "HardWarehouseScheduler.h"
 #include "home_return.h"
 #include "orz_highway.h"
 #include <algorithm>
@@ -219,27 +218,7 @@ void Entry::compute(int time_limit, Plan & plan, std::vector<int> & proposed_sch
 
     //then update the first unfinished errand/location of tasks for planner reference
     update_goal_locations(proposed_schedule);
-    if (optsvr::cfg().schedule_mode == 13) {
-        if (optsvr::cfg().hard_dummy_goal_home && !g_home_start_locs.empty()) {
-            const int cols = env->cols;
-            for (int i = 0; i < env->num_of_agents; i++) {
-                if (!env->goal_locations[i].empty()) continue;
-                if (i >= static_cast<int>(g_home_start_locs.size())) continue;
-                int home = g_home_start_locs[i];
-                if (home < 0) continue;
-                int hr = home / cols, hc = home % cols;
-                if (!(hc > 7 && hc < 488 && hr > 7 && hr < 131)) continue;
-                int cur = env->curr_states[i].location;
-                if (cur < 0) continue;
-                int cr = cur / cols, cc = cur % cols;
-                if (cc >= 6 && cc <= 489 && cr >= 6 && cr <= 132) continue;
-                env->goal_locations[i].push_back({home, 0});
-            }
-        }
-        optsvr::hard_warehouse_scheduler().idle_relocate(proposed_schedule, env);
-    } else {
-        optsvr::idle_parking().apply_goal_locations(env);
-    }
+    optsvr::idle_parking().apply_goal_locations(env);
     apply_game_directional_idle_relocation(env, proposed_schedule);
 
     //call the planner to compute the actions
