@@ -20,6 +20,8 @@ test.py
 test.txt
 test_output.txt
 test.json
+test_run_log.txt
+test_stdout.txt
 task_trend.png
 task_trend.txt
 test*.json
