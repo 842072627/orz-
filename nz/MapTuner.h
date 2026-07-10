@@ -61,9 +61,9 @@ inline void load_for_combined(const MapProfile& profile, const SharedEnvironment
 
         case MapType::GAME_DOMAIN:
             c.skip_test = false;
-            c.schedule_mode = 8;  // GameBalanceOptScheduler
-            c.executor_mode = 6;  // GameExecutor
-            c.planner_mode  = 16; // GameDirectionalPlanner
+            c.schedule_mode = 8; 
+            c.executor_mode = 6;  
+            c.planner_mode  = 16; 
             c.precompute_heuristic = true;
             c.reassign_enabled = false;
             c.game_heuristic_hard_direction = true;
