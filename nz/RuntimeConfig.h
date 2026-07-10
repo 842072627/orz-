@@ -106,6 +106,7 @@ struct RuntimeConfig {
     bool  game_dir_flow_enabled;
     int   game_dir_flow_cap;
     int   game_dir_flow_gap;
+    int   game_dir_flow_max_check_main;
     float game_dir_flow_decay;
     bool  game_heuristic_hard_direction;
     bool  game_idle_highway_relocate;
@@ -417,6 +418,7 @@ struct RuntimeConfig {
         OVERRIDE_BOOL("GAME_DIR_FLOW_ENABLED", game_dir_flow_enabled);
         OVERRIDE_INT("GAME_DIR_FLOW_CAP", game_dir_flow_cap);
         OVERRIDE_INT("GAME_DIR_FLOW_GAP", game_dir_flow_gap);
+        OVERRIDE_INT("GAME_DIR_FLOW_MAX_CHECK_MAIN", game_dir_flow_max_check_main);
         OVERRIDE_FLOAT("GAME_DIR_FLOW_DECAY", game_dir_flow_decay);
         OVERRIDE_BOOL("GAME_HEURISTIC_HARD_DIRECTION", game_heuristic_hard_direction);
         OVERRIDE_BOOL("OPT_GAME_HEURISTIC_HARD_DIRECTION", game_heuristic_hard_direction);
@@ -735,6 +737,7 @@ private:
         game_dir_flow_enabled = GAME_DIR_FLOW_ENABLED;
         game_dir_flow_cap = GAME_DIR_FLOW_CAP;
         game_dir_flow_gap = GAME_DIR_FLOW_GAP;
+        game_dir_flow_max_check_main = GAME_DIR_FLOW_MAX_CHECK_MAIN;
         game_dir_flow_decay = GAME_DIR_FLOW_DECAY;
         game_heuristic_hard_direction = GAME_HEURISTIC_HARD_DIRECTION;
         game_idle_highway_relocate = GAME_IDLE_HIGHWAY_RELOCATE;

@@ -189,9 +189,11 @@ bool GameBalanceOptScheduler::directional_future_flow_allows(
 
     const int cap = std::max(0, cfg().game_dir_flow_cap);
     const int gap = std::max(0, cfg().game_dir_flow_gap);
+    const int max_check_main = std::max(0, cfg().game_dir_flow_max_check_main);
     int prev_m = -1, prev_b = -1;
     project(agent_loc, prev_m, prev_b);
     if (prev_m < 0) return true;
+    const int agent_m = prev_m;  // save agent's main_dist for distance check
 
     float decay = cfg().game_dir_flow_decay;
     if (!std::isfinite(decay)) decay = GAME_DIR_FLOW_DECAY;
@@ -203,6 +205,8 @@ bool GameBalanceOptScheduler::directional_future_flow_allows(
         const int zid = zr.zone_id;
         if (zid < 0 || zid >= nz) return true;
         if (zid == last_zid) return true;
+        // 超过 main_dist 检查范围的 zone 不检测 flow（直接放行）
+        if (max_check_main > 0 && std::abs(zr.min_m - agent_m) > max_check_main) return true;
         const float same = (intent > 0) ? zone_future_pos_[zid] : zone_future_neg_[zid];
         const float opp = (intent > 0) ? zone_future_neg_[zid] : zone_future_pos_[zid];
         const float next_same = same + cur_weight;

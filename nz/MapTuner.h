@@ -73,6 +73,7 @@ inline void load_for_combined(const MapProfile& profile, const SharedEnvironment
             c.game_dir_flow_cap = 200;
             c.game_dir_flow_gap = 0;
             c.game_dir_flow_decay = 0.9f;
+            c.game_dir_flow_max_check_main = 400;
             c.game_region_match = true;
             c.game_region_flow_batch = 64;
             break;
