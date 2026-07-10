@@ -125,6 +125,9 @@ else()
     target_compile_definitions(lifelong PRIVATE PYTHON=0)
     target_link_libraries(lifelong PRIVATE ${Boost_LIBRARIES} Threads::Threads)
     if(Python3_FOUND)
+        target_sources(lifelong PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/python/common/pyMAPFPlanner.cpp
+                                              ${CMAKE_CURRENT_SOURCE_DIR}/python/common/pyTaskScheduler.cpp
+                                              ${CMAKE_CURRENT_SOURCE_DIR}/python/common/pyExecutor.cpp)
         target_link_libraries(lifelong PRIVATE ${Python3_LIBRARIES})
     endif()
 endif()
