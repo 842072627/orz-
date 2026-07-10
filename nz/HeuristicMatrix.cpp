@@ -9,6 +9,16 @@
 #include "MapProfile.h"
 #include "planner/GameDirectionalPlanner/orz_highway.h"
 
+// ORZ-only stub (was in WarehouseRailConstraints.h)
+namespace nz {
+struct WarehouseRailConstraintStats { int passage_rows = 0; int passage_cols = 0; int forbidden_edges = 0; };
+WarehouseRailConstraintStats build_warehouse_planner_rail_constraints(
+    SharedEnvironment*, std::vector<std::array<unsigned char,4>>*, std::vector<int>*);
+inline WarehouseRailConstraintStats build_warehouse_planner_rail_constraints(
+    SharedEnvironment*, std::vector<std::array<unsigned char,4>>*, std::vector<int>*) {
+    return {0, 0, 0};
+}
+}
 
 #include <thread>
 #include <atomic>
@@ -145,9 +155,95 @@ void HeuristicMatrix::build_direction_constraints(SharedEnvironment* env) {
         return;
     }
 
-    (void)cfg();
-    (void)map_profile();
-    return;
+    if (cfg().hard_heuristic_hard_direction &&
+        cfg().hard_ware_direct &&
+        map_profile().type == MapType::GAME_DOMAIN) {
+        auto stats = build_warehouse_planner_rail_constraints(env, &forbidden_dirs_, nullptr);
+        forbidden_edge_count_ = stats.forbidden_edges;
+        direction_constrained_ = forbidden_edge_count_ > 0;
+        if (direction_constrained_ && cfg().debug_level >= 1) {
+            std::fprintf(stderr,
+                "[HeuristicMatrix] hard warehouse planner-rail rows=%d cols=%d forbidden_edges=%d\n",
+                stats.passage_rows, stats.passage_cols, forbidden_edge_count_);
+        }
+        return;
+    }
+
+    if (!cfg().ware_heuristic_hard_direction ||
+        !cfg().ware_direct ||
+        map_profile().type != MapType::GAME_DOMAIN) {
+        return;
+    }
+
+    forbidden_dirs_.assign(map_size_, {0, 0, 0, 0});
+
+    std::vector<int> row_free_count(rows_, 0);
+    for (int r = 0; r < rows_; r++) {
+        for (int c = 0; c < cols_; c++) {
+            if (env->map[r * cols_ + c] == 0) row_free_count[r]++;
+        }
+    }
+    int max_row_free = *std::max_element(row_free_count.begin(), row_free_count.end());
+    int row_threshold = max_row_free * 80 / 100;
+
+    std::vector<int> passage_rows;
+    for (int r = 1; r < rows_ - 1; r++) {
+        if (row_free_count[r] > row_threshold &&
+            row_free_count[r - 1] <= row_threshold &&
+            row_free_count[r + 1] <= row_threshold) {
+            passage_rows.push_back(r);
+        }
+    }
+
+    auto forbid = [&](int loc, int dir) {
+        if (loc < 0 || loc >= map_size_ || dir < 0 || dir >= 4) return;
+        if (env->map[loc] != 0) return;
+        if (forbidden_dirs_[loc][dir] == 0) {
+            forbidden_dirs_[loc][dir] = 1;
+            forbidden_edge_count_++;
+        }
+    };
+
+    for (int i = 0; i < static_cast<int>(passage_rows.size()); i++) {
+        int row = passage_rows[i];
+        int forbidden_dir = (i % 2 == 0) ? 2 : 0;  // even rows flow east; odd rows flow west
+        for (int col = 1; col < cols_ - 1; col++) {
+            forbid(row * cols_ + col, forbidden_dir);
+        }
+    }
+
+    std::vector<int> col_free_count(cols_, 0);
+    for (int c = 0; c < cols_; c++) {
+        for (int r = 0; r < rows_; r++) {
+            if (env->map[r * cols_ + c] == 0) col_free_count[c]++;
+        }
+    }
+    int max_col_free = *std::max_element(col_free_count.begin(), col_free_count.end());
+    int col_threshold = max_col_free * 80 / 100;
+
+    std::vector<int> passage_columns;
+    for (int c = 1; c < cols_ - 1; c++) {
+        if (col_free_count[c] > col_threshold &&
+            col_free_count[c - 1] <= col_threshold &&
+            col_free_count[c + 1] <= col_threshold) {
+            passage_columns.push_back(c);
+        }
+    }
+
+    for (int i = 0; i < static_cast<int>(passage_columns.size()); i++) {
+        int col = passage_columns[i];
+        int forbidden_dir = (i % 2 == 0) ? 3 : 1;  // even columns flow south; odd columns flow north
+        for (int row = 1; row < rows_ - 1; row++) {
+            forbid(row * cols_ + col, forbidden_dir);
+        }
+    }
+
+    direction_constrained_ = forbidden_edge_count_ > 0;
+    if (direction_constrained_ && cfg().debug_level >= 1) {
+        std::fprintf(stderr,
+            "[HeuristicMatrix] warehouse hard-direction rows=%zu cols=%zu forbidden_edges=%d\n",
+            passage_rows.size(), passage_columns.size(), forbidden_edge_count_);
+    }
 }
 
 // ================================================================
