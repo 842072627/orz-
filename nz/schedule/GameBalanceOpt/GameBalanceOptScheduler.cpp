@@ -1,4 +1,4 @@
-// optsvr/schedule/GameBalanceOpt/GameBalanceOptScheduler.cpp
+// nz/schedule/GameBalanceOpt/GameBalanceOptScheduler.cpp
 // 中心线zone调度器实现 — BFS 中心线 + 24×24 zone 密度 + 方向锁 + 三层豁免
 #include "GameBalanceOptScheduler.h"
 #include "orz_highway.h"
@@ -6,6 +6,8 @@
 #include <climits>
 #include <cmath>
 #include <iostream>
+#include <sstream>
+#include <thread>
 
 namespace nz {
 
@@ -22,9 +24,8 @@ static constexpr float  DIVISOR_TABLE[21] = {
     2.5f, 2.6f, 2.7f, 2.8f, 2.9f,
     3.0f
 };
-
 static inline bool use_direct_distance_score() {
-    return cfg().game_distance_score_mode == 1;
+    return cfg().game_distance_score_mode == 1 || cfg().game_distance_score_mode == 3;
 }
 
 static inline bool is_valid_score(float score) {
@@ -36,7 +37,21 @@ static inline float distance_score(float dist) {
 }
 
 static inline float apply_route_density_penalty(float score, float divisor) {
-    return use_direct_distance_score() ? score * divisor : score / divisor;
+    return use_direct_distance_score() ? score : score / divisor;
+}
+
+static inline float route_density_penalty_cost(int density, int threshold) {
+    if (density <= threshold) return 0.0f;
+    const int exponent = std::max(0, density - threshold - 1);
+    return 10.0f * std::pow(1.1f, static_cast<float>(exponent));
+}
+
+static inline float future_flow_soft_penalty_from_ratio(float ratio) {
+    constexpr float kStartRatio = 0.70f;
+    if (ratio < kStartRatio) return 0.0f;
+    const float base = std::max(0.0f, cfg().game_flow_soft_penalty_base);
+    const float exponent = std::min(100.0f, std::max(0.0f, (ratio - kStartRatio) * 100.0f));
+    return base * std::pow(1.1f, exponent);
 }
 
 // ================================================================
@@ -229,6 +244,65 @@ bool GameBalanceOptScheduler::directional_future_flow_allows(
     return true;
 }
 
+float GameBalanceOptScheduler::directional_future_flow_soft_penalty(
+    int agent_loc, const std::vector<int>& locs, int start_idx) const {
+    if (!game_directional_flow_enabled() || !ready_ || locs.empty()) return 0.0f;
+    const int nz = n24c_ * n24r_;
+    if ((int)zone_future_pos_.size() != nz || (int)zone_future_neg_.size() != nz)
+        return 0.0f;
+
+    const int cap = std::max(0, cfg().game_dir_flow_cap);
+    if (cap <= 0) return 0.0f;
+    int prev_m = -1, prev_b = -1;
+    project(agent_loc, prev_m, prev_b);
+    if (prev_m < 0) return 0.0f;
+
+    float decay = cfg().game_dir_flow_decay;
+    if (!std::isfinite(decay)) decay = GAME_DIR_FLOW_DECAY;
+    decay = std::max(0.0f, std::min(1.0f, decay));
+    float cur_weight = 1.0f;
+    int last_zid = -1;
+    float penalty = 0.0f;
+
+    auto add_zone_penalty = [&](const ZoneMainRange& zr, int intent) {
+        const int zid = zr.zone_id;
+        if (zid < 0 || zid >= nz || zid == last_zid) return;
+        const float same = (intent > 0) ? zone_future_pos_[zid] : zone_future_neg_[zid];
+        const float ratio = (same + cur_weight) / static_cast<float>(cap);
+        penalty += future_flow_soft_penalty_from_ratio(ratio);
+        last_zid = zid;
+        cur_weight *= decay;
+    };
+
+    for (int i = std::max(0, start_idx); i < static_cast<int>(locs.size()); ++i) {
+        int tm = -1, tb = -1;
+        project(locs[i], tm, tb);
+        if (tm < 0) continue;
+        if (tm == prev_m) {
+            prev_m = tm;
+            prev_b = tb;
+            continue;
+        }
+
+        const int intent = (tm > prev_m) ? +1 : -1;
+        const int lo = std::min(prev_m, tm);
+        const int hi = std::max(prev_m, tm);
+        if (intent > 0) {
+            for (const auto& zr : zone_ranges_) {
+                if (zr.min_m <= hi && zr.max_m >= lo) add_zone_penalty(zr, intent);
+            }
+        } else {
+            for (auto it = zone_ranges_.rbegin(); it != zone_ranges_.rend(); ++it) {
+                if (it->min_m <= hi && it->max_m >= lo) add_zone_penalty(*it, intent);
+            }
+        }
+
+        prev_m = tm;
+        prev_b = tb;
+    }
+    return penalty;
+}
+
 // ================================================================
 // build_zone_ranges — 构建 zone→main_dist 范围映射
 // ================================================================
@@ -416,83 +490,12 @@ void GameBalanceOptScheduler::build_centerline(const SharedEnvironment* env) {
 }
 
 // ================================================================
-// compute_zone_widths — compute minimum cross-section width per zone
-// Uses DTW (distance-to-wall) to estimate corridor width = 2*max_dtw_in_zone
-// ================================================================
-void GameBalanceOptScheduler::compute_zone_widths(const SharedEnvironment* env, const std::vector<int>& dtw) {
-    int nz = n24c_ * n24r_;
-    zone_min_width_.assign(nz, 999);
-
-    // For each zone, find the maximum DTW value among walkable cells
-    // The "width" of the zone's narrowest point is approximated by
-    // scanning each row within the zone and counting consecutive walkable cells
-    for (int zi = 0; zi < nz; zi++) {
-        int zone_row = zi / n24c_;
-        int zone_col = zi % n24c_;
-        int start_r = zone_row * 24;
-        int start_c = zone_col * 24;
-        int end_r = std::min(start_r + 24, rows_);
-        int end_c = std::min(start_c + 24, cols_);
-
-        int min_row_width = 999;
-        bool has_walkable = false;
-        for (int r = start_r; r < end_r; r++) {
-            int consecutive = 0;
-            int max_consecutive = 0;
-            for (int c = start_c; c < end_c; c++) {
-                int loc = r * cols_ + c;
-                if (env->map[loc] == 0) {
-                    consecutive++;
-                    has_walkable = true;
-                } else {
-                    if (consecutive > max_consecutive) max_consecutive = consecutive;
-                    consecutive = 0;
-                }
-            }
-            if (consecutive > max_consecutive) max_consecutive = consecutive;
-            if (max_consecutive > 0 && max_consecutive < min_row_width)
-                min_row_width = max_consecutive;
-        }
-        // Also check columns
-        for (int c = start_c; c < end_c; c++) {
-            int consecutive = 0;
-            int max_consecutive = 0;
-            for (int r = start_r; r < end_r; r++) {
-                int loc = r * cols_ + c;
-                if (env->map[loc] == 0) {
-                    consecutive++;
-                    has_walkable = true;
-                } else {
-                    if (consecutive > max_consecutive) max_consecutive = consecutive;
-                    consecutive = 0;
-                }
-            }
-            if (consecutive > max_consecutive) max_consecutive = consecutive;
-            if (max_consecutive > 0 && max_consecutive < min_row_width)
-                min_row_width = max_consecutive;
-        }
-        zone_min_width_[zi] = has_walkable ? min_row_width : 0;
-    }
-}
-
-// ================================================================
 // initialize
 // ================================================================
 void GameBalanceOptScheduler::initialize(SharedEnvironment* env, int /*preprocess_time_limit_ms*/) {
     env_ = env;
     build_centerline(env);
     pibt_lock().reset();
-
-    // 宽度感知: 计算 zone 宽度
-    if (cfg().game_width_aware) {
-        std::vector<int> dtw;
-        compute_dtw(env, dtw);
-        compute_zone_widths(env, dtw);
-        auto& lock = pibt_lock();
-        int nz2 = n24c_ * n24r_;
-        for (int zi = 0; zi < nz2 && zi < PibtLock::MAX_ZONES; zi++)
-            lock.zone_width[zi] = zone_min_width_[zi];
-    }
 
     // Sync zone_n24c to PibtLock for PIBT counter-flow
     pibt_lock().zone_n24c = n24c_;
@@ -539,19 +542,8 @@ void GameBalanceOptScheduler::update_zone_direction(const SharedEnvironment* env
         return;
     }
 
-    int zone_hard_cap = cfg().game_zone_hard_cap;
     int dir_threshold = cfg().game_dir_threshold;
-
-    // IDEA3: 后期放宽zone约束
-    int effective_zone_cap = zone_hard_cap;
-    int effective_density_cap = cfg().game_density_cap;
-    if (cfg().game_late_relax) {
-        float progress = (float)step_ / (float)cfg().game_total_steps;
-        if (progress > cfg().game_late_phase_ratio) {
-            effective_zone_cap = cfg().game_late_zone_cap;
-            effective_density_cap = cfg().game_late_density_cap;
-        }
-    }
+    int zone_hard_cap = cfg().game_zone_hard_cap;
 
     std::vector<int> flow_right(nz, 0), flow_left(nz, 0);
     for (int a = 0; a < env->num_of_agents; a++) {
@@ -585,7 +577,7 @@ void GameBalanceOptScheduler::update_zone_direction(const SharedEnvironment* env
     // Phase 1: 热区设置方向（从邻居继承）
     for (int i = 0; i < (int)zone_ranges_.size(); i++) {
         int zid = zone_ranges_[i].zone_id;
-        if (zid < 0 || zid >= nz || zone24_density_[zid] < effective_zone_cap)
+        if (zid < 0 || zid >= nz || zone24_density_[zid] < zone_hard_cap)
             continue;
         if (zone_direction_[zid] != 0) continue;
         int neighbor_dir = 0;
@@ -608,16 +600,7 @@ void GameBalanceOptScheduler::update_zone_direction(const SharedEnvironment* env
     // Phase 2: 热区锁定自身 + 邻居（宽度感知容量控制）
     for (int i = 0; i < (int)zone_ranges_.size(); i++) {
         int zid = zone_ranges_[i].zone_id;
-        if (zid < 0 || zid >= nz || zone24_density_[zid] < effective_zone_cap) continue;
-
-        // WIDTH_AWARE: 窄zone更严格
-        if (cfg().game_width_aware && zid < (int)zone_min_width_.size()) {
-            int width = zone_min_width_[zid];
-            if (width <= cfg().game_narrow_threshold) {
-                int narrow_cap = std::max(2, (int)(width * cfg().game_narrow_cap_ratio));
-                if (zone24_density_[zid] < narrow_cap) continue;
-            }
-        }
+        if (zid < 0 || zid >= nz || zone24_density_[zid] < zone_hard_cap) continue;
 
         int dir = zone_direction_[zid];
         for (int d = -CONTAIN_EXPAND; d <= CONTAIN_EXPAND; d++) {
@@ -632,13 +615,13 @@ void GameBalanceOptScheduler::update_zone_direction(const SharedEnvironment* env
     for (int i = 0; i < (int)zone_ranges_.size(); i++) {
         int zid = zone_ranges_[i].zone_id;
         if (zid < 0 || zid >= nz) continue;
-        if (zone24_density_[zid] >= effective_zone_cap) continue;
+        if (zone24_density_[zid] >= zone_hard_cap) continue;
         bool nearby_hot = false;
         for (int d = -CONTAIN_EXPAND; d <= CONTAIN_EXPAND; d++) {
             int ni = i + d;
             if (ni < 0 || ni >= (int)zone_ranges_.size()) continue;
             int nzid = zone_ranges_[ni].zone_id;
-            if (nzid >= 0 && zone24_density_[nzid] >= effective_zone_cap) {
+            if (nzid >= 0 && zone24_density_[nzid] >= zone_hard_cap) {
                 nearby_hot = true; break;
             }
         }
@@ -741,113 +724,115 @@ float GameBalanceOptScheduler::base_score(int a_loc, int tid, int step, int star
     int density_cap   = cfg().game_density_cap;
     int route_penalty  = cfg().game_route_penalty;
 
-    // ---- Layer 1: main zone 豁免 ----
-    {
-        int a_m, a_b;
-        project(a_loc, a_m, a_b);
-        if (a_m >= 0) {
-            bool exempt = true;
-            int prev_m = a_m;
-            for (auto& loc : locs) {
-                int tm, tb;
-                project(loc, tm, tb);
-                if (tm < 0) continue;
-                int lo = std::min(prev_m, tm);
-                int hi = std::max(prev_m, tm);
-                for (auto& zr : zone_ranges_) {
-                    if (zr.min_m <= hi && zr.max_m >= lo &&
-                        zone_is_main_[zr.zone_id] &&
-                        zone24_density_[zr.zone_id] >= exempt_main) {
-                        exempt = false; break;
+    if (cfg().game_score_exempt_enabled) {
+        // ---- Layer 1: main zone 豁免 ----
+        {
+            int a_m, a_b;
+            project(a_loc, a_m, a_b);
+            if (a_m >= 0) {
+                bool exempt = true;
+                int prev_m = a_m;
+                for (auto& loc : locs) {
+                    int tm, tb;
+                    project(loc, tm, tb);
+                    if (tm < 0) continue;
+                    int lo = std::min(prev_m, tm);
+                    int hi = std::max(prev_m, tm);
+                    for (auto& zr : zone_ranges_) {
+                        if (zr.min_m <= hi && zr.max_m >= lo &&
+                            zone_is_main_[zr.zone_id] &&
+                            zone24_density_[zr.zone_id] >= exempt_main) {
+                            exempt = false; break;
+                        }
+                    }
+                    if (!exempt) break;
+                    prev_m = tm;
+                }
+                if (exempt) {
+                    float total = 0;
+                    int prev = a_loc;
+                    for (auto& loc : locs) {
+                        int r1 = prev / cols_, c1 = prev % cols_;
+                        int r2 = loc / cols_,  c2 = loc % cols_;
+                        float dist = std::sqrt((float)((c2-c1)*(c2-c1) + (r2-r1)*(r2-r1)));
+                        total += distance_score(dist);
+                        prev = loc;
+                    }
+                    return total;
+                }
+            }
+        }
+
+        // ---- Layer 2: branch task 检查 ----
+        {
+            bool is_branch = true;
+            int check_prev = a_loc;
+            int max_z = (int)zone_is_main_.size();
+            for (size_t ei = (size_t)start_idx; ei < locs.size(); ei++) {
+                int loc = locs[ei];
+                int x1 = check_prev % cols_, y1 = check_prev / cols_;
+                int x2 = loc % cols_,        y2 = loc / cols_;
+                // 起点 zone 检查
+                int z1 = (y1 / 24) * n24c_ + (x1 / 24);
+                if (z1 >= 0 && z1 < max_z) {
+                    int d1 = zone24_density_[z1];
+                    if (zone_is_main_[z1]) {
+                        if (d1 >= zone_hard_cap) { is_branch = false; break; }
+                    } else {
+                        if (d1 >= 70) { is_branch = false; break; }
                     }
                 }
-                if (!exempt) break;
-                prev_m = tm;
+                // 终点 zone 检查
+                int z2 = (y2 / 24) * n24c_ + (x2 / 24);
+                if (z2 >= 0 && z2 < max_z) {
+                    int d2 = zone24_density_[z2];
+                    if (zone_is_main_[z2]) {
+                        if (d2 >= zone_hard_cap) { is_branch = false; break; }
+                    } else {
+                        if (d2 >= 70) { is_branch = false; break; }
+                    }
+                }
+                // Bresenham 无障碍检查
+                int dx = abs(x2 - x1), sx = x1 < x2 ? 1 : -1;
+                int dy = -abs(y2 - y1), sy = y1 < y2 ? 1 : -1;
+                int err = dx + dy;
+                int cx = x1, cy = y1;
+                while (true) {
+                    if (env_->map[cy * cols_ + cx] != 0) { is_branch = false; break; }
+                    if (cx == x2 && cy == y2) break;
+                    int e2 = 2 * err;
+                    if (e2 >= dy) { err += dy; cx += sx; }
+                    if (e2 <= dx) { err += dx; cy += sy; }
+                }
+                if (!is_branch) break;
+                check_prev = loc;
             }
-            if (exempt) {
+
+            if (is_branch) {
                 float total = 0;
                 int prev = a_loc;
-                for (auto& loc : locs) {
+                for (size_t ei = (size_t)start_idx; ei < locs.size(); ei++) {
                     int r1 = prev / cols_, c1 = prev % cols_;
-                    int r2 = loc / cols_,  c2 = loc % cols_;
+                    int r2 = locs[ei] / cols_, c2 = locs[ei] % cols_;
+                    int z2 = (r2 / 24) * n24c_ + (c2 / 24);
+                    if (z2 >= 0 && z2 < max_z && zone24_density_[z2] >= 70)
+                        return INVALID_SCORE;
                     float dist = std::sqrt((float)((c2-c1)*(c2-c1) + (r2-r1)*(r2-r1)));
                     total += distance_score(dist);
-                    prev = loc;
+                    prev = locs[ei];
                 }
                 return total;
             }
-        }
-    }
 
-    // ---- Layer 2: branch task 检查 ----
-    {
-        bool is_branch = true;
-        int check_prev = a_loc;
-        int max_z = (int)zone_is_main_.size();
-        for (size_t ei = (size_t)start_idx; ei < locs.size(); ei++) {
-            int loc = locs[ei];
-            int x1 = check_prev % cols_, y1 = check_prev / cols_;
-            int x2 = loc % cols_,        y2 = loc / cols_;
-            // 起点 zone 检查
-            int z1 = (y1 / 24) * n24c_ + (x1 / 24);
-            if (z1 >= 0 && z1 < max_z) {
-                int d1 = zone24_density_[z1];
-                if (zone_is_main_[z1]) {
-                    if (d1 >= zone_hard_cap) { is_branch = false; break; }
-                } else {
-                    if (d1 >= 70) { is_branch = false; break; }
-                }
+            // ---- Layer 3: 逃逸豁免 ----
+            if (start_idx == 0) {
+                float esc = connection_exempt_score(a_loc, locs);
+                if (is_valid_score(esc)) return esc;
+            } else {
+                std::vector<int> remaining(locs.begin() + start_idx, locs.end());
+                float esc = connection_exempt_score(a_loc, remaining);
+                if (is_valid_score(esc)) return esc;
             }
-            // 终点 zone 检查
-            int z2 = (y2 / 24) * n24c_ + (x2 / 24);
-            if (z2 >= 0 && z2 < max_z) {
-                int d2 = zone24_density_[z2];
-                if (zone_is_main_[z2]) {
-                    if (d2 >= zone_hard_cap) { is_branch = false; break; }
-                } else {
-                    if (d2 >= 70) { is_branch = false; break; }
-                }
-            }
-            // Bresenham 无障碍检查
-            int dx = abs(x2 - x1), sx = x1 < x2 ? 1 : -1;
-            int dy = -abs(y2 - y1), sy = y1 < y2 ? 1 : -1;
-            int err = dx + dy;
-            int cx = x1, cy = y1;
-            while (true) {
-                if (env_->map[cy * cols_ + cx] != 0) { is_branch = false; break; }
-                if (cx == x2 && cy == y2) break;
-                int e2 = 2 * err;
-                if (e2 >= dy) { err += dy; cx += sx; }
-                if (e2 <= dx) { err += dx; cy += sy; }
-            }
-            if (!is_branch) break;
-            check_prev = loc;
-        }
-
-        if (is_branch) {
-            float total = 0;
-            int prev = a_loc;
-            for (size_t ei = (size_t)start_idx; ei < locs.size(); ei++) {
-                int r1 = prev / cols_, c1 = prev % cols_;
-                int r2 = locs[ei] / cols_, c2 = locs[ei] % cols_;
-                int z2 = (r2 / 24) * n24c_ + (c2 / 24);
-                if (z2 >= 0 && z2 < max_z && zone24_density_[z2] >= 70)
-                    return INVALID_SCORE;
-                float dist = std::sqrt((float)((c2-c1)*(c2-c1) + (r2-r1)*(r2-r1)));
-                total += distance_score(dist);
-                prev = locs[ei];
-            }
-            return total;
-        }
-
-        // ---- Layer 3: 逃逸豁免 ----
-        if (start_idx == 0) {
-            float esc = connection_exempt_score(a_loc, locs);
-            if (is_valid_score(esc)) return esc;
-        } else {
-            std::vector<int> remaining(locs.begin() + start_idx, locs.end());
-            float esc = connection_exempt_score(a_loc, remaining);
-            if (is_valid_score(esc)) return esc;
         }
     }
 
@@ -869,23 +854,28 @@ float GameBalanceOptScheduler::base_score(int a_loc, int tid, int step, int star
         int intent = (tm > prev_m) ? +1 : -1;
 
         int d_max_seg = 0;
-        for (auto& zr : zone_ranges_) {
-            if (zr.min_m <= hi && zr.max_m >= lo) {
-                int d = zone24_density_[zr.zone_id];
-                // 方向锁: 逆流阻断
-                if (zr.lock_dir != 0 && zr.lock_dir != intent) {
-                    return INVALID_SCORE;
+        if (!use_direct_distance_score()) {
+            for (auto& zr : zone_ranges_) {
+                if (zr.min_m <= hi && zr.max_m >= lo) {
+                    int d = zone24_density_[zr.zone_id];
+                    // 方向锁: 逆流阻断
+                    if (zr.lock_dir != 0 && zr.lock_dir != intent) {
+                        return INVALID_SCORE;
+                    }
+                    // 密度上限: 极端拥塞阻断
+                    if (d >= density_cap) {
+                        return INVALID_SCORE;
+                    }
+                    if (d > d_max_seg) d_max_seg = d;
                 }
-                // 密度上限: 极端拥塞阻断
-                if (d >= density_cap) {
-                    return INVALID_SCORE;
-                }
-                if (d > d_max_seg) d_max_seg = d;
             }
         }
 
         float seg_dist = (float)(std::abs(prev_m - tm) + std::abs(prev_b - tb));
         float seg_score = distance_score(seg_dist);
+        if (use_direct_distance_score() && ei == (size_t)start_idx) {
+            seg_score *= std::max(0.0f, cfg().game_pickup_weight);
+        }
 
         if (d_max_seg > route_penalty) {
             int idx = std::min(d_max_seg, route_penalty + 20) - route_penalty;
@@ -896,6 +886,9 @@ float GameBalanceOptScheduler::base_score(int a_loc, int tid, int step, int star
         prev_m = tm; prev_b = tb;
     }
 
+    if (use_direct_distance_score()) {
+        total_score -= directional_future_flow_soft_penalty(a_loc, locs, start_idx);
+    }
     return total_score;
 }
 // ================================================================
@@ -978,15 +971,7 @@ void GameBalanceOptScheduler::schedule(int time_limit,
     } diag;
     if (diag_on) diag.step = step;
 
-    // 时间进度
-    float progress = (float)step / (float)cfg().game_total_steps;
-    bool is_late_phase = progress > cfg().game_late_phase_ratio;
-
-    // IDEA3: 后期放宽zone约束 — 传递给base_score使用的effective参数
-    int eff_density_cap = cfg().game_density_cap;
-    if (cfg().game_late_relax && is_late_phase) {
-        eff_density_cap = cfg().game_late_density_cap;
-    }
+    const int eff_density_cap = cfg().game_density_cap;
 
     // ---- 分类 agent ----
     std::vector<int> free_agents;
@@ -1083,11 +1068,7 @@ void GameBalanceOptScheduler::schedule(int time_limit,
         diag.assign_budget = assign_budget;
     }
 
-    // 搜索半径（IDEA1: 后期扩展）
-    int search_radius = cfg().game_search_radius;
-    if (cfg().game_late_search_enable && is_late_phase) {
-        search_radius = cfg().game_late_search_radius;
-    }
+    const int search_radius = cfg().game_search_radius;
     if (diag_on) diag.search_radius = search_radius;
     if (diag_on) diag.region_mode = cfg().game_region_match ? 1 : 0;
 
@@ -1140,6 +1121,7 @@ void GameBalanceOptScheduler::schedule(int time_limit,
     }
     diag.prefilter_task_kept = (int)filtered_free_tasks_set.size();
     int blocked_zone_count = 0;
+    std::ostringstream blocked_zone_ids;
     if (game_directional_flow_enabled()) {
         const int nz = n24c_ * n24r_;
         const int cap = std::max(0, cfg().game_dir_flow_cap);
@@ -1154,8 +1136,11 @@ void GameBalanceOptScheduler::schedule(int time_limit,
                     (gap > 0 && pos + 1.0f > neg + (float)gap);
                 const bool neg_blocked = (neg + 1.0f >= (float)cap) ||
                     (gap > 0 && neg + 1.0f > pos + (float)gap);
-                if (pos_blocked || neg_blocked)
+                if (pos_blocked || neg_blocked) {
+                    if (blocked_zone_count > 0) blocked_zone_ids << ",";
+                    blocked_zone_ids << zid;
                     ++blocked_zone_count;
+                }
             }
         }
     }
@@ -1171,7 +1156,8 @@ void GameBalanceOptScheduler::schedule(int time_limit,
         diag.prefilter_reject_density,
         diag.prefilter_reject_branch,
         diag.prefilter_reject_other,
-        blocked_zone_count
+        blocked_zone_count,
+        blocked_zone_ids.str()
     });
 
     // 按 zone 分桶 free tasks
@@ -1182,19 +1168,6 @@ void GameBalanceOptScheduler::schedule(int time_limit,
             tasks_by_zone[zid_100(tit->second.locations[0], cols_)].push_back(tid);
     }
     if (diag_on) diag.task_zones = tasks_by_zone.size();
-
-    // IDEA5: Task Age排序 — 对每个zone的task按age降序
-    if (cfg().game_age_sort) {
-        for (auto& [z, tids] : tasks_by_zone) {
-            std::sort(tids.begin(), tids.end(), [&](int a, int b) {
-                auto ait = env->task_pool.find(a);
-                auto bit = env->task_pool.find(b);
-                int age_a = (ait != env->task_pool.end()) ? (step - ait->second.t_revealed) : 0;
-                int age_b = (bit != env->task_pool.end()) ? (step - bit->second.t_revealed) : 0;
-                return age_a > age_b; // 等待更久的排前面
-            });
-        }
-    }
 
     std::unordered_map<int, int> region_rep_loc;
     for (const auto& [z, tids] : tasks_by_zone) {
@@ -1269,12 +1242,7 @@ void GameBalanceOptScheduler::schedule(int time_limit,
         int ar = a_loc / cols_, ac = a_loc % cols_;
         int tr = tloc / cols_, tc = tloc % cols_;
         float dist = std::sqrt((float)((tr - ar) * (tr - ar) + (tc - ac) * (tc - ac)));
-        float score = distance_score(dist);
-        if (cfg().game_age_sort) {
-            float age = (float)(step - tit->second.t_revealed) / (float)cfg().game_total_steps;
-            score += cfg().game_age_sort_weight * age;
-        }
-        return score;
+        return distance_score(dist);
     };
 
     auto region_allows = [&](int a_zone, int a_loc, int task_zone) -> bool {
@@ -1301,7 +1269,168 @@ void GameBalanceOptScheduler::schedule(int time_limit,
         return ok;
     };
 
-    for (int a : free_agents) {
+    if (cfg().game_distance_score_mode == 3) {
+        struct GlobalCand {
+            float score;
+            int tid;
+        };
+        struct HeapItem {
+            float score;
+            int agent_pos;
+            int cand_pos;
+            bool operator<(const HeapItem& other) const {
+                return score < other.score;
+            }
+        };
+
+        const int cand_topk = std::max(1, cfg().game_global_cand_topk);
+        const int max_task_scan = std::max(1, cfg().game_global_max_task_scan);
+        std::vector<std::vector<GlobalCand>> all_candidates(free_agents.size());
+        int global_rebuild_round = 0;
+
+        auto build_candidates = [&]() {
+            const auto rebuild_start = std::chrono::steady_clock::now();
+            for (auto& v : all_candidates) v.clear();
+            int n_threads = cfg().num_threads;
+            if (n_threads <= 0) {
+                n_threads = static_cast<int>(std::thread::hardware_concurrency());
+                if (n_threads <= 0) n_threads = 4;
+            }
+            n_threads = std::max(1, std::min<int>(n_threads, free_agents.size()));
+            std::vector<std::thread> threads;
+            threads.reserve(n_threads);
+            int chunk = ((int)free_agents.size() + n_threads - 1) / n_threads;
+            for (int t = 0; t < n_threads; ++t) {
+                int begin = t * chunk;
+                int end = std::min<int>(free_agents.size(), begin + chunk);
+                if (begin >= end) continue;
+                threads.emplace_back([&, begin, end]() {
+                    for (int pos = begin; pos < end; ++pos) {
+	                        int a = free_agents[pos];
+	                        if (proposed_schedule[a] >= 0) continue;
+	                        int a_loc = env->curr_states[a].location;
+	                        int a_zone = zid_100(a_loc, cols_);
+	                        auto& cand = all_candidates[pos];
+	                        std::vector<std::pair<int, int>> zone_order;
+	                        zone_order.reserve(tasks_by_zone.size());
+	                        for (const auto& [z2, tids] : tasks_by_zone) {
+	                            if (tids.empty()) continue;
+	                            int zd = zh_dist(a_zone, z2);
+	                            if (zd <= search_radius) zone_order.emplace_back(zd, z2);
+	                        }
+	                        std::sort(zone_order.begin(), zone_order.end(),
+	                            [](const auto& x, const auto& y) {
+	                                if (x.first != y.first) return x.first < y.first;
+	                                return x.second < y.second;
+	                            });
+	                        int scanned_tasks = 0;
+	                        for (const auto& [zd, z2] : zone_order) {
+	                            (void)zd;
+	                            if (scanned_tasks >= max_task_scan) break;
+	                            auto tz = tasks_by_zone.find(z2);
+	                            if (tz == tasks_by_zone.end()) continue;
+	                            const auto& tids = tz->second;
+	                            for (int tid : tids) {
+	                                if (done_tasks.count(tid)) continue;
+	                                scanned_tasks++;
+	                                float s = base_score_ex(a_loc, tid, step, 0, eff_density_cap);
+	                                if (!is_valid_score(s)) continue;
+	                                cand.push_back({s, tid});
+	                            }
+	                        }
+                        if ((int)cand.size() > cand_topk) {
+                            auto kth = cand.begin() + cand_topk;
+                            std::nth_element(cand.begin(), kth, cand.end(),
+                                [](const GlobalCand& x, const GlobalCand& y) {
+                                    return x.score > y.score;
+                                });
+                            cand.resize(cand_topk);
+                        }
+                        std::sort(cand.begin(), cand.end(),
+                            [](const GlobalCand& x, const GlobalCand& y) {
+                                return x.score > y.score;
+                            });
+                    }
+                });
+            }
+            for (auto& th : threads) th.join();
+            (void)rebuild_start;
+            (void)n_threads;
+        };
+
+        while (assigned_count < assign_budget) {
+            if (std::chrono::steady_clock::now() > deadline) {
+                if (diag_on) diag.timeout_stop = 1;
+                break;
+            }
+            build_candidates();
+
+            std::priority_queue<HeapItem> heap;
+            int active_agents = 0;
+            for (int pos = 0; pos < (int)all_candidates.size(); ++pos) {
+                if (!all_candidates[pos].empty()) {
+                    heap.push({all_candidates[pos][0].score, pos, 0});
+                    active_agents++;
+                }
+            }
+            if (diag_on) {
+                diag.considered_agents += active_agents;
+                diag.region_batch_flushes++;
+            }
+            if (heap.empty()) break;
+
+            int batch_assigned = 0;
+            while (!heap.empty() && assigned_count < assign_budget &&
+                   batch_assigned < region_flow_batch) {
+                if (std::chrono::steady_clock::now() > deadline) {
+                    if (diag_on) diag.timeout_stop = 1;
+                    break;
+                }
+                HeapItem item = heap.top();
+                heap.pop();
+                if (item.agent_pos < 0 || item.agent_pos >= (int)free_agents.size()) continue;
+                auto& cand = all_candidates[item.agent_pos];
+                if (item.cand_pos < 0 || item.cand_pos >= (int)cand.size()) continue;
+
+                int a = free_agents[item.agent_pos];
+                int tid = cand[item.cand_pos].tid;
+                auto push_next = [&]() {
+                    int next = item.cand_pos + 1;
+                    if (next < (int)cand.size())
+                        heap.push({cand[next].score, item.agent_pos, next});
+                };
+
+                if (proposed_schedule[a] >= 0 || done_tasks.count(tid)) {
+                    push_next();
+                    continue;
+                }
+
+                int a_loc = env->curr_states[a].location;
+                float bs = score_candidate(a_loc, tid);
+                if (!is_valid_score(bs)) {
+                    push_next();
+                    continue;
+                }
+
+                proposed_schedule[a] = tid;
+                add_directional_future_flow_for_task(a_loc, tid, 0);
+                auto tit = env->task_pool.find(tid);
+                if (tit != env->task_pool.end() && tit->second.locations.size() > 2)
+                    parked_task_[a] = tid;
+                else
+                    parked_task_[a] = -1;
+                done_tasks.insert(tid);
+                ++assigned_count;
+                ++batch_assigned;
+                agent_idle_ticks_[a] = 0;
+                if (diag_on) diag.legal_agents_after_full_filter++;
+            }
+
+            region_allow_cache.clear();
+            if (batch_assigned == 0) break;
+        }
+        if (assigned_count >= assign_budget && diag_on) diag.budget_stop = 1;
+    } else for (int a : free_agents) {
         if (assigned_count >= assign_budget) {
             if (diag_on) diag.budget_stop = 1;
             break;
@@ -1379,14 +1508,6 @@ void GameBalanceOptScheduler::schedule(int time_limit,
                 for (int tid : sz->second) {
                     if (done_tasks.count(tid)) continue;
                     float bs = score_candidate(a_loc, tid);
-                    // IDEA5: age score bonus
-                    if (cfg().game_age_sort && bs > -1e8f) {
-                        auto tit = env->task_pool.find(tid);
-                        if (tit != env->task_pool.end()) {
-                            float age = (float)(step - tit->second.t_revealed) / (float)cfg().game_total_steps;
-                            bs += cfg().game_age_sort_weight * age;
-                        }
-                    }
                     if (is_valid_score(bs)) has_valid_candidate = true;
                     if (bs > best_score) { best_score = bs; best_tid = tid; }
                 }
@@ -1405,13 +1526,6 @@ void GameBalanceOptScheduler::schedule(int time_limit,
                                 break;
                             }
                             float bs = score_candidate(a_loc, tid);
-                            if (cfg().game_age_sort && bs > -1e8f) {
-                                auto tit = env->task_pool.find(tid);
-                                if (tit != env->task_pool.end()) {
-                                    float age = (float)(step - tit->second.t_revealed) / (float)cfg().game_total_steps;
-                                    bs += cfg().game_age_sort_weight * age;
-                                }
-                            }
                             if (is_valid_score(bs)) has_valid_candidate = true;
                             if (bs > best_score) { best_score = bs; best_tid = tid; }
                         }
@@ -1530,6 +1644,8 @@ void GameBalanceOptScheduler::schedule(int time_limit,
                   << " reject_flow=" << diag.reject_flow
                   << " reject_zone_or_route=" << diag.reject_zone_or_route
                   << " neighbor_checked_cap_hits=" << diag.neighbor_checked_cap_hits
+                  << " blocked_zone_count=" << blocked_zone_count
+                  << " blocked_zone_ids=" << blocked_zone_ids.str()
                   << "\n";
     }
 }
@@ -1560,110 +1676,112 @@ float GameBalanceOptScheduler::base_score_ex(int a_loc, int tid, int step,
     int density_cap   = eff_density_cap;
     int route_penalty  = cfg().game_route_penalty;
 
-    // ---- Layer 1: main zone 豁免 ----
-    {
-        int a_m, a_b;
-        project(a_loc, a_m, a_b);
-        if (a_m >= 0) {
-            bool exempt = true;
-            int prev_m = a_m;
-            for (auto& loc : locs) {
-                int tm, tb;
-                project(loc, tm, tb);
-                if (tm < 0) continue;
-                int lo = std::min(prev_m, tm);
-                int hi = std::max(prev_m, tm);
-                for (auto& zr : zone_ranges_) {
-                    if (zr.min_m <= hi && zr.max_m >= lo &&
-                        zone_is_main_[zr.zone_id] &&
-                        zone24_density_[zr.zone_id] >= exempt_main) {
-                        exempt = false; break;
+    if (cfg().game_score_exempt_enabled) {
+        // ---- Layer 1: main zone 豁免 ----
+        {
+            int a_m, a_b;
+            project(a_loc, a_m, a_b);
+            if (a_m >= 0) {
+                bool exempt = true;
+                int prev_m = a_m;
+                for (auto& loc : locs) {
+                    int tm, tb;
+                    project(loc, tm, tb);
+                    if (tm < 0) continue;
+                    int lo = std::min(prev_m, tm);
+                    int hi = std::max(prev_m, tm);
+                    for (auto& zr : zone_ranges_) {
+                        if (zr.min_m <= hi && zr.max_m >= lo &&
+                            zone_is_main_[zr.zone_id] &&
+                            zone24_density_[zr.zone_id] >= exempt_main) {
+                            exempt = false; break;
+                        }
+                    }
+                    if (!exempt) break;
+                    prev_m = tm;
+                }
+                if (exempt) {
+                    float total = 0;
+                    int prev = a_loc;
+                    for (auto& loc : locs) {
+                        int r1 = prev / cols_, c1 = prev % cols_;
+                        int r2 = loc / cols_,  c2 = loc % cols_;
+                        float dist = std::sqrt((float)((c2-c1)*(c2-c1) + (r2-r1)*(r2-r1)));
+                        total += distance_score(dist);
+                        prev = loc;
+                    }
+                    return total;
+                }
+            }
+        }
+
+        // ---- Layer 2: branch task 检查 ----
+        {
+            bool is_branch = true;
+            int check_prev = a_loc;
+            int max_z = (int)zone_is_main_.size();
+            for (size_t ei = (size_t)start_idx; ei < locs.size(); ei++) {
+                int loc = locs[ei];
+                int x1 = check_prev % cols_, y1 = check_prev / cols_;
+                int x2 = loc % cols_,        y2 = loc / cols_;
+                int z1 = (y1 / 24) * n24c_ + (x1 / 24);
+                if (z1 >= 0 && z1 < max_z) {
+                    int d1 = zone24_density_[z1];
+                    if (zone_is_main_[z1]) {
+                        if (d1 >= zone_hard_cap) { is_branch = false; break; }
+                    } else {
+                        if (d1 >= 70) { is_branch = false; break; }
                     }
                 }
-                if (!exempt) break;
-                prev_m = tm;
+                int z2 = (y2 / 24) * n24c_ + (x2 / 24);
+                if (z2 >= 0 && z2 < max_z) {
+                    int d2 = zone24_density_[z2];
+                    if (zone_is_main_[z2]) {
+                        if (d2 >= zone_hard_cap) { is_branch = false; break; }
+                    } else {
+                        if (d2 >= 70) { is_branch = false; break; }
+                    }
+                }
+                int dx = abs(x2 - x1), sx = x1 < x2 ? 1 : -1;
+                int dy = -abs(y2 - y1), sy = y1 < y2 ? 1 : -1;
+                int err = dx + dy;
+                int cx = x1, cy = y1;
+                while (true) {
+                    if (env_->map[cy * cols_ + cx] != 0) { is_branch = false; break; }
+                    if (cx == x2 && cy == y2) break;
+                    int e2 = 2 * err;
+                    if (e2 >= dy) { err += dy; cx += sx; }
+                    if (e2 <= dx) { err += dx; cy += sy; }
+                }
+                if (!is_branch) break;
+                check_prev = loc;
             }
-            if (exempt) {
+
+            if (is_branch) {
                 float total = 0;
                 int prev = a_loc;
-                for (auto& loc : locs) {
+                for (size_t ei = (size_t)start_idx; ei < locs.size(); ei++) {
                     int r1 = prev / cols_, c1 = prev % cols_;
-                    int r2 = loc / cols_,  c2 = loc % cols_;
+                    int r2 = locs[ei] / cols_, c2 = locs[ei] % cols_;
+                    int z2 = (r2 / 24) * n24c_ + (c2 / 24);
+                    if (z2 >= 0 && z2 < max_z && zone24_density_[z2] >= 70)
+                        return reject(ScoreRejectReason::Branch);
                     float dist = std::sqrt((float)((c2-c1)*(c2-c1) + (r2-r1)*(r2-r1)));
                     total += distance_score(dist);
-                    prev = loc;
+                    prev = locs[ei];
                 }
                 return total;
             }
-        }
-    }
 
-    // ---- Layer 2: branch task 检查 ----
-    {
-        bool is_branch = true;
-        int check_prev = a_loc;
-        int max_z = (int)zone_is_main_.size();
-        for (size_t ei = (size_t)start_idx; ei < locs.size(); ei++) {
-            int loc = locs[ei];
-            int x1 = check_prev % cols_, y1 = check_prev / cols_;
-            int x2 = loc % cols_,        y2 = loc / cols_;
-            int z1 = (y1 / 24) * n24c_ + (x1 / 24);
-            if (z1 >= 0 && z1 < max_z) {
-                int d1 = zone24_density_[z1];
-                if (zone_is_main_[z1]) {
-                    if (d1 >= zone_hard_cap) { is_branch = false; break; }
-                } else {
-                    if (d1 >= 70) { is_branch = false; break; }
-                }
+            // ---- Layer 3: 逃逸豁免 ----
+            if (start_idx == 0) {
+                float esc = connection_exempt_score(a_loc, locs);
+                if (is_valid_score(esc)) return esc;
+            } else {
+                std::vector<int> remaining(locs.begin() + start_idx, locs.end());
+                float esc = connection_exempt_score(a_loc, remaining);
+                if (is_valid_score(esc)) return esc;
             }
-            int z2 = (y2 / 24) * n24c_ + (x2 / 24);
-            if (z2 >= 0 && z2 < max_z) {
-                int d2 = zone24_density_[z2];
-                if (zone_is_main_[z2]) {
-                    if (d2 >= zone_hard_cap) { is_branch = false; break; }
-                } else {
-                    if (d2 >= 70) { is_branch = false; break; }
-                }
-            }
-            int dx = abs(x2 - x1), sx = x1 < x2 ? 1 : -1;
-            int dy = -abs(y2 - y1), sy = y1 < y2 ? 1 : -1;
-            int err = dx + dy;
-            int cx = x1, cy = y1;
-            while (true) {
-                if (env_->map[cy * cols_ + cx] != 0) { is_branch = false; break; }
-                if (cx == x2 && cy == y2) break;
-                int e2 = 2 * err;
-                if (e2 >= dy) { err += dy; cx += sx; }
-                if (e2 <= dx) { err += dx; cy += sy; }
-            }
-            if (!is_branch) break;
-            check_prev = loc;
-        }
-
-        if (is_branch) {
-            float total = 0;
-            int prev = a_loc;
-            for (size_t ei = (size_t)start_idx; ei < locs.size(); ei++) {
-                int r1 = prev / cols_, c1 = prev % cols_;
-                int r2 = locs[ei] / cols_, c2 = locs[ei] % cols_;
-                int z2 = (r2 / 24) * n24c_ + (c2 / 24);
-                if (z2 >= 0 && z2 < max_z && zone24_density_[z2] >= 70)
-                    return reject(ScoreRejectReason::Branch);
-                float dist = std::sqrt((float)((c2-c1)*(c2-c1) + (r2-r1)*(r2-r1)));
-                total += distance_score(dist);
-                prev = locs[ei];
-            }
-            return total;
-        }
-
-        // ---- Layer 3: 逃逸豁免 ----
-        if (start_idx == 0) {
-            float esc = connection_exempt_score(a_loc, locs);
-            if (is_valid_score(esc)) return esc;
-        } else {
-            std::vector<int> remaining(locs.begin() + start_idx, locs.end());
-            float esc = connection_exempt_score(a_loc, remaining);
-            if (is_valid_score(esc)) return esc;
         }
     }
 
@@ -1685,23 +1803,28 @@ float GameBalanceOptScheduler::base_score_ex(int a_loc, int tid, int step,
         int intent = (tm > prev_m) ? +1 : -1;
 
         int d_max_seg = 0;
-        for (auto& zr : zone_ranges_) {
-            if (zr.min_m <= hi && zr.max_m >= lo) {
-                int d = zone24_density_[zr.zone_id];
-                // 方向锁: 逆流阻断
-                if (zr.lock_dir != 0 && zr.lock_dir != intent) {
-                    return reject(ScoreRejectReason::LockDir);
+        if (!use_direct_distance_score()) {
+            for (auto& zr : zone_ranges_) {
+                if (zr.min_m <= hi && zr.max_m >= lo) {
+                    int d = zone24_density_[zr.zone_id];
+                    // 方向锁: 逆流阻断
+                    if (zr.lock_dir != 0 && zr.lock_dir != intent) {
+                        return reject(ScoreRejectReason::LockDir);
+                    }
+                    // 密度上限
+                    if (d >= density_cap) {
+                        return reject(ScoreRejectReason::Density);
+                    }
+                    if (d > d_max_seg) d_max_seg = d;
                 }
-                // 密度上限
-                if (d >= density_cap) {
-                    return reject(ScoreRejectReason::Density);
-                }
-                if (d > d_max_seg) d_max_seg = d;
             }
         }
 
         float seg_dist = (float)(std::abs(prev_m - tm) + std::abs(prev_b - tb));
         float seg_score = distance_score(seg_dist);
+        if (use_direct_distance_score() && ei == (size_t)start_idx) {
+            seg_score *= std::max(0.0f, cfg().game_pickup_weight);
+        }
 
         if (d_max_seg > route_penalty) {
             int idx = std::min(d_max_seg, route_penalty + 20) - route_penalty;
@@ -1712,6 +1835,9 @@ float GameBalanceOptScheduler::base_score_ex(int a_loc, int tid, int step,
         prev_m = tm; prev_b = tb;
     }
 
+    if (use_direct_distance_score()) {
+        total_score -= directional_future_flow_soft_penalty(a_loc, locs, start_idx);
+    }
     return total_score;
 }
 

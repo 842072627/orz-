@@ -1,4 +1,4 @@
-// optsvr/schedule/GameBalanceOpt/GameBalanceOptScheduler.h
+// nz/schedule/GameBalanceOpt/GameBalanceOptScheduler.h
 // 中心线zone调度器 — BFS中心线 + zone密度 + 方向锁 + 三层豁免打分
 #pragma once
 
@@ -63,8 +63,6 @@ private:
     // ---- agent空闲计数器（IDEA4: idle exempt）----
     std::vector<int> agent_idle_ticks_;  // [aid] → 连续空闲tick数
 
-    // ---- IDEA: zone width (bottleneck awareness) ----
-    std::vector<int> zone_min_width_;    // [zid] → minimum cross-section width
     std::vector<float> zone_future_pos_; // [zid] → decayed future-flow in +main direction
     std::vector<float> zone_future_neg_; // [zid] → decayed future-flow in -main direction
 
@@ -74,7 +72,6 @@ private:
     void build_centerline(const SharedEnvironment* env);
     void compute_dtw(const SharedEnvironment* env, std::vector<int>& dtw);
     void build_zone_ranges();
-    void compute_zone_widths(const SharedEnvironment* env, const std::vector<int>& dtw);
 
     // ---- 每 tick 更新 ----
     void update_zone_density(const SharedEnvironment* env);
@@ -93,6 +90,9 @@ private:
     bool  directional_future_flow_allows(int agent_loc,
                                          const std::vector<int>& locs,
                                          int start_idx) const;
+    float directional_future_flow_soft_penalty(int agent_loc,
+                                               const std::vector<int>& locs,
+                                               int start_idx) const;
     void  reset_directional_future_flow();
     void  seed_directional_future_flow(const SharedEnvironment* env);
     void  add_directional_future_flow_for_task(int agent_loc, int tid,

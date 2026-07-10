@@ -111,7 +111,12 @@ constexpr int   GAME_ROUTE_PENALTY  = 20;      // 密度惩罚起始阈值
 constexpr int   GAME_DISTANCE_SCORE_MODE = 0;  // 0=1/(dist+1), 1=直接距离(-dist)
 constexpr int   GAME_EX_MAIN_CAP   = 35;       // Layer3 逃逸豁免主区上限
 constexpr int   GAME_EX_NONMAIN_CAP = 80;      // Layer3 逃逸豁免非主区上限
-constexpr float GAME_BAL_ASSIGN_RATIO = 1.0f;  // mode=8 分配比例（0.0~1.0, 1.0=不限制）
+constexpr float GAME_BAL_ASSIGN_RATIO = 1.0f;
+constexpr float GAME_FLOW_SOFT_PENALTY_BASE = 10.0f;   // 7.10: future flow 软惩罚基数
+constexpr int   GAME_GLOBAL_CAND_TOPK      = 2000;     // 7.10: 全局候选任务上限
+constexpr int   GAME_GLOBAL_MAX_TASK_SCAN  = 20000;    // 7.10: 最大扫描任务数
+constexpr float GAME_PICKUP_WEIGHT         = 10.0f;    // 7.10: pickup 权重
+constexpr bool  GAME_SCORE_EXEMPT_ENABLED  = true;     // 7.10: 豁免打分开关  // mode=8 分配比例（0.0~1.0, 1.0=不限制）
 constexpr bool  GAME_SKIP_CHANNEL_ERRANDS = false; // mode16: 任务任一errand在ORZ通道标注格上则屏蔽
 constexpr bool  GAME_DIR_FLOW_ENABLED = false; // mode16: 开启主线zone双方向future-flow限流
 constexpr int   GAME_DIR_FLOW_CAP  = 64;       // mode16: 每个主线zone单方向future-flow上限

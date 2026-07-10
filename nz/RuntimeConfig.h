@@ -96,6 +96,12 @@ struct RuntimeConfig {
     int   game_ex_main_cap;
     int   game_ex_nonmain_cap;
     float game_bal_assign_ratio;
+    // ---- 7.10 新增 ----
+    float game_flow_soft_penalty_base;
+    int   game_global_cand_topk;
+    int   game_global_max_task_scan;
+    float game_pickup_weight;
+    bool  game_score_exempt_enabled;
     bool  game_skip_channel_errands;
     bool  game_dir_flow_enabled;
     int   game_dir_flow_cap;
@@ -402,6 +408,11 @@ struct RuntimeConfig {
         OVERRIDE_INT("GAME_EX_MAIN_CAP", game_ex_main_cap);
         OVERRIDE_INT("GAME_EX_NONMAIN_CAP", game_ex_nonmain_cap);
         OVERRIDE_FLOAT("GAME_BAL_ASSIGN_RATIO", game_bal_assign_ratio);
+        OVERRIDE_FLOAT("GAME_FLOW_SOFT_PENALTY_BASE", game_flow_soft_penalty_base);
+        OVERRIDE_INT("GAME_GLOBAL_CAND_TOPK", game_global_cand_topk);
+        OVERRIDE_INT("GAME_GLOBAL_MAX_TASK_SCAN", game_global_max_task_scan);
+        OVERRIDE_FLOAT("GAME_PICKUP_WEIGHT", game_pickup_weight);
+        OVERRIDE_BOOL("GAME_SCORE_EXEMPT_ENABLED", game_score_exempt_enabled);
         OVERRIDE_BOOL("GAME_SKIP_CHANNEL_ERRANDS", game_skip_channel_errands);
         OVERRIDE_BOOL("GAME_DIR_FLOW_ENABLED", game_dir_flow_enabled);
         OVERRIDE_INT("GAME_DIR_FLOW_CAP", game_dir_flow_cap);
@@ -715,6 +726,11 @@ private:
         game_ex_main_cap = GAME_EX_MAIN_CAP;
         game_ex_nonmain_cap = GAME_EX_NONMAIN_CAP;
         game_bal_assign_ratio = GAME_BAL_ASSIGN_RATIO;
+        game_flow_soft_penalty_base = GAME_FLOW_SOFT_PENALTY_BASE;
+        game_global_cand_topk = GAME_GLOBAL_CAND_TOPK;
+        game_global_max_task_scan = GAME_GLOBAL_MAX_TASK_SCAN;
+        game_pickup_weight = GAME_PICKUP_WEIGHT;
+        game_score_exempt_enabled = GAME_SCORE_EXEMPT_ENABLED;
         game_skip_channel_errands = GAME_SKIP_CHANNEL_ERRANDS;
         game_dir_flow_enabled = GAME_DIR_FLOW_ENABLED;
         game_dir_flow_cap = GAME_DIR_FLOW_CAP;
