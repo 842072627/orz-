@@ -96,6 +96,9 @@ if(PYTHON AND NOT ENABLE_PYTHON_BINDINGS)
     set(ENABLE_PYTHON_BINDINGS ON)
 endif()
 
+# python/common contains pyEntry.hpp (needed by driver.cpp regardless of PYTHON flag)
+include_directories("python/common")
+
 set(HAS_PYBIND11 OFF)
 if(ENABLE_PYTHON_BINDINGS)
     find_package(pybind11 QUIET)
