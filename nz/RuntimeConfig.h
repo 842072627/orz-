@@ -93,6 +93,7 @@ struct RuntimeConfig {
     int   game_dir_threshold;
     int   game_route_penalty;
     int   game_distance_score_mode;
+    bool  game_use_bfs_distance;
     int   game_ex_main_cap;
     int   game_ex_nonmain_cap;
     float game_bal_assign_ratio;
@@ -107,6 +108,29 @@ struct RuntimeConfig {
     int   game_dir_flow_cap;
     int   game_dir_flow_gap;
     int   game_dir_flow_max_check_main;
+    // game_16000 additions
+    bool  game_dir_flow_dynamic_cap;
+    float game_dir_flow_dynamic_cap_dec;
+    float game_dir_flow_dynamic_cap_high;
+    float game_dir_flow_dynamic_cap_inc;
+    int   game_dir_flow_dynamic_cap_interval;
+    float game_dir_flow_dynamic_cap_low;
+    float game_dir_flow_dynamic_cap_max_ratio;
+    float game_dir_flow_dynamic_cap_min_ratio;
+    int   game_dir_flow_dynamic_cap_window;
+    bool  game_dir_flow_hard_filter;
+    float game_dir_flow_horizon_exempt_ratio;
+    bool  game_dir_flow_random_shortest;
+    int   game_dir_flow_zone_horizon;
+    float game_flow_soft_over_cap_growth;
+    bool  game_idle_global_match;
+    int   game_idle_global_max_agents;
+    int   game_idle_global_ticks;
+    int   game_short_task_final_open_ticks;
+    float game_short_task_release_ratio;
+    int   game_short_task_test_ticks;
+    bool  game_short_task_throttle;
+
     float game_dir_flow_decay;
     bool  game_heuristic_hard_direction;
     bool  game_idle_highway_relocate;
@@ -126,6 +150,7 @@ struct RuntimeConfig {
     int   game_urgency_threshold;
     // ---- 有效自适应策略 ----
     int   game_search_radius;
+    int   game_skip_longest_pct;
     int   game_late_search_radius;
     bool  game_late_search_enable;
     float game_late_phase_ratio;
@@ -406,6 +431,7 @@ struct RuntimeConfig {
         OVERRIDE_INT("GAME_DIR_THRESHOLD", game_dir_threshold);
         OVERRIDE_INT("GAME_ROUTE_PENALTY", game_route_penalty);
         OVERRIDE_INT("GAME_DISTANCE_SCORE_MODE", game_distance_score_mode);
+        OVERRIDE_BOOL("GAME_USE_BFS_DISTANCE", game_use_bfs_distance);
         OVERRIDE_INT("GAME_EX_MAIN_CAP", game_ex_main_cap);
         OVERRIDE_INT("GAME_EX_NONMAIN_CAP", game_ex_nonmain_cap);
         OVERRIDE_FLOAT("GAME_BAL_ASSIGN_RATIO", game_bal_assign_ratio);
@@ -419,6 +445,28 @@ struct RuntimeConfig {
         OVERRIDE_INT("GAME_DIR_FLOW_CAP", game_dir_flow_cap);
         OVERRIDE_INT("GAME_DIR_FLOW_GAP", game_dir_flow_gap);
         OVERRIDE_INT("GAME_DIR_FLOW_MAX_CHECK_MAIN", game_dir_flow_max_check_main);
+        OVERRIDE_BOOL("GAME_DIR_FLOW_DYNAMIC_CAP", game_dir_flow_dynamic_cap);
+        OVERRIDE_FLOAT("GAME_DIR_FLOW_DYNAMIC_CAP_DEC", game_dir_flow_dynamic_cap_dec);
+        OVERRIDE_FLOAT("GAME_DIR_FLOW_DYNAMIC_CAP_HIGH", game_dir_flow_dynamic_cap_high);
+        OVERRIDE_FLOAT("GAME_DIR_FLOW_DYNAMIC_CAP_INC", game_dir_flow_dynamic_cap_inc);
+        OVERRIDE_INT("GAME_DIR_FLOW_DYNAMIC_CAP_INTERVAL", game_dir_flow_dynamic_cap_interval);
+        OVERRIDE_FLOAT("GAME_DIR_FLOW_DYNAMIC_CAP_LOW", game_dir_flow_dynamic_cap_low);
+        OVERRIDE_FLOAT("GAME_DIR_FLOW_DYNAMIC_CAP_MAX_RATIO", game_dir_flow_dynamic_cap_max_ratio);
+        OVERRIDE_FLOAT("GAME_DIR_FLOW_DYNAMIC_CAP_MIN_RATIO", game_dir_flow_dynamic_cap_min_ratio);
+        OVERRIDE_INT("GAME_DIR_FLOW_DYNAMIC_CAP_WINDOW", game_dir_flow_dynamic_cap_window);
+        OVERRIDE_BOOL("GAME_DIR_FLOW_HARD_FILTER", game_dir_flow_hard_filter);
+        OVERRIDE_FLOAT("GAME_DIR_FLOW_HORIZON_EXEMPT_RATIO", game_dir_flow_horizon_exempt_ratio);
+        OVERRIDE_BOOL("GAME_DIR_FLOW_RANDOM_SHORTEST", game_dir_flow_random_shortest);
+        OVERRIDE_INT("GAME_DIR_FLOW_ZONE_HORIZON", game_dir_flow_zone_horizon);
+        OVERRIDE_FLOAT("GAME_FLOW_SOFT_OVER_CAP_GROWTH", game_flow_soft_over_cap_growth);
+        OVERRIDE_BOOL("GAME_IDLE_GLOBAL_MATCH", game_idle_global_match);
+        OVERRIDE_INT("GAME_IDLE_GLOBAL_MAX_AGENTS", game_idle_global_max_agents);
+        OVERRIDE_INT("GAME_IDLE_GLOBAL_TICKS", game_idle_global_ticks);
+        OVERRIDE_INT("GAME_SHORT_TASK_FINAL_OPEN_TICKS", game_short_task_final_open_ticks);
+        OVERRIDE_FLOAT("GAME_SHORT_TASK_RELEASE_RATIO", game_short_task_release_ratio);
+        OVERRIDE_INT("GAME_SHORT_TASK_TEST_TICKS", game_short_task_test_ticks);
+        OVERRIDE_BOOL("GAME_SHORT_TASK_THROTTLE", game_short_task_throttle);
+
         OVERRIDE_FLOAT("GAME_DIR_FLOW_DECAY", game_dir_flow_decay);
         OVERRIDE_BOOL("GAME_HEURISTIC_HARD_DIRECTION", game_heuristic_hard_direction);
         OVERRIDE_BOOL("OPT_GAME_HEURISTIC_HARD_DIRECTION", game_heuristic_hard_direction);
@@ -438,6 +486,7 @@ struct RuntimeConfig {
         OVERRIDE_FLOAT("GAME_URGENCY_WEIGHT", game_urgency_weight);
         OVERRIDE_INT("GAME_URGENCY_THRESHOLD", game_urgency_threshold);
         OVERRIDE_INT("GAME_SEARCH_RADIUS", game_search_radius);
+        OVERRIDE_INT("GAME_SKIP_LONGEST_PCT", game_skip_longest_pct);
         OVERRIDE_INT("GAME_LATE_SEARCH_RADIUS", game_late_search_radius);
         OVERRIDE_BOOL("GAME_LATE_SEARCH_ENABLE", game_late_search_enable);
         OVERRIDE_FLOAT("GAME_LATE_PHASE_RATIO", game_late_phase_ratio);
@@ -725,6 +774,7 @@ private:
         game_dir_threshold = GAME_DIR_THRESHOLD;
         game_route_penalty = GAME_ROUTE_PENALTY;
         game_distance_score_mode = GAME_DISTANCE_SCORE_MODE;
+        game_use_bfs_distance = GAME_USE_BFS_DISTANCE;
         game_ex_main_cap = GAME_EX_MAIN_CAP;
         game_ex_nonmain_cap = GAME_EX_NONMAIN_CAP;
         game_bal_assign_ratio = GAME_BAL_ASSIGN_RATIO;
@@ -738,6 +788,28 @@ private:
         game_dir_flow_cap = GAME_DIR_FLOW_CAP;
         game_dir_flow_gap = GAME_DIR_FLOW_GAP;
         game_dir_flow_max_check_main = GAME_DIR_FLOW_MAX_CHECK_MAIN;
+        game_dir_flow_dynamic_cap = GAME_DIR_FLOW_DYNAMIC_CAP;
+        game_dir_flow_dynamic_cap_dec = GAME_DIR_FLOW_DYNAMIC_CAP_DEC;
+        game_dir_flow_dynamic_cap_high = GAME_DIR_FLOW_DYNAMIC_CAP_HIGH;
+        game_dir_flow_dynamic_cap_inc = GAME_DIR_FLOW_DYNAMIC_CAP_INC;
+        game_dir_flow_dynamic_cap_interval = GAME_DIR_FLOW_DYNAMIC_CAP_INTERVAL;
+        game_dir_flow_dynamic_cap_low = GAME_DIR_FLOW_DYNAMIC_CAP_LOW;
+        game_dir_flow_dynamic_cap_max_ratio = GAME_DIR_FLOW_DYNAMIC_CAP_MAX_RATIO;
+        game_dir_flow_dynamic_cap_min_ratio = GAME_DIR_FLOW_DYNAMIC_CAP_MIN_RATIO;
+        game_dir_flow_dynamic_cap_window = GAME_DIR_FLOW_DYNAMIC_CAP_WINDOW;
+        game_dir_flow_hard_filter = GAME_DIR_FLOW_HARD_FILTER;
+        game_dir_flow_horizon_exempt_ratio = GAME_DIR_FLOW_HORIZON_EXEMPT_RATIO;
+        game_dir_flow_random_shortest = GAME_DIR_FLOW_RANDOM_SHORTEST;
+        game_dir_flow_zone_horizon = GAME_DIR_FLOW_ZONE_HORIZON;
+        game_flow_soft_over_cap_growth = GAME_FLOW_SOFT_OVER_CAP_GROWTH;
+        game_idle_global_match = GAME_IDLE_GLOBAL_MATCH;
+        game_idle_global_max_agents = GAME_IDLE_GLOBAL_MAX_AGENTS;
+        game_idle_global_ticks = GAME_IDLE_GLOBAL_TICKS;
+        game_short_task_final_open_ticks = GAME_SHORT_TASK_FINAL_OPEN_TICKS;
+        game_short_task_release_ratio = GAME_SHORT_TASK_RELEASE_RATIO;
+        game_short_task_test_ticks = GAME_SHORT_TASK_TEST_TICKS;
+        game_short_task_throttle = GAME_SHORT_TASK_THROTTLE;
+
         game_dir_flow_decay = GAME_DIR_FLOW_DECAY;
         game_heuristic_hard_direction = GAME_HEURISTIC_HARD_DIRECTION;
         game_idle_highway_relocate = GAME_IDLE_HIGHWAY_RELOCATE;
@@ -756,6 +828,7 @@ private:
         game_urgency_threshold = GAME_URGENCY_THRESHOLD;
         // 有效自适应策略
         game_search_radius = GAME_SEARCH_RADIUS;
+        game_skip_longest_pct = GAME_SKIP_LONGEST_PCT;
         game_late_search_radius = GAME_LATE_SEARCH_RADIUS;
         game_late_search_enable = GAME_LATE_SEARCH_ENABLE;
         game_late_phase_ratio = GAME_LATE_PHASE_RATIO;

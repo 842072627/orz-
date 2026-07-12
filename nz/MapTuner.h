@@ -69,8 +69,9 @@ inline void load_for_combined(const MapProfile& profile, const SharedEnvironment
             c.game_heuristic_hard_direction = true;
             c.game_idle_highway_relocate = true;
             c.game_skip_channel_errands = false;
+            c.game_skip_longest_pct = 5;
             c.game_dir_flow_enabled = true;
-            c.game_dir_flow_cap = 250;
+            c.game_dir_flow_cap = 9999;
             c.game_dir_flow_gap = 0;
             c.game_dir_flow_decay = 0.9f;
             c.game_dir_flow_max_check_main = 1000;

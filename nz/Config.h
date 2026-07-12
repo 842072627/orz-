@@ -166,7 +166,32 @@ constexpr int   GAME_LATE_ZONE_CAP     = 25;     // 后期zone_hard_cap
 
 // ---- IDEA5: Task Age排序优先 ----
 // free_tasks按等待时间排序，优先分配久等task
-constexpr bool  GAME_AGE_SORT         = false;   // true=启用age排序
+constexpr bool  GAME_AGE_SORT         = false;
+constexpr int   GAME_SKIP_LONGEST_PCT = 0;
+// mode16: dynamic cap (game_16000)
+constexpr bool  GAME_DIR_FLOW_DYNAMIC_CAP = false;
+constexpr float GAME_DIR_FLOW_DYNAMIC_CAP_DEC = 0.95f;
+constexpr float GAME_DIR_FLOW_DYNAMIC_CAP_HIGH = 0.03f;
+constexpr float GAME_DIR_FLOW_DYNAMIC_CAP_INC = 5.0f;
+constexpr int   GAME_DIR_FLOW_DYNAMIC_CAP_INTERVAL = 200;
+constexpr float GAME_DIR_FLOW_DYNAMIC_CAP_LOW = 0.01f;
+constexpr float GAME_DIR_FLOW_DYNAMIC_CAP_MAX_RATIO = 1.40f;
+constexpr float GAME_DIR_FLOW_DYNAMIC_CAP_MIN_RATIO = 0.50f;
+constexpr int   GAME_DIR_FLOW_DYNAMIC_CAP_WINDOW = 500;
+constexpr bool  GAME_DIR_FLOW_HARD_FILTER = true;
+constexpr float GAME_DIR_FLOW_HORIZON_EXEMPT_RATIO = 0.2f;
+constexpr bool  GAME_DIR_FLOW_RANDOM_SHORTEST = true;
+constexpr int   GAME_DIR_FLOW_ZONE_HORIZON = 15;
+constexpr float GAME_FLOW_SOFT_OVER_CAP_GROWTH = 1.20f;
+constexpr bool  GAME_IDLE_GLOBAL_MATCH = false;
+constexpr int   GAME_IDLE_GLOBAL_MAX_AGENTS = 64;
+constexpr int   GAME_IDLE_GLOBAL_TICKS = 500;
+constexpr int   GAME_SHORT_TASK_FINAL_OPEN_TICKS = 10000;
+constexpr float GAME_SHORT_TASK_RELEASE_RATIO = 0.20f;
+constexpr int   GAME_SHORT_TASK_TEST_TICKS = 40000;
+constexpr bool  GAME_SHORT_TASK_THROTTLE = false;
+constexpr bool  GAME_USE_BFS_DISTANCE = true;
+       // >0: 按 errand 总 main_dist 淘汰最长的 N% 任务   // true=启用age排序
 constexpr float GAME_AGE_SORT_WEIGHT  = 0.5f;    // score加成: + weight * age/total_steps
 
 // ═══════════════════════════════════════════════════════════════════

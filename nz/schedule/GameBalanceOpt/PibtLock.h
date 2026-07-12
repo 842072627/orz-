@@ -45,4 +45,4 @@ private:
 
 inline PibtLock& pibt_lock() { return PibtLock::instance(); }
 
-} // namespace nz
+} // namespace optsvr

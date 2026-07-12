@@ -1,10 +1,13 @@
-// nz/schedule/GameBalanceOpt/GameBalanceOptScheduler.cpp
+// optsvr/schedule/GameBalanceOpt/GameBalanceOptScheduler.cpp
 // 中心线zone调度器实现 — BFS 中心线 + 24×24 zone 密度 + 方向锁 + 三层豁免
 #include "GameBalanceOptScheduler.h"
+#include "HeuristicMatrix.h"
 #include "orz_highway.h"
 #include "ScheduleStatsExport.h"
+#include <atomic>
 #include <climits>
 #include <cmath>
+#include <iomanip>
 #include <iostream>
 #include <sstream>
 #include <thread>
@@ -16,6 +19,7 @@ namespace nz {
 // ================================================================
 static constexpr int    CONTAIN_EXPAND   = 1;
 static constexpr int    ROUTE_THRESHOLD  = 20;
+static constexpr int    GAME_H_CAP       = 100000;
 static constexpr float  INVALID_SCORE    = -1e9f;
 static constexpr float  DIVISOR_TABLE[21] = {
     1.0f, 1.1f, 1.2f, 1.3f, 1.4f,
@@ -48,10 +52,18 @@ static inline float route_density_penalty_cost(int density, int threshold) {
 
 static inline float future_flow_soft_penalty_from_ratio(float ratio) {
     constexpr float kStartRatio = 0.70f;
+    constexpr float kAtCapMultiplier = 5.0f;
     if (ratio < kStartRatio) return 0.0f;
     const float base = std::max(0.0f, cfg().game_flow_soft_penalty_base);
-    const float exponent = std::min(100.0f, std::max(0.0f, (ratio - kStartRatio) * 100.0f));
-    return base * std::pow(1.1f, exponent);
+    const float at_cap = base * kAtCapMultiplier;
+    if (ratio <= 1.0f) {
+        const float progress = (ratio - kStartRatio) / (1.0f - kStartRatio);
+        return base + (at_cap - base) * progress;
+    }
+    float growth = cfg().game_flow_soft_over_cap_growth;
+    if (!std::isfinite(growth)) growth = GAME_FLOW_SOFT_OVER_CAP_GROWTH;
+    growth = std::max(0.0f, growth);
+    return at_cap + base * 100.0f * growth * (ratio - 1.0f);
 }
 
 // ================================================================
@@ -83,6 +95,24 @@ void GameBalanceOptScheduler::project(int loc, int& m, int& b) const {
     m = (b >= 0) ? main_dist_[loc] : -1;
 }
 
+float GameBalanceOptScheduler::projected_distance_between(int from, int to) const {
+    int fm, fb, tm, tb;
+    project(from, fm, fb);
+    project(to, tm, tb);
+    if (fm < 0 || tm < 0) return -1.0f;
+    return static_cast<float>(std::abs(fm - tm) + std::abs(fb - tb));
+}
+
+float GameBalanceOptScheduler::score_distance_between(int from, int to) const {
+    if (cfg().game_use_bfs_distance && env_ != nullptr && heuristic_matrix().is_ready()) {
+        if (from < 0 || to < 0 || from >= total_ || to >= total_) return -1.0f;
+        int h = get_h_fast(env_, from, to);
+        if (h < 0 || h >= GAME_H_CAP) return -1.0f;
+        return static_cast<float>(h);
+    }
+    return projected_distance_between(from, to);
+}
+
 bool GameBalanceOptScheduler::game_directional_flow_enabled() const {
     return cfg().planner_mode == 16 && cfg().game_dir_flow_enabled &&
            cfg().game_dir_flow_cap > 0;
@@ -96,17 +126,659 @@ bool GameBalanceOptScheduler::task_has_channel_errand(const std::vector<int>& lo
     return false;
 }
 
+int GameBalanceOptScheduler::zone24_of_loc(int loc) const {
+    if (loc < 0 || loc >= total_ || cols_ <= 0 || n24c_ <= 0) return -1;
+    const int r = loc / cols_;
+    const int c = loc % cols_;
+    const int zid = (r / 24) * n24c_ + (c / 24);
+    const int nz = n24c_ * n24r_;
+    return (zid >= 0 && zid < nz) ? zid : -1;
+}
+
+void GameBalanceOptScheduler::build_zone24_distances() {
+    const int nz = n24c_ * n24r_;
+    constexpr uint16_t kInf = 65535;
+    zone24_dist_.assign(std::max(0, nz * nz), kInf);
+    zone24_neighbors_.assign(std::max(0, nz), {});
+    if (nz <= 0 || (int)zone24_has_free_.size() != nz) return;
+
+    // Two geometric neighbor zones are connected only when at least one
+    // traversable cell edge actually crosses their shared boundary.
+    for (int loc = 0; loc < total_; ++loc) {
+        if (env_ == nullptr || env_->map[loc] != 0) continue;
+        const int zid = zone24_of_loc(loc);
+        if (zid < 0) continue;
+        const int r = loc / cols_;
+        const int c = loc % cols_;
+        const int next[2] = {
+            (c + 1 < cols_) ? loc + 1 : -1,
+            (r + 1 < rows_) ? loc + cols_ : -1,
+        };
+        for (int nb_loc : next) {
+            if (nb_loc < 0 || env_->map[nb_loc] != 0) continue;
+            const int nb_zid = zone24_of_loc(nb_loc);
+            if (nb_zid < 0 || nb_zid == zid) continue;
+            zone24_neighbors_[zid].push_back(nb_zid);
+            zone24_neighbors_[nb_zid].push_back(zid);
+        }
+    }
+    for (auto& neighbors : zone24_neighbors_) {
+        std::sort(neighbors.begin(), neighbors.end());
+        neighbors.erase(std::unique(neighbors.begin(), neighbors.end()),
+                        neighbors.end());
+    }
+
+    std::queue<int> q;
+    for (int src = 0; src < nz; ++src) {
+        if (!zone24_has_free_[src]) continue;
+        uint16_t* row = zone24_dist_.data() + src * nz;
+        row[src] = 0;
+        q.push(src);
+        while (!q.empty()) {
+            const int cur = q.front();
+            q.pop();
+            for (int nb : zone24_neighbors_[cur]) {
+                if (nb < 0 || nb >= nz || !zone24_has_free_[nb]) continue;
+                if (row[nb] != kInf) continue;
+                row[nb] = static_cast<uint16_t>(row[cur] + 1);
+                q.push(nb);
+            }
+        }
+    }
+}
+
+std::vector<int> GameBalanceOptScheduler::shortest_zone_path(
+    int from_zid, int to_zid, bool randomize) const {
+    const int nz = n24c_ * n24r_;
+    constexpr uint16_t kInf = 65535;
+    if (from_zid < 0 || to_zid < 0 || from_zid >= nz || to_zid >= nz)
+        return {};
+    if (from_zid == to_zid) return {from_zid};
+    if ((int)zone24_has_free_.size() != nz ||
+        !zone24_has_free_[from_zid] || !zone24_has_free_[to_zid] ||
+        (int)zone24_dist_.size() != nz * nz)
+        return {};
+    const uint16_t* dist = zone24_dist_.data() + from_zid * nz;
+    if (dist[to_zid] == kInf) return {};
+
+    std::vector<int> path;
+    path.reserve(static_cast<size_t>(dist[to_zid]) + 1);
+    int cur = from_zid;
+    path.push_back(cur);
+    while (cur != to_zid) {
+        std::vector<int> nexts;
+        for (int nb : zone24_neighbors_[cur]) {
+            const uint16_t nb_to_target = zone24_dist_[nb * nz + to_zid];
+            if (nb >= 0 && nb < nz && dist[nb] == dist[cur] + 1 &&
+                nb_to_target != kInf &&
+                dist[nb] + nb_to_target == dist[to_zid])
+                nexts.push_back(nb);
+        }
+        if (nexts.empty()) return {};
+        if (randomize && nexts.size() > 1) {
+            std::uniform_int_distribution<int> pick(0, (int)nexts.size() - 1);
+            cur = nexts[pick(ff_rng_)];
+        } else {
+            std::sort(nexts.begin(), nexts.end());
+            cur = nexts.front();
+        }
+        path.push_back(cur);
+    }
+    return path;
+}
+
+bool GameBalanceOptScheduler::build_task_zone_cache(
+    int tid, TaskStaticCache& info) const {
+    if (env_ == nullptr) return false;
+    auto tit = env_->task_pool.find(tid);
+    if (tit == env_->task_pool.end() || tit->second.locations.empty()) return false;
+
+    const auto& locs = tit->second.locations;
+    info.internal_zone_paths.resize(locs.size());
+    info.coarse_tail_distance.assign(locs.size(), 0.0f);
+    info.coarse_intrinsic_distance = 0.0f;
+    info.coarse_distance_valid = true;
+    std::vector<float> coarse_leg_distance(locs.size(), 0.0f);
+    for (size_t i = 1; i < locs.size(); ++i) {
+        const float dist = projected_distance_between(locs[i - 1], locs[i]);
+        if (dist < 0.0f) {
+            info.coarse_distance_valid = false;
+        } else {
+            coarse_leg_distance[i] = dist;
+            info.coarse_intrinsic_distance += dist;
+        }
+        info.internal_zone_paths[i] = shortest_zone_path(
+            zone24_of_loc(locs[i - 1]), zone24_of_loc(locs[i]), false);
+    }
+    for (int i = static_cast<int>(locs.size()) - 2; i >= 0; --i) {
+        info.coarse_tail_distance[i] =
+            info.coarse_tail_distance[i + 1] + coarse_leg_distance[i + 1];
+    }
+    info.zone_paths_ready = true;
+    return true;
+}
+
+bool GameBalanceOptScheduler::build_task_distance_cache(
+    int tid, TaskStaticCache& info) const {
+    if (env_ == nullptr) return false;
+    auto tit = env_->task_pool.find(tid);
+    if (tit == env_->task_pool.end() || tit->second.locations.empty()) return false;
+
+    const auto& locs = tit->second.locations;
+    info.intrinsic_distance = 0.0f;
+    info.distance_valid = true;
+    info.tail_distance.assign(locs.size(), 0.0f);
+    std::vector<float> leg_distance(locs.size(), 0.0f);
+    for (size_t i = 1; i < locs.size(); ++i) {
+        const float dist = score_distance_between(locs[i - 1], locs[i]);
+        if (dist < 0.0f) {
+            info.distance_valid = false;
+        } else {
+            leg_distance[i] = dist;
+            info.intrinsic_distance += dist;
+        }
+    }
+    for (int i = static_cast<int>(locs.size()) - 2; i >= 0; --i)
+        info.tail_distance[i] = info.tail_distance[i + 1] + leg_distance[i + 1];
+    info.distance_ready = true;
+    return true;
+}
+
+bool GameBalanceOptScheduler::build_task_static_cache(
+    int tid, TaskStaticCache& info) const {
+    info = TaskStaticCache{};
+    return build_task_zone_cache(tid, info) &&
+           build_task_distance_cache(tid, info);
+}
+
+std::size_t GameBalanceOptScheduler::prewarm_task_static_cache(
+    const std::vector<int>& tids,
+    std::chrono::steady_clock::time_point deadline,
+    int max_threads) {
+    std::vector<int> zone_pending;
+    std::vector<int> distance_pending;
+    zone_pending.reserve(tids.size());
+    distance_pending.reserve(tids.size());
+    for (int tid : tids) {
+        auto cached = task_static_cache_.find(tid);
+        if (cached == task_static_cache_.end() || !cached->second.zone_paths_ready)
+            zone_pending.push_back(tid);
+        if (cached == task_static_cache_.end() || !cached->second.distance_ready)
+            distance_pending.push_back(tid);
+    }
+    if ((zone_pending.empty() && distance_pending.empty()) ||
+        std::chrono::steady_clock::now() >= deadline)
+        return 0;
+
+    auto deduplicate = [](std::vector<int>& pending) {
+        std::sort(pending.begin(), pending.end());
+        pending.erase(std::unique(pending.begin(), pending.end()), pending.end());
+    };
+    deduplicate(zone_pending);
+    deduplicate(distance_pending);
+
+    int cache_threads = cfg().num_threads;
+    if (cache_threads <= 0) {
+        cache_threads = static_cast<int>(std::thread::hardware_concurrency());
+        if (cache_threads <= 0) cache_threads = 4;
+    }
+    const int zone_threads = std::max(1,
+        std::min<int>(cache_threads, std::max<std::size_t>(1, zone_pending.size())));
+    const auto zone_start = std::chrono::steady_clock::now();
+    std::vector<TaskStaticCache> zone_built(zone_pending.size());
+    std::vector<unsigned char> zone_ok(zone_pending.size(), 0);
+    std::atomic<std::size_t> next_zone{0};
+    std::vector<std::thread> workers;
+    workers.reserve(zone_threads);
+    for (int t = 0; t < zone_threads; ++t) {
+        workers.emplace_back([&]() {
+            while (std::chrono::steady_clock::now() < deadline) {
+                const std::size_t i = next_zone.fetch_add(1, std::memory_order_relaxed);
+                if (i >= zone_pending.size()) break;
+                if (build_task_zone_cache(zone_pending[i], zone_built[i]))
+                    zone_ok[i] = 1;
+            }
+        });
+    }
+    for (auto& worker : workers) worker.join();
+    workers.clear();
+
+    std::size_t zone_added = 0;
+    for (std::size_t i = 0; i < zone_pending.size(); ++i) {
+        if (!zone_ok[i]) continue;
+        auto [it, inserted] = task_static_cache_.try_emplace(zone_pending[i]);
+        it->second.coarse_intrinsic_distance =
+            zone_built[i].coarse_intrinsic_distance;
+        it->second.coarse_distance_valid = zone_built[i].coarse_distance_valid;
+        it->second.coarse_tail_distance =
+            std::move(zone_built[i].coarse_tail_distance);
+        it->second.internal_zone_paths =
+            std::move(zone_built[i].internal_zone_paths);
+        it->second.zone_paths_ready = true;
+        if (inserted) ++zone_added;
+    }
+    const auto zone_end = std::chrono::steady_clock::now();
+
+    if (max_threads > 0) cache_threads = std::min(cache_threads, max_threads);
+    const int distance_threads = std::max(1,
+        std::min<int>(cache_threads, std::max<std::size_t>(1, distance_pending.size())));
+    std::vector<TaskStaticCache> distance_built(distance_pending.size());
+    std::vector<unsigned char> distance_ok(distance_pending.size(), 0);
+    std::atomic<std::size_t> next_distance{0};
+    workers.reserve(distance_threads);
+    for (int t = 0; t < distance_threads; ++t) {
+        workers.emplace_back([&]() {
+            while (std::chrono::steady_clock::now() < deadline) {
+                const std::size_t i =
+                    next_distance.fetch_add(1, std::memory_order_relaxed);
+                if (i >= distance_pending.size()) break;
+                if (build_task_distance_cache(
+                        distance_pending[i], distance_built[i]))
+                    distance_ok[i] = 1;
+            }
+        });
+    }
+    for (auto& worker : workers) worker.join();
+
+    std::size_t distance_added = 0;
+    for (std::size_t i = 0; i < distance_pending.size(); ++i) {
+        if (!distance_ok[i]) continue;
+        auto [it, inserted] = task_static_cache_.try_emplace(distance_pending[i]);
+        (void)inserted;
+        it->second.intrinsic_distance = distance_built[i].intrinsic_distance;
+        it->second.distance_valid = distance_built[i].distance_valid;
+        it->second.tail_distance = std::move(distance_built[i].tail_distance);
+        it->second.distance_ready = true;
+        ++distance_added;
+    }
+    const auto distance_end = std::chrono::steady_clock::now();
+
+    if (cfg().debug_level >= 1 && tids.size() >= 100) {
+        const auto zone_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            zone_end - zone_start).count();
+        const auto distance_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            distance_end - zone_end).count();
+        std::cerr << "[GameTaskCache] tasks=" << tids.size()
+                  << " zone=" << zone_added << "@" << zone_ms << "ms"
+                  << " dist=" << distance_added << "@" << distance_ms << "ms\n";
+    }
+    return distance_added;
+}
+
+const GameBalanceOptScheduler::TaskStaticCache*
+GameBalanceOptScheduler::ensure_task_static_cache(int tid) {
+    auto cached = task_static_cache_.find(tid);
+    if (cached != task_static_cache_.end() && cached->second.distance_ready &&
+        cached->second.zone_paths_ready)
+        return &cached->second;
+    TaskStaticCache info;
+    if (!build_task_static_cache(tid, info)) return nullptr;
+    auto [it, inserted] = task_static_cache_.insert_or_assign(tid, std::move(info));
+    (void)inserted;
+    return &it->second;
+}
+
+const std::vector<int>* GameBalanceOptScheduler::cached_internal_zone_path(
+    int tid, int edge_idx, int from_loc, const std::vector<int>& locs) const {
+    if (tid < 0 || edge_idx <= 0 || edge_idx >= static_cast<int>(locs.size()) ||
+        from_loc != locs[edge_idx - 1])
+        return nullptr;
+    auto cached = task_static_cache_.find(tid);
+    if (cached == task_static_cache_.end() ||
+        !cached->second.zone_paths_ready ||
+        edge_idx >= static_cast<int>(cached->second.internal_zone_paths.size()))
+        return nullptr;
+    return &cached->second.internal_zone_paths[edge_idx];
+}
+
 void GameBalanceOptScheduler::reset_directional_future_flow() {
     const int nz = n24c_ * n24r_;
     zone_future_pos_.assign(std::max(0, nz), 0.0f);
     zone_future_neg_.assign(std::max(0, nz), 0.0f);
+    zone_future_exempt_pos_.assign(std::max(0, nz), 0.0f);
+    zone_future_exempt_neg_.assign(std::max(0, nz), 0.0f);
+}
+
+float GameBalanceOptScheduler::directional_zone_cap(int zid, int intent) const {
+    (void)intent;
+    const float base_cap = static_cast<float>(std::max(1, cfg().game_dir_flow_cap));
+    if (!cfg().game_dir_flow_dynamic_cap || zid < 0 ||
+        zid >= static_cast<int>(zone_dynamic_cap_.size()))
+        return base_cap;
+    const float cap = zone_dynamic_cap_[zid];
+    return std::isfinite(cap) && cap > 0.0f ? cap : base_cap;
+}
+
+void GameBalanceOptScheduler::reset_dynamic_zone_cap(const SharedEnvironment* env) {
+    const int nz = n24c_ * n24r_;
+    const float base_cap = static_cast<float>(std::max(1, cfg().game_dir_flow_cap));
+    zone_stall_samples_.clear();
+    zone_stall_agent_ticks_.assign(std::max(0, nz), 0.0);
+    zone_stall_busy_agent_ticks_.assign(std::max(0, nz), 0.0);
+    zone_stall_density_.assign(std::max(0, nz), 0.0f);
+    zone_stall_busy_density_.assign(std::max(0, nz), 0.0f);
+    zone_dynamic_cap_.assign(std::max(0, nz), base_cap);
+    dynamic_cap_prev_agent_loc_.assign(env != nullptr ? env->num_of_agents : 0, -1);
+    if (env != nullptr) {
+        const int n = std::min<int>(env->num_of_agents, env->curr_states.size());
+        for (int a = 0; a < n; ++a)
+            dynamic_cap_prev_agent_loc_[a] = env->curr_states[a].location;
+        dynamic_cap_prev_tick_ = std::max(0,
+            std::max(env->system_timestep, env->curr_timestep));
+    } else {
+        dynamic_cap_prev_tick_ = -1;
+    }
+    dynamic_cap_last_update_tick_ = dynamic_cap_prev_tick_;
+    dynamic_cap_last_window_ticks_ = 0;
+    dynamic_cap_last_up_ = 0;
+    dynamic_cap_last_down_ = 0;
+    dynamic_cap_last_avg_ = base_cap;
+    dynamic_cap_last_min_ = base_cap;
+    dynamic_cap_last_max_ = base_cap;
+    dynamic_cap_last_stall_avg_ = 0.0f;
+    dynamic_cap_last_stall_max_ = 0.0f;
+    dynamic_cap_last_busy_stall_avg_ = 0.0f;
+    dynamic_cap_last_free_stall_avg_ = 0.0f;
+    dynamic_cap_last_active_ = 0;
+    dynamic_cap_last_below_base_ = 0;
+    dynamic_cap_last_above_base_ = 0;
+    dynamic_cap_last_at_min_ = 0;
+}
+
+void GameBalanceOptScheduler::update_dynamic_zone_cap(const SharedEnvironment* env) {
+    if (env == nullptr || !ready_) return;
+    const int nz = n24c_ * n24r_;
+    if (nz <= 0) return;
+    if ((int)zone_dynamic_cap_.size() != nz ||
+        (int)zone_stall_agent_ticks_.size() != nz ||
+        (int)zone_stall_busy_agent_ticks_.size() != nz ||
+        (int)zone_stall_density_.size() != nz ||
+        (int)zone_stall_busy_density_.size() != nz ||
+        (int)dynamic_cap_prev_agent_loc_.size() != env->num_of_agents) {
+        reset_dynamic_zone_cap(env);
+        return;
+    }
+    if (!cfg().game_dir_flow_dynamic_cap) return;
+
+    const int curr_tick = std::max(0,
+        std::max(env->system_timestep, env->curr_timestep));
+    if (dynamic_cap_prev_tick_ < 0 || curr_tick <= dynamic_cap_prev_tick_) {
+        const int n = std::min<int>(env->num_of_agents, env->curr_states.size());
+        for (int a = 0; a < n; ++a)
+            dynamic_cap_prev_agent_loc_[a] = env->curr_states[a].location;
+        dynamic_cap_prev_tick_ = curr_tick;
+        return;
+    }
+
+    const int window = std::max(1, cfg().game_dir_flow_dynamic_cap_window);
+    const int segment_start = std::max(dynamic_cap_prev_tick_, curr_tick - window);
+    const int segment_ticks = curr_tick - segment_start;
+    ZoneStallSample sample;
+    sample.start_tick = segment_start;
+    sample.end_tick = curr_tick;
+    sample.stationary_agents.assign(nz, 0);
+    sample.stationary_busy_agents.assign(nz, 0);
+
+    const int n = std::min<int>(env->num_of_agents, env->curr_states.size());
+    for (int a = 0; a < n; ++a) {
+        const int loc = env->curr_states[a].location;
+        if (loc >= 0 && loc == dynamic_cap_prev_agent_loc_[a]) {
+            const int zid = zone24_of_loc(loc);
+            if (zid >= 0 && zid < nz && sample.stationary_agents[zid] < UINT16_MAX) {
+                ++sample.stationary_agents[zid];
+                const bool busy = a < static_cast<int>(env->curr_task_schedule.size()) &&
+                                  env->curr_task_schedule[a] >= 0;
+                if (busy && sample.stationary_busy_agents[zid] < UINT16_MAX)
+                    ++sample.stationary_busy_agents[zid];
+            }
+        }
+        dynamic_cap_prev_agent_loc_[a] = loc;
+    }
+    dynamic_cap_prev_tick_ = curr_tick;
+
+    if (segment_ticks > 0) {
+        for (int zid = 0; zid < nz; ++zid) {
+            zone_stall_agent_ticks_[zid] +=
+                static_cast<double>(sample.stationary_agents[zid]) * segment_ticks;
+            zone_stall_busy_agent_ticks_[zid] +=
+                static_cast<double>(sample.stationary_busy_agents[zid]) * segment_ticks;
+        }
+        zone_stall_samples_.push_back(std::move(sample));
+    }
+
+    const int cutoff = curr_tick - window;
+    while (!zone_stall_samples_.empty() &&
+           zone_stall_samples_.front().end_tick <= cutoff) {
+        const auto& old = zone_stall_samples_.front();
+        const int ticks = old.end_tick - old.start_tick;
+        for (int zid = 0; zid < nz; ++zid) {
+            zone_stall_agent_ticks_[zid] -=
+                static_cast<double>(old.stationary_agents[zid]) * ticks;
+            zone_stall_busy_agent_ticks_[zid] -=
+                static_cast<double>(old.stationary_busy_agents[zid]) * ticks;
+        }
+        zone_stall_samples_.pop_front();
+    }
+    if (!zone_stall_samples_.empty() &&
+        zone_stall_samples_.front().start_tick < cutoff) {
+        auto& old = zone_stall_samples_.front();
+        const int trimmed_ticks = cutoff - old.start_tick;
+        for (int zid = 0; zid < nz; ++zid) {
+            zone_stall_agent_ticks_[zid] -=
+                static_cast<double>(old.stationary_agents[zid]) * trimmed_ticks;
+            zone_stall_busy_agent_ticks_[zid] -=
+                static_cast<double>(old.stationary_busy_agents[zid]) * trimmed_ticks;
+        }
+        old.start_tick = cutoff;
+    }
+
+    const int covered_ticks = zone_stall_samples_.empty()
+        ? 0 : curr_tick - zone_stall_samples_.front().start_tick;
+    dynamic_cap_last_window_ticks_ = covered_ticks;
+    for (int zid = 0; zid < nz; ++zid) {
+        const int valid_cells = zid < (int)zone24_valid_cells_.size()
+            ? zone24_valid_cells_[zid] : 0;
+        if (valid_cells <= 0 || covered_ticks <= 0) {
+            zone_stall_density_[zid] = 0.0f;
+            zone_stall_busy_density_[zid] = 0.0f;
+            continue;
+        }
+        const double denom = static_cast<double>(valid_cells) * covered_ticks;
+        zone_stall_density_[zid] = static_cast<float>(
+            std::max(0.0, zone_stall_agent_ticks_[zid]) / denom);
+        zone_stall_busy_density_[zid] = static_cast<float>(
+            std::max(0.0, zone_stall_busy_agent_ticks_[zid]) / denom);
+    }
+
+    const int interval = std::max(1, cfg().game_dir_flow_dynamic_cap_interval);
+    if (dynamic_cap_last_update_tick_ >= 0 &&
+        curr_tick - dynamic_cap_last_update_tick_ < interval)
+        return;
+    dynamic_cap_last_update_tick_ = curr_tick;
+    dynamic_cap_last_up_ = 0;
+    dynamic_cap_last_down_ = 0;
+    if (covered_ticks < window) return;
+
+    const float base_cap = static_cast<float>(std::max(1, cfg().game_dir_flow_cap));
+    float low = cfg().game_dir_flow_dynamic_cap_low;
+    float high = cfg().game_dir_flow_dynamic_cap_high;
+    if (!std::isfinite(low)) low = GAME_DIR_FLOW_DYNAMIC_CAP_LOW;
+    if (!std::isfinite(high)) high = GAME_DIR_FLOW_DYNAMIC_CAP_HIGH;
+    low = std::max(0.0f, low);
+    high = std::max(low, high);
+    float inc = cfg().game_dir_flow_dynamic_cap_inc;
+    float dec = cfg().game_dir_flow_dynamic_cap_dec;
+    float min_ratio = cfg().game_dir_flow_dynamic_cap_min_ratio;
+    float max_ratio = cfg().game_dir_flow_dynamic_cap_max_ratio;
+    if (!std::isfinite(inc)) inc = GAME_DIR_FLOW_DYNAMIC_CAP_INC;
+    if (!std::isfinite(dec)) dec = GAME_DIR_FLOW_DYNAMIC_CAP_DEC;
+    if (!std::isfinite(min_ratio)) min_ratio = GAME_DIR_FLOW_DYNAMIC_CAP_MIN_RATIO;
+    if (!std::isfinite(max_ratio)) max_ratio = GAME_DIR_FLOW_DYNAMIC_CAP_MAX_RATIO;
+    inc = std::max(0.0f, inc);
+    dec = std::max(0.1f, std::min(1.0f, dec));
+    min_ratio = std::max(0.05f, min_ratio);
+    max_ratio = std::max(min_ratio, max_ratio);
+    const float min_cap = base_cap * min_ratio;
+    const float max_cap = base_cap * max_ratio;
+    std::vector<int> decreased_zones;
+
+    for (int zid = 0; zid < nz; ++zid) {
+        if (zid >= (int)zone24_valid_cells_.size() || zone24_valid_cells_[zid] <= 0)
+            continue;
+        const float normal_flow =
+            (zid < (int)zone_future_pos_.size() && zid < (int)zone_future_neg_.size())
+            ? std::max(zone_future_pos_[zid], zone_future_neg_[zid]) : 0.0f;
+        const float exempt_flow =
+            (zid < (int)zone_future_exempt_pos_.size() &&
+             zid < (int)zone_future_exempt_neg_.size())
+            ? std::max(zone_future_exempt_pos_[zid], zone_future_exempt_neg_[zid]) : 0.0f;
+        const bool has_route_flow = normal_flow > 0.0f || exempt_flow > 0.0f;
+        if (!has_route_flow) continue;
+
+        float cap = std::max(min_cap, std::min(max_cap, zone_dynamic_cap_[zid]));
+        const float density = zone_stall_busy_density_[zid];
+        if (density > high) {
+            const float next = std::max(min_cap, cap * dec);
+            if (next + 1e-4f < cap) {
+                ++dynamic_cap_last_down_;
+                decreased_zones.push_back(zid);
+            }
+            cap = next;
+        } else if (density < low && normal_flow >= 0.70f * cap) {
+            const float next = std::min(max_cap, cap + inc);
+            if (next > cap + 1e-4f) ++dynamic_cap_last_up_;
+            cap = next;
+        }
+        zone_dynamic_cap_[zid] = cap;
+    }
+
+    float cap_sum = 0.0f;
+    float cap_min = max_cap;
+    float cap_max = min_cap;
+    float stall_sum = 0.0f;
+    float free_stall_sum = 0.0f;
+    float stall_max = 0.0f;
+    int active_zones = 0;
+    int below_base = 0;
+    int above_base = 0;
+    int at_min = 0;
+    std::vector<int> saturated_zones;
+    saturated_zones.reserve(nz);
+    for (int zid = 0; zid < nz; ++zid) {
+        const float pos_flow = zid < (int)zone_future_pos_.size()
+            ? zone_future_pos_[zid] : 0.0f;
+        const float neg_flow = zid < (int)zone_future_neg_.size()
+            ? zone_future_neg_[zid] : 0.0f;
+        const float flow = pos_flow + neg_flow;
+        if (zid < (int)zone24_valid_cells_.size() && zone24_valid_cells_[zid] > 0) {
+            if (zone_dynamic_cap_[zid] < base_cap - 1e-4f) ++below_base;
+            if (zone_dynamic_cap_[zid] > base_cap + 1e-4f) ++above_base;
+            if (zone_dynamic_cap_[zid] <= min_cap + 1e-4f) ++at_min;
+        }
+        if (flow > 0.0f) saturated_zones.push_back(zid);
+        if (flow <= 0.0f && std::abs(zone_dynamic_cap_[zid] - base_cap) < 1e-4f)
+            continue;
+        cap_sum += zone_dynamic_cap_[zid];
+        cap_min = std::min(cap_min, zone_dynamic_cap_[zid]);
+        cap_max = std::max(cap_max, zone_dynamic_cap_[zid]);
+        const float busy_stall = zone_stall_busy_density_[zid];
+        const float free_stall = std::max(
+            0.0f, zone_stall_density_[zid] - busy_stall);
+        stall_sum += busy_stall;
+        free_stall_sum += free_stall;
+        stall_max = std::max(stall_max, busy_stall);
+        ++active_zones;
+    }
+    dynamic_cap_last_avg_ = active_zones > 0 ? cap_sum / active_zones : base_cap;
+    dynamic_cap_last_min_ = active_zones > 0 ? cap_min : base_cap;
+    dynamic_cap_last_max_ = active_zones > 0 ? cap_max : base_cap;
+    dynamic_cap_last_stall_avg_ = active_zones > 0 ? stall_sum / active_zones : 0.0f;
+    dynamic_cap_last_stall_max_ = stall_max;
+    dynamic_cap_last_busy_stall_avg_ = dynamic_cap_last_stall_avg_;
+    dynamic_cap_last_free_stall_avg_ = active_zones > 0
+        ? free_stall_sum / active_zones : 0.0f;
+    dynamic_cap_last_active_ = active_zones;
+    dynamic_cap_last_below_base_ = below_base;
+    dynamic_cap_last_above_base_ = above_base;
+    dynamic_cap_last_at_min_ = at_min;
+
+    auto saturation = [&](int zid) {
+        const float cap = directional_zone_cap(zid, +1);
+        const float flow = std::max(zone_future_pos_[zid], zone_future_neg_[zid]);
+        return cap > 0.0f ? flow / cap : 0.0f;
+    };
+    const int top_count = std::min<int>(8, saturated_zones.size());
+    std::partial_sort(
+        saturated_zones.begin(), saturated_zones.begin() + top_count,
+        saturated_zones.end(), [&](int lhs, int rhs) {
+            return saturation(lhs) > saturation(rhs);
+        });
+
+    std::sort(decreased_zones.begin(), decreased_zones.end(), [&](int lhs, int rhs) {
+        return zone_stall_busy_density_[lhs] > zone_stall_busy_density_[rhs];
+    });
+    std::vector<int> low_cap_zones;
+    for (int zid : saturated_zones) {
+        if (zone_dynamic_cap_[zid] < base_cap - 1e-4f)
+            low_cap_zones.push_back(zid);
+    }
+    std::sort(low_cap_zones.begin(), low_cap_zones.end(), [&](int lhs, int rhs) {
+        if (std::abs(zone_dynamic_cap_[lhs] - zone_dynamic_cap_[rhs]) > 1e-4f)
+            return zone_dynamic_cap_[lhs] < zone_dynamic_cap_[rhs];
+        return saturation(lhs) > saturation(rhs);
+    });
+
+    if (cfg().debug_level >= 1) {
+        auto format_zones = [&](const std::vector<int>& zones, int limit) {
+            std::ostringstream out;
+            out << std::fixed;
+            const int count = std::min<int>(limit, zones.size());
+            for (int i = 0; i < count; ++i) {
+                const int zid = zones[i];
+                const float busy_stall = zone_stall_busy_density_[zid];
+                const float free_stall = std::max(
+                    0.0f, zone_stall_density_[zid] - busy_stall);
+                if (i > 0) out << ",";
+                out << zid
+                    << ":c" << std::setprecision(0) << zone_dynamic_cap_[zid]
+                    << ":s" << std::setprecision(3) << zone_stall_density_[zid]
+                    << "(" << busy_stall << "/" << free_stall << ")"
+                    << ":f" << std::setprecision(1) << zone_future_pos_[zid]
+                    << "/" << zone_future_neg_[zid]
+                    << ":r" << std::setprecision(2) << saturation(zid);
+            }
+            return out.str();
+        };
+        std::cerr << "[GameDynCap] tick=" << curr_tick
+                  << " window=" << covered_ticks
+                  << " active=" << active_zones
+                  << " cap=" << std::fixed << std::setprecision(1)
+                  << dynamic_cap_last_avg_ << "/" << dynamic_cap_last_min_
+                  << "/" << dynamic_cap_last_max_
+                  << " zones=" << below_base << "/" << above_base
+                  << " at_min=" << at_min
+                  << " stall=" << std::setprecision(3)
+                  << dynamic_cap_last_stall_avg_ << "/"
+                  << dynamic_cap_last_stall_max_
+                  << " busy_free=" << dynamic_cap_last_busy_stall_avg_
+                  << "/" << dynamic_cap_last_free_stall_avg_
+                  << " adjust=" << dynamic_cap_last_up_
+                  << "/" << dynamic_cap_last_down_
+                  << " top=" << format_zones(saturated_zones, 8)
+                  << " down=" << format_zones(decreased_zones, 8)
+                  << " low=" << format_zones(low_cap_zones, 8)
+                  << "\n";
+    }
 }
 
 void GameBalanceOptScheduler::add_directional_future_flow_route(
-    int agent_loc, const std::vector<int>& locs, int start_idx, int weight) {
-    if (!game_directional_flow_enabled() || !ready_ || locs.empty() || weight <= 0) return;
+    int agent_loc, const std::vector<int>& locs, int start_idx, int weight, int tid) {
+    if (!game_directional_flow_enabled() || !ready_ || locs.empty() || weight == 0) return;
     const int nz = n24c_ * n24r_;
-    if ((int)zone_future_pos_.size() != nz || (int)zone_future_neg_.size() != nz)
+    if ((int)zone_future_pos_.size() != nz ||
+        (int)zone_future_neg_.size() != nz ||
+        (int)zone_future_exempt_pos_.size() != nz ||
+        (int)zone_future_exempt_neg_.size() != nz)
         reset_directional_future_flow();
 
     int prev_m = -1, prev_b = -1;
@@ -117,15 +789,25 @@ void GameBalanceOptScheduler::add_directional_future_flow_route(
     if (!std::isfinite(decay)) decay = GAME_DIR_FLOW_DECAY;
     decay = std::max(0.0f, std::min(1.0f, decay));
     float cur_weight = static_cast<float>(weight);
+    const int horizon = std::max(0, cfg().game_dir_flow_zone_horizon);
+    int zone_steps = 0;
     int last_zid = -1;
+    int prev_loc = agent_loc;
 
-    auto add_zone_flow = [&](const ZoneMainRange& zr, int intent) {
-        const int zid = zr.zone_id;
-        if (zid < 0 || zid >= nz || zid == last_zid) return;
-        if (intent > 0) zone_future_pos_[zid] += cur_weight;
-        else zone_future_neg_[zid] += cur_weight;
+    auto add_zid_flow = [&](int zid, int intent) -> bool {
+        if (zid < 0 || zid >= nz || zid == last_zid) return true;
+        const bool beyond_horizon = horizon > 0 && zone_steps >= horizon;
+        if (beyond_horizon) {
+            if (intent > 0) zone_future_exempt_pos_[zid] += cur_weight;
+            else zone_future_exempt_neg_[zid] += cur_weight;
+        } else {
+            if (intent > 0) zone_future_pos_[zid] += cur_weight;
+            else zone_future_neg_[zid] += cur_weight;
+        }
+        ++zone_steps;
         last_zid = zid;
         cur_weight *= decay;
+        return true;
     };
 
     for (int i = std::max(0, start_idx); i < static_cast<int>(locs.size()); ++i) {
@@ -133,6 +815,7 @@ void GameBalanceOptScheduler::add_directional_future_flow_route(
         project(locs[i], tm, tb);
         if (tm < 0) continue;
         if (tm == prev_m) {
+            prev_loc = locs[i];
             prev_m = tm;
             prev_b = tb;
             continue;
@@ -141,16 +824,36 @@ void GameBalanceOptScheduler::add_directional_future_flow_route(
         const int intent = (tm > prev_m) ? +1 : -1;
         const int lo = std::min(prev_m, tm);
         const int hi = std::max(prev_m, tm);
-        if (intent > 0) {
-            for (const auto& zr : zone_ranges_) {
-                if (zr.min_m <= hi && zr.max_m >= lo) add_zone_flow(zr, intent);
+
+        const std::vector<int>* cached_path =
+            cached_internal_zone_path(tid, i, prev_loc, locs);
+        std::vector<int> generated_path;
+        if (cached_path == nullptr) {
+            generated_path = shortest_zone_path(
+                zone24_of_loc(prev_loc), zone24_of_loc(locs[i]),
+                cfg().game_dir_flow_random_shortest);
+            cached_path = &generated_path;
+        }
+        const auto& zpath = *cached_path;
+        if (!zpath.empty()) {
+            for (int zid : zpath) {
+                if (!add_zid_flow(zid, intent)) return;
             }
         } else {
-            for (auto it = zone_ranges_.rbegin(); it != zone_ranges_.rend(); ++it) {
-                if (it->min_m <= hi && it->max_m >= lo) add_zone_flow(*it, intent);
+            if (intent > 0) {
+                for (const auto& zr : zone_ranges_) {
+                    if (zr.min_m <= hi && zr.max_m >= lo &&
+                        !add_zid_flow(zr.zone_id, intent)) return;
+                }
+            } else {
+                for (auto it = zone_ranges_.rbegin(); it != zone_ranges_.rend(); ++it) {
+                    if (it->min_m <= hi && it->max_m >= lo &&
+                        !add_zid_flow(it->zone_id, intent)) return;
+                }
             }
         }
 
+        prev_loc = locs[i];
         prev_m = tm;
         prev_b = tb;
     }
@@ -158,6 +861,11 @@ void GameBalanceOptScheduler::add_directional_future_flow_route(
 
 void GameBalanceOptScheduler::add_directional_future_flow_for_task(
     int agent_loc, int tid, int start_idx) {
+    adjust_directional_future_flow_for_task(agent_loc, tid, start_idx, 1);
+}
+
+void GameBalanceOptScheduler::adjust_directional_future_flow_for_task(
+    int agent_loc, int tid, int start_idx, int weight) {
     if (!game_directional_flow_enabled() || env_ == nullptr) return;
     auto it = env_->task_pool.find(tid);
     if (it == env_->task_pool.end() || it->second.locations.empty()) return;
@@ -165,7 +873,7 @@ void GameBalanceOptScheduler::add_directional_future_flow_for_task(
     int idx = start_idx;
     if (idx < 0) idx = it->second.idx_next_loc;
     idx = std::max(0, std::min(idx, static_cast<int>(locs.size()) - 1));
-    add_directional_future_flow_route(agent_loc, locs, idx);
+    add_directional_future_flow_route(agent_loc, locs, idx, weight, tid);
 }
 
 void GameBalanceOptScheduler::seed_directional_future_flow(const SharedEnvironment* env) {
@@ -181,39 +889,57 @@ void GameBalanceOptScheduler::seed_directional_future_flow(const SharedEnvironme
 }
 
 bool GameBalanceOptScheduler::directional_future_flow_allows(
-    int agent_loc, const std::vector<int>& locs, int start_idx) const {
+    int agent_loc, const std::vector<int>& locs, int start_idx, int tid) const {
+    if (!cfg().game_dir_flow_hard_filter) return true;
     if (!game_directional_flow_enabled() || !ready_ || locs.empty()) return true;
     const int nz = n24c_ * n24r_;
-    if ((int)zone_future_pos_.size() != nz || (int)zone_future_neg_.size() != nz)
+    if ((int)zone_future_pos_.size() != nz ||
+        (int)zone_future_neg_.size() != nz ||
+        (int)zone_future_exempt_pos_.size() != nz ||
+        (int)zone_future_exempt_neg_.size() != nz)
         return true;
 
-    const int cap = std::max(0, cfg().game_dir_flow_cap);
     const int gap = std::max(0, cfg().game_dir_flow_gap);
-    const int max_check_main = std::max(0, cfg().game_dir_flow_max_check_main);
     int prev_m = -1, prev_b = -1;
     project(agent_loc, prev_m, prev_b);
     if (prev_m < 0) return true;
-    const int agent_m = prev_m;  // save agent's main_dist for distance check
 
     float decay = cfg().game_dir_flow_decay;
     if (!std::isfinite(decay)) decay = GAME_DIR_FLOW_DECAY;
     decay = std::max(0.0f, std::min(1.0f, decay));
     float cur_weight = 1.0f;
+    const int horizon = std::max(0, cfg().game_dir_flow_zone_horizon);
+    float exempt_ratio = cfg().game_dir_flow_horizon_exempt_ratio;
+    if (!std::isfinite(exempt_ratio))
+        exempt_ratio = GAME_DIR_FLOW_HORIZON_EXEMPT_RATIO;
+    exempt_ratio = std::max(0.0f, exempt_ratio);
+    const float exempt_gap = static_cast<float>(gap) * exempt_ratio;
+    int zone_steps = 0;
     int last_zid = -1;
+    int prev_loc = agent_loc;
 
-    auto zone_allows = [&](const ZoneMainRange& zr, int intent) {
-        const int zid = zr.zone_id;
-        if (zid < 0 || zid >= nz) return true;
-        if (zid == last_zid) return true;
-        // 超过 main_dist 检查范围的 zone 不检测 flow（直接放行）
-        if (max_check_main > 0 && std::abs(zr.min_m - agent_m) > max_check_main) return true;
-        const float same = (intent > 0) ? zone_future_pos_[zid] : zone_future_neg_[zid];
-        const float opp = (intent > 0) ? zone_future_neg_[zid] : zone_future_pos_[zid];
+    auto zid_allows = [&](int zid, int intent) -> bool {
+        if (zid < 0 || zid >= nz || zid == last_zid) return true;
+        const bool beyond_horizon = horizon > 0 && zone_steps >= horizon;
+        const float local_cap = directional_zone_cap(zid, intent);
+        const float local_exempt_cap = local_cap * exempt_ratio;
+        const float same = beyond_horizon
+            ? ((intent > 0) ? zone_future_exempt_pos_[zid] : zone_future_exempt_neg_[zid])
+            : ((intent > 0) ? zone_future_pos_[zid] : zone_future_neg_[zid]);
+        const float opp = beyond_horizon
+            ? ((intent > 0) ? zone_future_exempt_neg_[zid] : zone_future_exempt_pos_[zid])
+            : ((intent > 0) ? zone_future_neg_[zid] : zone_future_pos_[zid]);
         const float next_same = same + cur_weight;
+        ++zone_steps;
         last_zid = zid;
         cur_weight *= decay;
-        if (next_same >= (float)cap) return false;
-        if (gap > 0 && next_same > opp + (float)gap) return false;
+        if (beyond_horizon) {
+            if (next_same > local_exempt_cap) return false;
+            if (gap > 0 && next_same > opp + exempt_gap) return false;
+        } else {
+            if (next_same >= local_cap) return false;
+            if (gap > 0 && next_same > opp + static_cast<float>(gap)) return false;
+        }
         return true;
     };
 
@@ -222,6 +948,7 @@ bool GameBalanceOptScheduler::directional_future_flow_allows(
         project(locs[i], tm, tb);
         if (tm < 0) continue;
         if (tm == prev_m) {
+            prev_loc = locs[i];
             prev_m = tm;
             prev_b = tb;
             continue;
@@ -230,18 +957,35 @@ bool GameBalanceOptScheduler::directional_future_flow_allows(
         const int intent = (tm > prev_m) ? +1 : -1;
         const int lo = std::min(prev_m, tm);
         const int hi = std::max(prev_m, tm);
-        if (intent > 0) {
-            for (const auto& zr : zone_ranges_) {
-                if (zr.min_m > hi || zr.max_m < lo) continue;
-                if (!zone_allows(zr, intent)) return false;
+
+        const std::vector<int>* cached_path =
+            cached_internal_zone_path(tid, i, prev_loc, locs);
+        std::vector<int> generated_path;
+        if (cached_path == nullptr) {
+            generated_path = shortest_zone_path(
+                zone24_of_loc(prev_loc), zone24_of_loc(locs[i]), false);
+            cached_path = &generated_path;
+        }
+        const auto& zpath = *cached_path;
+        if (!zpath.empty()) {
+            for (int zid : zpath) {
+                if (!zid_allows(zid, intent)) return false;
             }
         } else {
-            for (auto it = zone_ranges_.rbegin(); it != zone_ranges_.rend(); ++it) {
-                if (it->min_m > hi || it->max_m < lo) continue;
-                if (!zone_allows(*it, intent)) return false;
+            if (intent > 0) {
+                for (const auto& zr : zone_ranges_) {
+                    if (zr.min_m > hi || zr.max_m < lo) continue;
+                    if (!zid_allows(zr.zone_id, intent)) return false;
+                }
+            } else {
+                for (auto it = zone_ranges_.rbegin(); it != zone_ranges_.rend(); ++it) {
+                    if (it->min_m > hi || it->max_m < lo) continue;
+                    if (!zid_allows(it->zone_id, intent)) return false;
+                }
             }
         }
 
+        prev_loc = locs[i];
         prev_m = tm;
         prev_b = tb;
     }
@@ -249,14 +993,12 @@ bool GameBalanceOptScheduler::directional_future_flow_allows(
 }
 
 float GameBalanceOptScheduler::directional_future_flow_soft_penalty(
-    int agent_loc, const std::vector<int>& locs, int start_idx) const {
+    int agent_loc, const std::vector<int>& locs, int start_idx, int tid) const {
     if (!game_directional_flow_enabled() || !ready_ || locs.empty()) return 0.0f;
     const int nz = n24c_ * n24r_;
     if ((int)zone_future_pos_.size() != nz || (int)zone_future_neg_.size() != nz)
         return 0.0f;
 
-    const int cap = std::max(0, cfg().game_dir_flow_cap);
-    if (cap <= 0) return 0.0f;
     int prev_m = -1, prev_b = -1;
     project(agent_loc, prev_m, prev_b);
     if (prev_m < 0) return 0.0f;
@@ -265,17 +1007,24 @@ float GameBalanceOptScheduler::directional_future_flow_soft_penalty(
     if (!std::isfinite(decay)) decay = GAME_DIR_FLOW_DECAY;
     decay = std::max(0.0f, std::min(1.0f, decay));
     float cur_weight = 1.0f;
+    const int horizon = std::max(0, cfg().game_dir_flow_zone_horizon);
+    int zone_steps = 0;
     int last_zid = -1;
     float penalty = 0.0f;
+    int prev_loc = agent_loc;
 
-    auto add_zone_penalty = [&](const ZoneMainRange& zr, int intent) {
-        const int zid = zr.zone_id;
-        if (zid < 0 || zid >= nz || zid == last_zid) return;
+    auto add_zid_penalty = [&](int zid, int intent) -> bool {
+        if (zid < 0 || zid >= nz || zid == last_zid) return true;
+        if (horizon > 0 && zone_steps >= horizon) return false;
         const float same = (intent > 0) ? zone_future_pos_[zid] : zone_future_neg_[zid];
-        const float ratio = (same + cur_weight) / static_cast<float>(cap);
+        const float local_cap = directional_zone_cap(zid, intent);
+        if (local_cap <= 0.0f) return false;
+        const float ratio = (same + cur_weight) / local_cap;
         penalty += future_flow_soft_penalty_from_ratio(ratio);
+        ++zone_steps;
         last_zid = zid;
         cur_weight *= decay;
+        return true;
     };
 
     for (int i = std::max(0, start_idx); i < static_cast<int>(locs.size()); ++i) {
@@ -283,6 +1032,7 @@ float GameBalanceOptScheduler::directional_future_flow_soft_penalty(
         project(locs[i], tm, tb);
         if (tm < 0) continue;
         if (tm == prev_m) {
+            prev_loc = locs[i];
             prev_m = tm;
             prev_b = tb;
             continue;
@@ -291,16 +1041,35 @@ float GameBalanceOptScheduler::directional_future_flow_soft_penalty(
         const int intent = (tm > prev_m) ? +1 : -1;
         const int lo = std::min(prev_m, tm);
         const int hi = std::max(prev_m, tm);
-        if (intent > 0) {
-            for (const auto& zr : zone_ranges_) {
-                if (zr.min_m <= hi && zr.max_m >= lo) add_zone_penalty(zr, intent);
+
+        const std::vector<int>* cached_path =
+            cached_internal_zone_path(tid, i, prev_loc, locs);
+        std::vector<int> generated_path;
+        if (cached_path == nullptr) {
+            generated_path = shortest_zone_path(
+                zone24_of_loc(prev_loc), zone24_of_loc(locs[i]), false);
+            cached_path = &generated_path;
+        }
+        const auto& zpath = *cached_path;
+        if (!zpath.empty()) {
+            for (int zid : zpath) {
+                if (!add_zid_penalty(zid, intent)) return penalty;
             }
         } else {
-            for (auto it = zone_ranges_.rbegin(); it != zone_ranges_.rend(); ++it) {
-                if (it->min_m <= hi && it->max_m >= lo) add_zone_penalty(*it, intent);
+            if (intent > 0) {
+                for (const auto& zr : zone_ranges_) {
+                    if (zr.min_m <= hi && zr.max_m >= lo)
+                        if (!add_zid_penalty(zr.zone_id, intent)) return penalty;
+                }
+            } else {
+                for (auto it = zone_ranges_.rbegin(); it != zone_ranges_.rend(); ++it) {
+                    if (it->min_m <= hi && it->max_m >= lo)
+                        if (!add_zid_penalty(it->zone_id, intent)) return penalty;
+                }
             }
         }
 
+        prev_loc = locs[i];
         prev_m = tm;
         prev_b = tb;
     }
@@ -481,6 +1250,17 @@ void GameBalanceOptScheduler::build_centerline(const SharedEnvironment* env) {
     // zone 密度 + main 标记
     int nz = n24c_ * n24r_;
     zone24_density_.assign(nz, 0);
+    zone24_has_free_.assign(nz, 0);
+    zone24_valid_cells_.assign(nz, 0);
+    for (int loc = 0; loc < total_; ++loc) {
+        if (env->map[loc] != 0) continue;
+        int zid = zone24_of_loc(loc);
+        if (zid >= 0 && zid < nz) {
+            zone24_has_free_[zid] = 1;
+            ++zone24_valid_cells_[zid];
+        }
+    }
+    build_zone24_distances();
     zone_is_main_.assign(nz, 0);
     for (int clloc : centerline_cells_) {
         int r = clloc / cols_, c = clloc % cols_;
@@ -498,6 +1278,10 @@ void GameBalanceOptScheduler::build_centerline(const SharedEnvironment* env) {
 // ================================================================
 void GameBalanceOptScheduler::initialize(SharedEnvironment* env, int /*preprocess_time_limit_ms*/) {
     env_ = env;
+    task_static_cache_.clear();
+    short_task_length_cuts_ready_ = false;
+    short_task_length_cuts_.fill(0);
+    short_task_length_means_.fill(1.0f);
     build_centerline(env);
     pibt_lock().reset();
 
@@ -506,6 +1290,8 @@ void GameBalanceOptScheduler::initialize(SharedEnvironment* env, int /*preproces
 
     // agent空闲计数器（IDEA4: idle exempt）
     agent_idle_ticks_.assign(env->num_of_agents, 0);
+    last_idle_update_timestep_ = -1;
+    reset_dynamic_zone_cap(env);
 }
 
 // ================================================================
@@ -688,7 +1474,8 @@ float GameBalanceOptScheduler::connection_exempt_score(int agent_loc,
             if (e2 >= dy) { err += dy; cx += sx; }
             if (e2 <= dx) { err += dx; cy += sy; }
         }
-        float dist = std::sqrt((float)((tx - ax)*(tx - ax) + (ty - ay)*(ty - ay)));
+        float dist = score_distance_between(ay * cols_ + ax, loc);
+        if (dist < 0.0f) return INVALID_SCORE;
         total_score += distance_score(dist);
         ax = tx; ay = ty;
     }
@@ -721,7 +1508,7 @@ float GameBalanceOptScheduler::base_score(int a_loc, int tid, int step, int star
     if (!ready_) return 1.0f;
     auto& locs = it->second.locations;
     if (task_has_channel_errand(locs)) return INVALID_SCORE;
-    if (!directional_future_flow_allows(a_loc, locs, start_idx)) return INVALID_SCORE;
+    if (!directional_future_flow_allows(a_loc, locs, start_idx, tid)) return INVALID_SCORE;
 
     int zone_hard_cap = cfg().game_zone_hard_cap;
     int exempt_main   = cfg().game_exempt_main;
@@ -756,9 +1543,8 @@ float GameBalanceOptScheduler::base_score(int a_loc, int tid, int step, int star
                     float total = 0;
                     int prev = a_loc;
                     for (auto& loc : locs) {
-                        int r1 = prev / cols_, c1 = prev % cols_;
-                        int r2 = loc / cols_,  c2 = loc % cols_;
-                        float dist = std::sqrt((float)((c2-c1)*(c2-c1) + (r2-r1)*(r2-r1)));
+                        float dist = score_distance_between(prev, loc);
+                        if (dist < 0.0f) return INVALID_SCORE;
                         total += distance_score(dist);
                         prev = loc;
                     }
@@ -816,12 +1602,12 @@ float GameBalanceOptScheduler::base_score(int a_loc, int tid, int step, int star
                 float total = 0;
                 int prev = a_loc;
                 for (size_t ei = (size_t)start_idx; ei < locs.size(); ei++) {
-                    int r1 = prev / cols_, c1 = prev % cols_;
                     int r2 = locs[ei] / cols_, c2 = locs[ei] % cols_;
                     int z2 = (r2 / 24) * n24c_ + (c2 / 24);
                     if (z2 >= 0 && z2 < max_z && zone24_density_[z2] >= 70)
                         return INVALID_SCORE;
-                    float dist = std::sqrt((float)((c2-c1)*(c2-c1) + (r2-r1)*(r2-r1)));
+                    float dist = score_distance_between(prev, locs[ei]);
+                    if (dist < 0.0f) return INVALID_SCORE;
                     total += distance_score(dist);
                     prev = locs[ei];
                 }
@@ -845,8 +1631,31 @@ float GameBalanceOptScheduler::base_score(int a_loc, int tid, int step, int star
     project(a_loc, a_m, a_b);
     if (a_m < 0) return 1.0f;
 
+    if (use_direct_distance_score() && start_idx >= 0 &&
+        start_idx < static_cast<int>(locs.size())) {
+        auto cached = task_static_cache_.find(tid);
+        if (cached != task_static_cache_.end() &&
+            ((cached->second.distance_ready && cached->second.distance_valid &&
+              start_idx < static_cast<int>(cached->second.tail_distance.size())) ||
+             (!cached->second.distance_ready && cached->second.coarse_distance_valid &&
+              start_idx < static_cast<int>(cached->second.coarse_tail_distance.size())))) {
+            const float pickup_dist = score_distance_between(a_loc, locs[start_idx]);
+            if (pickup_dist < 0.0f) return INVALID_SCORE;
+            float total = distance_score(pickup_dist) *
+                std::max(0.0f, cfg().game_pickup_weight);
+            const float internal_dist = cached->second.distance_ready
+                ? cached->second.tail_distance[start_idx]
+                : cached->second.coarse_tail_distance[start_idx];
+            total += distance_score(internal_dist);
+            total -= directional_future_flow_soft_penalty(
+                a_loc, locs, start_idx, tid);
+            return total;
+        }
+    }
+
     float total_score = 0;
     int prev_m = a_m, prev_b = a_b;
+    int prev_loc = a_loc;
 
     for (size_t ei = (size_t)start_idx; ei < locs.size(); ei++) {
         int tm, tb;
@@ -875,7 +1684,8 @@ float GameBalanceOptScheduler::base_score(int a_loc, int tid, int step, int star
             }
         }
 
-        float seg_dist = (float)(std::abs(prev_m - tm) + std::abs(prev_b - tb));
+        float seg_dist = score_distance_between(prev_loc, locs[ei]);
+        if (seg_dist < 0.0f) return INVALID_SCORE;
         float seg_score = distance_score(seg_dist);
         if (use_direct_distance_score() && ei == (size_t)start_idx) {
             seg_score *= std::max(0.0f, cfg().game_pickup_weight);
@@ -887,11 +1697,12 @@ float GameBalanceOptScheduler::base_score(int a_loc, int tid, int step, int star
         }
 
         total_score += seg_score;
+        prev_loc = locs[ei];
         prev_m = tm; prev_b = tb;
     }
 
     if (use_direct_distance_score()) {
-        total_score -= directional_future_flow_soft_penalty(a_loc, locs, start_idx);
+        total_score -= directional_future_flow_soft_penalty(a_loc, locs, start_idx, tid);
     }
     return total_score;
 }
@@ -912,6 +1723,7 @@ void GameBalanceOptScheduler::schedule(int time_limit,
     update_zone_density(env);
     update_zone_direction(env);
     seed_directional_future_flow(env);
+    update_dynamic_zone_cap(env);
 
     // ---- PibtLock 同步 ----
     if ((int)parked_task_.size() != n_agents)
@@ -955,6 +1767,15 @@ void GameBalanceOptScheduler::schedule(int time_limit,
         int prefilter_reject_density = 0;
         int prefilter_reject_branch = 0;
         int prefilter_reject_other = 0;
+        int length_gate_active = 0;
+        int length_gate_input = 0;
+        int length_gate_kept = 0;
+        int length_gate_short_total[2] = {0, 0};
+        int length_gate_short_active[2] = {0, 0};
+        int length_gate_short_quota[2] = {0, 0};
+        int length_gate_short_kept[2] = {0, 0};
+        int length_gate_cut[4] = {0, 0, 0, 0};
+        int length_gate_final_active[5] = {0, 0, 0, 0, 0};
         int legal_agents_after_task_filter = 0;
         int legal_agents_after_full_filter = 0;
         int region_mode = 0;
@@ -972,8 +1793,15 @@ void GameBalanceOptScheduler::schedule(int time_limit,
         long long reject_channel = 0;
         long long reject_flow = 0;
         long long reject_zone_or_route = 0;
+        int reassign_replace_attempts = 0;
+        int reassign_replace_accepts = 0;
+        int reassign_attempts = 0;
+        int reassign_accepts = 0;
+        int idle_global_eligible = 0;
+        int idle_global_assigned = 0;
     } diag;
     if (diag_on) diag.step = step;
+    set_game_prefilter_stats({});
 
     const int eff_density_cap = cfg().game_density_cap;
 
@@ -981,10 +1809,15 @@ void GameBalanceOptScheduler::schedule(int time_limit,
     std::vector<int> free_agents;
     std::unordered_set<int> assigned_tasks;
 
+    const int curr_timestep = std::max(0,
+        std::max(env->system_timestep, env->curr_timestep));
+    const int idle_tick_delta = last_idle_update_timestep_ < 0
+        ? 0 : std::max(0, curr_timestep - last_idle_update_timestep_);
+    last_idle_update_timestep_ = curr_timestep;
     for (int a = 0; a < n_agents; a++) {
         if (env->curr_task_schedule[a] < 0) {
             free_agents.push_back(a);
-            agent_idle_ticks_[a]++;
+            agent_idle_ticks_[a] += idle_tick_delta;
         } else {
             assigned_tasks.insert(env->curr_task_schedule[a]);
             agent_idle_ticks_[a] = 0;
@@ -1005,6 +1838,26 @@ void GameBalanceOptScheduler::schedule(int time_limit,
             if (tit != env->task_pool.end() && task_has_channel_errand(tit->second.locations))
                 diag.channel_free_tasks++;
         }
+    }
+
+    // Tasks are unavailable during initialize. Cache their immutable geometry
+    // incrementally within a small slice of the online schedule budget.
+    std::vector<int> uncached_tasks;
+    uncached_tasks.reserve(free_tasks_set.size());
+    for (int tid : free_tasks_set) {
+        auto cached = task_static_cache_.find(tid);
+        if (cached == task_static_cache_.end() ||
+            !cached->second.distance_ready || !cached->second.zone_paths_ready)
+            uncached_tasks.push_back(tid);
+    }
+    if (!uncached_tasks.empty()) {
+        const int cache_ms = std::max(1, std::min(50, time_limit / 20));
+        const auto cache_deadline = std::min(
+            deadline, std::chrono::steady_clock::now() +
+                std::chrono::milliseconds(cache_ms));
+        // Random reads from the 17+ GB BFS matrix are bandwidth-bound. A
+        // single worker avoids page thrashing and respects the short budget.
+        prewarm_task_static_cache(uncached_tasks, cache_deadline, 1);
     }
 
     // ---- Phase 1: 多 errand 续接 + parked task 处理 ----
@@ -1053,6 +1906,21 @@ void GameBalanceOptScheduler::schedule(int time_limit,
                       << " free_after_phase1=0 assigned=0"
                       << " free_tasks=" << diag.free_tasks
                       << " channel_free_tasks=" << diag.channel_free_tasks
+                      << " dyn_cap=" << (cfg().game_dir_flow_dynamic_cap ? 1 : 0)
+                      << " cap_window=" << dynamic_cap_last_window_ticks_
+                      << " cap_avg=" << dynamic_cap_last_avg_
+                      << " cap_min=" << dynamic_cap_last_min_
+                      << " cap_max=" << dynamic_cap_last_max_
+                      << " stall_avg=" << dynamic_cap_last_stall_avg_
+                      << " stall_max=" << dynamic_cap_last_stall_max_
+                      << " stall_busy=" << dynamic_cap_last_busy_stall_avg_
+                      << " stall_free=" << dynamic_cap_last_free_stall_avg_
+                      << " cap_active=" << dynamic_cap_last_active_
+                      << " cap_lo_hi=" << dynamic_cap_last_below_base_
+                      << "/" << dynamic_cap_last_above_base_
+                      << " cap_at_min=" << dynamic_cap_last_at_min_
+                      << " cap_up=" << dynamic_cap_last_up_
+                      << " cap_down=" << dynamic_cap_last_down_
                       << " note=no_free_agents\n";
         }
         return;
@@ -1090,57 +1958,173 @@ void GameBalanceOptScheduler::schedule(int time_limit,
             diag.prefilter_reject_channel++;
             continue;
         }
+        // Global prefilter only checks task-internal zone capacity. Concrete
+        // distances and directed reachability belong to the shortlisted
+        // agent-task validation below.
         if (cfg().game_prefilter_capacity && locs.size() > 1 &&
-            [&]() {
-                ScoreRejectReason reason = ScoreRejectReason::None;
-                const float score =
-                    base_score_ex(locs.front(), tid, step, 1, eff_density_cap, &reason);
-                if (is_valid_score(score)) return false;
-                switch (reason) {
-                    case ScoreRejectReason::FutureFlow:
-                        diag.prefilter_reject_flow++;
-                        break;
-                    case ScoreRejectReason::LockDir:
-                        diag.prefilter_reject_lock++;
-                        break;
-                    case ScoreRejectReason::Density:
-                        diag.prefilter_reject_density++;
-                        break;
-                    case ScoreRejectReason::Branch:
-                        diag.prefilter_reject_branch++;
-                        break;
-                    case ScoreRejectReason::Missing:
-                    case ScoreRejectReason::Channel:
-                    case ScoreRejectReason::Other:
-                    case ScoreRejectReason::None:
-                        diag.prefilter_reject_other++;
-                        break;
-                }
-                return true;
-            }()) {
+            !directional_future_flow_allows(
+                locs.front(), locs, 1, tid)) {
+            diag.prefilter_reject_flow++;
             diag.prefilter_reject_capacity++;
             continue;
         }
         filtered_free_tasks_set.insert(tid);
     }
     diag.prefilter_task_kept = (int)filtered_free_tasks_set.size();
+
+    // Length pacing experiment: split all currently revealed tasks into five
+    // equal-count quantiles. In each of the two shortest bins, running tasks
+    // consume quota first and only the remaining quota is opened at random.
+    // The three longer bins remain unrestricted.
+    const int length_gate_open_tick = std::max(0,
+        cfg().game_short_task_test_ticks -
+        std::max(0, cfg().game_short_task_final_open_ticks));
+    const bool length_gate_active = cfg().game_short_task_throttle &&
+        curr_timestep < length_gate_open_tick &&
+        filtered_free_tasks_set.size() >= 5;
+    if (length_gate_active) {
+        auto task_length = [&](const Task& task) {
+            const auto& locs = task.locations;
+            int length = 0;
+            for (std::size_t i = 1; i < locs.size(); ++i) {
+                const int a = locs[i - 1];
+                const int b = locs[i];
+                length += std::abs(a / cols_ - b / cols_) +
+                          std::abs(a % cols_ - b % cols_);
+            }
+            return length;
+        };
+        if (!short_task_length_cuts_ready_) {
+            std::vector<int> initial_lengths;
+            initial_lengths.reserve(env->task_pool.size());
+            for (const auto& [tid, task] : env->task_pool) {
+                (void)tid;
+                if (!task.locations.empty()) initial_lengths.push_back(task_length(task));
+            }
+            std::sort(initial_lengths.begin(), initial_lengths.end());
+            if (initial_lengths.size() >= 5) {
+                for (int i = 0; i < 4; ++i) {
+                    const std::size_t pos = std::min(
+                        initial_lengths.size() - 1,
+                        initial_lengths.size() * static_cast<std::size_t>(i + 1) / 5 - 1);
+                    short_task_length_cuts_[i] = initial_lengths[pos];
+                }
+                std::array<long long, 5> sums{{0, 0, 0, 0, 0}};
+                std::array<int, 5> counts{{0, 0, 0, 0, 0}};
+                for (int length : initial_lengths) {
+                    int bin = 0;
+                    while (bin < 4 && length > short_task_length_cuts_[bin]) ++bin;
+                    sums[bin] += length;
+                    ++counts[bin];
+                }
+                for (int bin = 0; bin < 5; ++bin) {
+                    short_task_length_means_[bin] = counts[bin] > 0
+                        ? static_cast<float>(sums[bin]) / counts[bin] : 1.0f;
+                }
+                short_task_length_cuts_ready_ = true;
+            }
+        }
+
+        std::vector<int> bins[5];
+        std::unordered_map<int, unsigned char> task_length_bin;
+        task_length_bin.reserve(env->task_pool.size());
+        for (const auto& [tid, task] : env->task_pool) {
+            if (task.locations.empty()) continue;
+            const int length = task_length(task);
+            int bin = 0;
+            while (bin < 4 && length > short_task_length_cuts_[bin]) ++bin;
+            bins[bin].push_back(tid);
+            task_length_bin[tid] = static_cast<unsigned char>(bin);
+        }
+        for (int i = 0; i < 4; ++i)
+            diag.length_gate_cut[i] = short_task_length_cuts_[i];
+
+        std::unordered_set<int> gated_tasks;
+        gated_tasks.reserve(filtered_free_tasks_set.size());
+        float release_ratio = cfg().game_short_task_release_ratio;
+        if (!std::isfinite(release_ratio)) release_ratio = 0.20f;
+        release_ratio = std::clamp(release_ratio, 0.0f, 0.50f);
+        const float other_ratio = std::max(0.0f,
+            (1.0f - 2.0f * release_ratio) / 3.0f);
+        float weighted_mean = 0.0f;
+        for (int bin = 0; bin < 5; ++bin) {
+            const float completion_share = bin < 2 ? release_ratio : other_ratio;
+            weighted_mean += completion_share * short_task_length_means_[bin];
+        }
+        weighted_mean = std::max(1e-6f, weighted_mean);
+        for (int tid : assigned_tasks) {
+            auto bit = task_length_bin.find(tid);
+            if (bit != task_length_bin.end() && bit->second < 2)
+                ++diag.length_gate_short_active[bit->second];
+        }
+        for (int bin = 0; bin < 5; ++bin) {
+            auto& tids = bins[bin];
+            if (bin < 2) {
+                diag.length_gate_short_total[bin] = static_cast<int>(tids.size());
+                const float active_share =
+                    release_ratio * short_task_length_means_[bin] / weighted_mean;
+                const int quota = std::min<int>(tids.size(),
+                    static_cast<int>(std::ceil(max_total_busy * active_share)));
+                diag.length_gate_short_quota[bin] = quota;
+                const int open_budget = std::max(
+                    0, quota - diag.length_gate_short_active[bin]);
+                std::vector<int> legal_free;
+                legal_free.reserve(tids.size());
+                for (int tid : tids) {
+                    if (filtered_free_tasks_set.count(tid)) legal_free.push_back(tid);
+                }
+                std::shuffle(legal_free.begin(), legal_free.end(), short_task_rng_);
+                const int keep = std::min<int>(open_budget, legal_free.size());
+                diag.length_gate_short_kept[bin] = keep;
+                for (int i = 0; i < keep; ++i) gated_tasks.insert(legal_free[i]);
+            } else {
+                for (int tid : tids) {
+                    if (filtered_free_tasks_set.count(tid)) gated_tasks.insert(tid);
+                }
+            }
+        }
+        diag.length_gate_active = 1;
+        diag.length_gate_input = static_cast<int>(filtered_free_tasks_set.size());
+        diag.length_gate_kept = static_cast<int>(gated_tasks.size());
+        filtered_free_tasks_set.swap(gated_tasks);
+    }
     int blocked_zone_count = 0;
     std::ostringstream blocked_zone_ids;
     if (game_directional_flow_enabled()) {
         const int nz = n24c_ * n24r_;
-        const int cap = std::max(0, cfg().game_dir_flow_cap);
+        const int base_cap = std::max(0, cfg().game_dir_flow_cap);
         const int gap = std::max(0, cfg().game_dir_flow_gap);
-        if (cap > 0 &&
+        float exempt_ratio = cfg().game_dir_flow_horizon_exempt_ratio;
+        if (!std::isfinite(exempt_ratio))
+            exempt_ratio = GAME_DIR_FLOW_HORIZON_EXEMPT_RATIO;
+        exempt_ratio = std::max(0.0f, exempt_ratio);
+        const float exempt_gap = static_cast<float>(gap) * exempt_ratio;
+        if (base_cap > 0 &&
             (int)zone_future_pos_.size() == nz &&
-            (int)zone_future_neg_.size() == nz) {
+            (int)zone_future_neg_.size() == nz &&
+            (int)zone_future_exempt_pos_.size() == nz &&
+            (int)zone_future_exempt_neg_.size() == nz) {
             for (int zid = 0; zid < nz; ++zid) {
                 const float pos = zone_future_pos_[zid];
                 const float neg = zone_future_neg_[zid];
-                const bool pos_blocked = (pos + 1.0f >= (float)cap) ||
+                const float exempt_pos = zone_future_exempt_pos_[zid];
+                const float exempt_neg = zone_future_exempt_neg_[zid];
+                const float pos_cap = directional_zone_cap(zid, +1);
+                const float neg_cap = directional_zone_cap(zid, -1);
+                const float exempt_pos_cap = pos_cap * exempt_ratio;
+                const float exempt_neg_cap = neg_cap * exempt_ratio;
+                const bool pos_blocked = (pos + 1.0f >= pos_cap) ||
                     (gap > 0 && pos + 1.0f > neg + (float)gap);
-                const bool neg_blocked = (neg + 1.0f >= (float)cap) ||
+                const bool neg_blocked = (neg + 1.0f >= neg_cap) ||
                     (gap > 0 && neg + 1.0f > pos + (float)gap);
-                if (pos_blocked || neg_blocked) {
+                const bool exempt_pos_blocked =
+                    exempt_pos + 1.0f > exempt_pos_cap ||
+                    (gap > 0 && exempt_pos + 1.0f > exempt_neg + exempt_gap);
+                const bool exempt_neg_blocked =
+                    exempt_neg + 1.0f > exempt_neg_cap ||
+                    (gap > 0 && exempt_neg + 1.0f > exempt_pos + exempt_gap);
+                if (pos_blocked || neg_blocked ||
+                    exempt_pos_blocked || exempt_neg_blocked) {
                     if (blocked_zone_count > 0) blocked_zone_ids << ",";
                     blocked_zone_ids << zid;
                     ++blocked_zone_count;
@@ -1161,7 +2145,11 @@ void GameBalanceOptScheduler::schedule(int time_limit,
         diag.prefilter_reject_branch,
         diag.prefilter_reject_other,
         blocked_zone_count,
-        blocked_zone_ids.str()
+        blocked_zone_ids.str(),
+        0,
+        0,
+        0,
+        0
     });
 
     // 按 zone 分桶 free tasks
@@ -1205,6 +2193,8 @@ void GameBalanceOptScheduler::schedule(int time_limit,
 
     std::unordered_set<int> done_tasks;
     int assigned_count = 0;
+    int idle_global_count = 0;
+    int idle_global_assigned_count = 0;
     std::unordered_map<long long, bool> region_allow_cache;
     const int region_flow_batch = std::max(1, cfg().game_region_flow_batch);
     int region_flow_since_cache_clear = 0;
@@ -1229,7 +2219,7 @@ void GameBalanceOptScheduler::schedule(int time_limit,
             diag.reject_channel++;
             return INVALID_SCORE;
         }
-        if (!directional_future_flow_allows(a_loc, locs, 0)) {
+        if (!directional_future_flow_allows(a_loc, locs, 0, tid)) {
             diag.reject_flow++;
             return INVALID_SCORE;
         }
@@ -1243,9 +2233,8 @@ void GameBalanceOptScheduler::schedule(int time_limit,
         if (tit == env->task_pool.end() || tit->second.locations.empty())
             return INVALID_SCORE;
         const int tloc = tit->second.locations.front();
-        int ar = a_loc / cols_, ac = a_loc % cols_;
-        int tr = tloc / cols_, tc = tloc % cols_;
-        float dist = std::sqrt((float)((tr - ar) * (tr - ar) + (tc - ac) * (tc - ac)));
+        float dist = score_distance_between(a_loc, tloc);
+        if (dist < 0.0f) return INVALID_SCORE;
         return distance_score(dist);
     };
 
@@ -1278,6 +2267,10 @@ void GameBalanceOptScheduler::schedule(int time_limit,
             float score;
             int tid;
         };
+        struct CoarseCand {
+            float score;
+            int tid;
+        };
         struct HeapItem {
             float score;
             int agent_pos;
@@ -1288,9 +2281,28 @@ void GameBalanceOptScheduler::schedule(int time_limit,
         };
 
         const int cand_topk = std::max(1, cfg().game_global_cand_topk);
-        const int max_task_scan = std::max(1, cfg().game_global_max_task_scan);
+        // Per-zone coarse-score shortlist. Only these tasks pay for the full
+        // future-flow and density evaluation below.
+        const int full_score_batch =
+            std::max(1, cfg().game_global_max_task_scan);
         std::vector<std::vector<GlobalCand>> all_candidates(free_agents.size());
-        int global_rebuild_round = 0;
+        std::vector<unsigned char> idle_global_agent(n_agents, 0);
+        if (cfg().game_idle_global_match) {
+            std::vector<int> idle_order;
+            idle_order.reserve(free_agents.size());
+            const int idle_threshold = std::max(1, cfg().game_idle_global_ticks);
+            for (int a : free_agents) {
+                if (agent_idle_ticks_[a] >= idle_threshold)
+                    idle_order.push_back(a);
+            }
+            std::shuffle(idle_order.begin(), idle_order.end(), idle_global_rng_);
+            idle_global_count = std::min<int>(
+                std::max(0, cfg().game_idle_global_max_agents), idle_order.size());
+            for (int i = 0; i < idle_global_count; ++i)
+                idle_global_agent[idle_order[i]] = 1;
+            if (diag_on) diag.idle_global_eligible = idle_global_count;
+        }
+        bool idle_global_phase = false;
 
         auto build_candidates = [&]() {
             const auto rebuild_start = std::chrono::steady_clock::now();
@@ -1310,8 +2322,12 @@ void GameBalanceOptScheduler::schedule(int time_limit,
                 if (begin >= end) continue;
                 threads.emplace_back([&, begin, end]() {
                     for (int pos = begin; pos < end; ++pos) {
+	                        if (std::chrono::steady_clock::now() > deadline) break;
 	                        int a = free_agents[pos];
 	                        if (proposed_schedule[a] >= 0) continue;
+	                        const bool use_global_idle_search =
+	                            idle_global_phase && idle_global_agent[a] != 0;
+	                        if (idle_global_phase && !use_global_idle_search) continue;
 	                        int a_loc = env->curr_states[a].location;
 	                        int a_zone = zid_100(a_loc, cols_);
 	                        auto& cand = all_candidates[pos];
@@ -1320,40 +2336,93 @@ void GameBalanceOptScheduler::schedule(int time_limit,
 	                        for (const auto& [z2, tids] : tasks_by_zone) {
 	                            if (tids.empty()) continue;
 	                            int zd = zh_dist(a_zone, z2);
-	                            if (zd <= search_radius) zone_order.emplace_back(zd, z2);
+	                            if (use_global_idle_search || zd <= search_radius)
+	                                zone_order.emplace_back(zd, z2);
 	                        }
 	                        std::sort(zone_order.begin(), zone_order.end(),
 	                            [](const auto& x, const auto& y) {
 	                                if (x.first != y.first) return x.first < y.first;
 	                                return x.second < y.second;
 	                            });
-	                        int scanned_tasks = 0;
 	                        for (const auto& [zd, z2] : zone_order) {
 	                            (void)zd;
-	                            if (scanned_tasks >= max_task_scan) break;
+	                            if ((int)cand.size() >= cand_topk ||
+	                                std::chrono::steady_clock::now() > deadline)
+	                                break;
 	                            auto tz = tasks_by_zone.find(z2);
 	                            if (tz == tasks_by_zone.end()) continue;
 	                            const auto& tids = tz->second;
-	                            for (int tid : tids) {
+
+	                            // First rank every task in this nearby zone by the
+	                            // cheap distance-only score: pickup_weight *
+	                            // agent->first-errand distance plus all errand legs.
+	                            std::vector<CoarseCand> coarse;
+	                            coarse.reserve(tids.size());
+	                            for (size_t task_pos = 0; task_pos < tids.size(); ++task_pos) {
+	                                if ((task_pos & 15U) == 0U &&
+	                                    std::chrono::steady_clock::now() > deadline)
+	                                    break;
+	                                const int tid = tids[task_pos];
 	                                if (done_tasks.count(tid)) continue;
-	                                scanned_tasks++;
-	                                float s = base_score_ex(a_loc, tid, step, 0, eff_density_cap);
-	                                if (!is_valid_score(s)) continue;
-	                                cand.push_back({s, tid});
+	                                auto tit = env->task_pool.find(tid);
+	                                if (tit == env->task_pool.end() ||
+	                                    tit->second.locations.empty()) continue;
+	                                const auto& locs = tit->second.locations;
+	                                auto cached = task_static_cache_.find(tid);
+	                                if (cached == task_static_cache_.end()) continue;
+	                                const float pickup_dist =
+	                                    score_distance_between(a_loc, locs.front());
+	                                if (pickup_dist < 0.0f) continue;
+	                                float score = distance_score(pickup_dist) *
+	                                    std::max(0.0f, cfg().game_pickup_weight);
+	                                if (cached->second.distance_ready) {
+	                                    if (!cached->second.distance_valid) continue;
+	                                    score += distance_score(
+	                                        cached->second.intrinsic_distance);
+	                                } else {
+	                                    if (!cached->second.coarse_distance_valid) continue;
+	                                    score += distance_score(
+	                                        cached->second.coarse_intrinsic_distance);
+	                                }
+	                                coarse.push_back({score, tid});
 	                            }
+	                            if (coarse.empty()) continue;
+	                            auto coarse_better =
+	                                [](const CoarseCand& x, const CoarseCand& y) {
+	                                    if (x.score != y.score) return x.score > y.score;
+	                                    return x.tid < y.tid;
+	                                };
+	                            if ((int)coarse.size() > full_score_batch) {
+	                                std::nth_element(coarse.begin(),
+	                                    coarse.begin() + full_score_batch,
+	                                    coarse.end(), coarse_better);
+	                                coarse.resize(full_score_batch);
+	                            }
+	                            std::sort(coarse.begin(), coarse.end(), coarse_better);
+
+	                            // Only the best distance candidates enter the
+	                            // expensive full score (future-flow, density, etc.).
+	                            const int limit = static_cast<int>(coarse.size());
+	                            for (int i = 0; i < limit; ++i) {
+	                                if (std::chrono::steady_clock::now() > deadline) break;
+	                                const int tid = coarse[i].tid;
+	                                const float score =
+	                                    base_score_ex(a_loc, tid, step, 0, eff_density_cap);
+	                                if (is_valid_score(score)) cand.push_back({score, tid});
+	                            }
+	                            if ((int)cand.size() > cand_topk) {
+	                                std::nth_element(cand.begin(), cand.begin() + cand_topk,
+	                                    cand.end(), [](const GlobalCand& x, const GlobalCand& y) {
+	                                        return x.score > y.score;
+	                                    });
+	                                cand.resize(cand_topk);
+	                            }
+	                            std::sort(cand.begin(), cand.end(),
+	                                [](const GlobalCand& x, const GlobalCand& y) {
+	                                    if (x.score != y.score) return x.score > y.score;
+	                                    return x.tid < y.tid;
+	                                });
 	                        }
-                        if ((int)cand.size() > cand_topk) {
-                            auto kth = cand.begin() + cand_topk;
-                            std::nth_element(cand.begin(), kth, cand.end(),
-                                [](const GlobalCand& x, const GlobalCand& y) {
-                                    return x.score > y.score;
-                                });
-                            cand.resize(cand_topk);
-                        }
-                        std::sort(cand.begin(), cand.end(),
-                            [](const GlobalCand& x, const GlobalCand& y) {
-                                return x.score > y.score;
-                            });
                     }
                 });
             }
@@ -1381,7 +2450,13 @@ void GameBalanceOptScheduler::schedule(int time_limit,
                 diag.considered_agents += active_agents;
                 diag.region_batch_flushes++;
             }
-            if (heap.empty()) break;
+            if (heap.empty()) {
+                if (!idle_global_phase && idle_global_count > 0) {
+                    idle_global_phase = true;
+                    continue;
+                }
+                break;
+            }
 
             int batch_assigned = 0;
             while (!heap.empty() && assigned_count < assign_budget &&
@@ -1426,12 +2501,22 @@ void GameBalanceOptScheduler::schedule(int time_limit,
                 done_tasks.insert(tid);
                 ++assigned_count;
                 ++batch_assigned;
+                if (idle_global_phase && idle_global_agent[a] != 0) {
+                    ++idle_global_assigned_count;
+                    if (diag_on) ++diag.idle_global_assigned;
+                }
                 agent_idle_ticks_[a] = 0;
                 if (diag_on) diag.legal_agents_after_full_filter++;
             }
 
             region_allow_cache.clear();
-            if (batch_assigned == 0) break;
+            if (batch_assigned == 0) {
+                if (!idle_global_phase && idle_global_count > 0) {
+                    idle_global_phase = true;
+                    continue;
+                }
+                break;
+            }
         }
         if (assigned_count >= assign_budget && diag_on) diag.budget_stop = 1;
     } else for (int a : free_agents) {
@@ -1575,6 +2660,212 @@ void GameBalanceOptScheduler::schedule(int time_limit,
         if (proposed_schedule[a] < 0) proposed_schedule[a] = -1;
     }
 
+    // ---- Phase 3: reassign swap LNS ----
+    // Compare alternatives against net flow: remove the current route first,
+    // then restore it or commit the accepted replacement.
+    if (cfg().game_reassign && cfg().game_lns_pct > 0) {
+        const auto lns_start = std::chrono::steady_clock::now();
+        const int lns_ms = std::max(1, time_limit * cfg().game_lns_pct / 100);
+        const auto lns_deadline = std::min(deadline, lns_start + std::chrono::milliseconds(lns_ms));
+
+        std::vector<int> reassign_agents;
+        reassign_agents.reserve(n_agents);
+        const int min_dist = std::max(0, cfg().game_min_dist);
+        for (int a = 0; a < n_agents; ++a) {
+            if (a >= (int)proposed_schedule.size() || a >= (int)env->curr_states.size())
+                continue;
+            const int tid = proposed_schedule[a];
+            if (tid < 0) continue;
+            auto tit = env->task_pool.find(tid);
+            if (tit == env->task_pool.end() || tit->second.locations.empty())
+                continue;
+            const Task& task = tit->second;
+            if (task.idx_next_loc != 0) continue;
+            const int a_loc = env->curr_states[a].location;
+            if (a_loc < 0) continue;
+            float pickup_dist = score_distance_between(a_loc, task.locations.front());
+            if (pickup_dist >= 0.0f && pickup_dist < (float)min_dist)
+                continue;
+            reassign_agents.push_back(a);
+        }
+
+        const float keep_bias = std::max(0.0f, cfg().game_keep_bias);
+        auto pair_score_for_swap = [&](int a, int tid) -> float {
+            if (a < 0 || a >= (int)env->curr_states.size() || tid < 0)
+                return INVALID_SCORE;
+            const int a_loc = env->curr_states[a].location;
+            if (a_loc < 0) return INVALID_SCORE;
+            return base_score_ex(a_loc, tid, step, 0, eff_density_cap);
+        };
+
+        auto adjust_agent_task_flow = [&](int a, int tid, int weight) {
+            if (a < 0 || a >= (int)env->curr_states.size() || tid < 0) return;
+            const int a_loc = env->curr_states[a].location;
+            if (a_loc < 0) return;
+            adjust_directional_future_flow_for_task(a_loc, tid, 0, weight);
+        };
+
+        auto pair_score_with_net_flow = [&](int a, int ta, int b, int tb) -> float {
+            const float sa = pair_score_for_swap(a, ta);
+            if (!is_valid_score(sa)) return INVALID_SCORE;
+            adjust_agent_task_flow(a, ta, 1);
+            const float sb = pair_score_for_swap(b, tb);
+            adjust_agent_task_flow(a, ta, -1);
+            if (!is_valid_score(sb)) return INVALID_SCORE;
+            return sa + sb;
+        };
+
+        if (!reassign_agents.empty() && !env->new_tasks.empty()) {
+            std::vector<int> new_free_tasks;
+            new_free_tasks.reserve(env->new_tasks.size());
+            for (int tid : env->new_tasks) {
+                if (filtered_free_tasks_set.count(tid) && !done_tasks.count(tid)) {
+                    auto tit = env->task_pool.find(tid);
+                    if (tit != env->task_pool.end() && !tit->second.locations.empty() &&
+                        !task_has_channel_errand(tit->second.locations))
+                        new_free_tasks.push_back(tid);
+                }
+            }
+
+            for (int a : reassign_agents) {
+                if (std::chrono::steady_clock::now() >= lns_deadline) {
+                    if (diag_on) diag.timeout_stop = 1;
+                    break;
+                }
+                if (new_free_tasks.empty()) break;
+                const int old_tid = proposed_schedule[a];
+                if (old_tid < 0) continue;
+
+                adjust_agent_task_flow(a, old_tid, -1);
+                const float old_score_raw = pair_score_for_swap(a, old_tid);
+                if (!is_valid_score(old_score_raw)) {
+                    adjust_agent_task_flow(a, old_tid, 1);
+                    continue;
+                }
+                const float old_score = old_score_raw + keep_bias;
+
+                int best_idx = -1;
+                float best_score = old_score;
+                for (int i = 0; i < (int)new_free_tasks.size(); ++i) {
+                    if (std::chrono::steady_clock::now() >= lns_deadline) break;
+                    ++diag.reassign_replace_attempts;
+                    const int new_tid = new_free_tasks[i];
+                    const float ns = pair_score_for_swap(a, new_tid);
+                    if (is_valid_score(ns) && ns > best_score + 1e-3f) {
+                        best_score = ns;
+                        best_idx = i;
+                    }
+                }
+
+                if (best_idx >= 0) {
+                    const int new_tid = new_free_tasks[best_idx];
+                    adjust_agent_task_flow(a, new_tid, 1);
+                    proposed_schedule[a] = new_tid;
+                    if (old_tid >= 0) {
+                        filtered_free_tasks_set.insert(old_tid);
+                        done_tasks.erase(old_tid);
+                    }
+                    filtered_free_tasks_set.erase(new_tid);
+                    done_tasks.insert(new_tid);
+                    auto tit = env->task_pool.find(new_tid);
+                    parked_task_[a] = (tit != env->task_pool.end() &&
+                                       tit->second.locations.size() > 2) ? new_tid : -1;
+                    new_free_tasks[best_idx] = new_free_tasks.back();
+                    new_free_tasks.pop_back();
+                    ++diag.reassign_replace_accepts;
+                } else {
+                    adjust_agent_task_flow(a, old_tid, 1);
+                }
+            }
+        }
+
+        if (reassign_agents.size() >= 2) {
+            std::mt19937 rng(20260710u + (uint32_t)step);
+            std::uniform_int_distribution<int> pick(0, (int)reassign_agents.size() - 1);
+            const int max_attempts = std::max<int>(
+                1, std::min<long long>(20000LL, (long long)reassign_agents.size() * 8LL));
+            for (int attempt = 0; attempt < max_attempts; ++attempt) {
+                if (std::chrono::steady_clock::now() >= lns_deadline) {
+                    if (diag_on) diag.timeout_stop = 1;
+                    break;
+                }
+                int ia = pick(rng);
+                int ib = pick(rng);
+                if (ia == ib) continue;
+                int a = reassign_agents[ia];
+                int b = reassign_agents[ib];
+                if (a == b) continue;
+                const int ta = proposed_schedule[a];
+                const int tb = proposed_schedule[b];
+                if (ta < 0 || tb < 0 || ta == tb) continue;
+
+                ++diag.reassign_attempts;
+                adjust_agent_task_flow(a, ta, -1);
+                adjust_agent_task_flow(b, tb, -1);
+
+                const float old_pair = pair_score_with_net_flow(a, ta, b, tb);
+                const float new_pair = pair_score_with_net_flow(a, tb, b, ta);
+                const float old_score = is_valid_score(old_pair)
+                    ? old_pair + 2.0f * keep_bias : INVALID_SCORE;
+                const float new_score = new_pair;
+                if (new_score > old_score + 1e-3f) {
+                    adjust_agent_task_flow(a, tb, 1);
+                    adjust_agent_task_flow(b, ta, 1);
+                    proposed_schedule[a] = tb;
+                    proposed_schedule[b] = ta;
+                    std::swap(parked_task_[a], parked_task_[b]);
+                    ++diag.reassign_accepts;
+                } else {
+                    adjust_agent_task_flow(a, ta, 1);
+                    adjust_agent_task_flow(b, tb, 1);
+                }
+            }
+        }
+    }
+
+    set_game_prefilter_stats({
+        diag.prefilter_task_total,
+        diag.prefilter_task_kept,
+        diag.prefilter_task_total - diag.prefilter_task_kept,
+        diag.prefilter_reject_missing,
+        diag.prefilter_reject_channel,
+        diag.prefilter_reject_capacity,
+        diag.prefilter_reject_flow,
+        diag.prefilter_reject_lock,
+        diag.prefilter_reject_density,
+        diag.prefilter_reject_branch,
+        diag.prefilter_reject_other,
+        blocked_zone_count,
+        blocked_zone_ids.str(),
+        diag.reassign_replace_attempts,
+        diag.reassign_replace_accepts,
+        diag.reassign_attempts,
+        diag.reassign_accepts,
+        idle_global_count,
+        idle_global_assigned_count
+    });
+
+    if (short_task_length_cuts_ready_) {
+        for (int a = 0; a < n_agents; ++a) {
+            if (a >= (int)proposed_schedule.size()) continue;
+            const int tid = proposed_schedule[a];
+            if (tid < 0) continue;
+            auto tit = env->task_pool.find(tid);
+            if (tit == env->task_pool.end()) continue;
+            const auto& locs = tit->second.locations;
+            int length = 0;
+            for (std::size_t i = 1; i < locs.size(); ++i) {
+                const int from = locs[i - 1];
+                const int to = locs[i];
+                length += std::abs(from / cols_ - to / cols_) +
+                          std::abs(from % cols_ - to % cols_);
+            }
+            int bin = 0;
+            while (bin < 4 && length > short_task_length_cuts_[bin]) ++bin;
+            ++diag.length_gate_final_active[bin];
+        }
+    }
+
     // URGENCY: sync urgency info to PibtLock
     if (cfg().game_urgency_priority) {
         for (int a = 0; a < n_agents && a < PibtLock::MAX_AGENTS; a++) {
@@ -1604,6 +2895,8 @@ void GameBalanceOptScheduler::schedule(int time_limit,
                   << " max_busy=" << diag.max_total_busy
                   << " assign_budget=" << diag.assign_budget
                   << " assigned=" << diag.assigned_count
+                  << " idle_global=" << diag.idle_global_eligible
+                  << "/" << diag.idle_global_assigned
                   << " budget_stop=" << diag.budget_stop
                   << " timeout_stop=" << diag.timeout_stop
                   << " radius=" << diag.search_radius
@@ -1622,6 +2915,31 @@ void GameBalanceOptScheduler::schedule(int time_limit,
                   << " prefilter_reject_density=" << diag.prefilter_reject_density
                   << " prefilter_reject_branch=" << diag.prefilter_reject_branch
                   << " prefilter_reject_other=" << diag.prefilter_reject_other
+                  << " len_gate=" << diag.length_gate_active
+                  << " len_tasks=" << diag.length_gate_kept
+                  << "/" << diag.length_gate_input
+                  << " len_s0=" << diag.length_gate_short_active[0]
+                  << "+" << diag.length_gate_short_kept[0]
+                  << "/" << diag.length_gate_short_quota[0]
+                  << "(" << diag.length_gate_short_total[0] << ")"
+                  << " len_s1=" << diag.length_gate_short_active[1]
+                  << "+" << diag.length_gate_short_kept[1]
+                  << "/" << diag.length_gate_short_quota[1]
+                  << "(" << diag.length_gate_short_total[1] << ")"
+                  << " len_cut=" << diag.length_gate_cut[0] << ","
+                  << diag.length_gate_cut[1] << ","
+                  << diag.length_gate_cut[2] << ","
+                  << diag.length_gate_cut[3]
+                  << " len_avg=" << short_task_length_means_[0] << ","
+                  << short_task_length_means_[1] << ","
+                  << short_task_length_means_[2] << ","
+                  << short_task_length_means_[3] << ","
+                  << short_task_length_means_[4]
+                  << " len_act=" << diag.length_gate_final_active[0] << ","
+                  << diag.length_gate_final_active[1] << ","
+                  << diag.length_gate_final_active[2] << ","
+                  << diag.length_gate_final_active[3] << ","
+                  << diag.length_gate_final_active[4]
                   << " legal_agents_after_task_filter=" << diag.legal_agents_after_task_filter
                   << " legal_agents_after_task_filter_ratio="
                   << (diag.free_agents_after_phase1 > 0
@@ -1647,7 +2965,26 @@ void GameBalanceOptScheduler::schedule(int time_limit,
                   << " reject_channel=" << diag.reject_channel
                   << " reject_flow=" << diag.reject_flow
                   << " reject_zone_or_route=" << diag.reject_zone_or_route
+                  << " reassign_replace_attempts=" << diag.reassign_replace_attempts
+                  << " reassign_replace_accepts=" << diag.reassign_replace_accepts
+                  << " reassign_attempts=" << diag.reassign_attempts
+                  << " reassign_accepts=" << diag.reassign_accepts
                   << " neighbor_checked_cap_hits=" << diag.neighbor_checked_cap_hits
+                  << " dyn_cap=" << (cfg().game_dir_flow_dynamic_cap ? 1 : 0)
+                  << " cap_window=" << dynamic_cap_last_window_ticks_
+                  << " cap_avg=" << dynamic_cap_last_avg_
+                  << " cap_min=" << dynamic_cap_last_min_
+                  << " cap_max=" << dynamic_cap_last_max_
+                  << " stall_avg=" << dynamic_cap_last_stall_avg_
+                  << " stall_max=" << dynamic_cap_last_stall_max_
+                  << " stall_busy=" << dynamic_cap_last_busy_stall_avg_
+                  << " stall_free=" << dynamic_cap_last_free_stall_avg_
+                  << " cap_active=" << dynamic_cap_last_active_
+                  << " cap_lo_hi=" << dynamic_cap_last_below_base_
+                  << "/" << dynamic_cap_last_above_base_
+                  << " cap_at_min=" << dynamic_cap_last_at_min_
+                  << " cap_up=" << dynamic_cap_last_up_
+                  << " cap_down=" << dynamic_cap_last_down_
                   << " blocked_zone_count=" << blocked_zone_count
                   << " blocked_zone_ids=" << blocked_zone_ids.str()
                   << "\n";
@@ -1672,7 +3009,7 @@ float GameBalanceOptScheduler::base_score_ex(int a_loc, int tid, int step,
     if (!ready_) return 1.0f;
     auto& locs = it->second.locations;
     if (task_has_channel_errand(locs)) return reject(ScoreRejectReason::Channel);
-    if (!directional_future_flow_allows(a_loc, locs, start_idx))
+    if (!directional_future_flow_allows(a_loc, locs, start_idx, tid))
         return reject(ScoreRejectReason::FutureFlow);
 
     int zone_hard_cap = cfg().game_zone_hard_cap;
@@ -1708,9 +3045,8 @@ float GameBalanceOptScheduler::base_score_ex(int a_loc, int tid, int step,
                     float total = 0;
                     int prev = a_loc;
                     for (auto& loc : locs) {
-                        int r1 = prev / cols_, c1 = prev % cols_;
-                        int r2 = loc / cols_,  c2 = loc % cols_;
-                        float dist = std::sqrt((float)((c2-c1)*(c2-c1) + (r2-r1)*(r2-r1)));
+                        float dist = score_distance_between(prev, loc);
+                        if (dist < 0.0f) return reject(ScoreRejectReason::Other);
                         total += distance_score(dist);
                         prev = loc;
                     }
@@ -1765,12 +3101,12 @@ float GameBalanceOptScheduler::base_score_ex(int a_loc, int tid, int step,
                 float total = 0;
                 int prev = a_loc;
                 for (size_t ei = (size_t)start_idx; ei < locs.size(); ei++) {
-                    int r1 = prev / cols_, c1 = prev % cols_;
                     int r2 = locs[ei] / cols_, c2 = locs[ei] % cols_;
                     int z2 = (r2 / 24) * n24c_ + (c2 / 24);
                     if (z2 >= 0 && z2 < max_z && zone24_density_[z2] >= 70)
                         return reject(ScoreRejectReason::Branch);
-                    float dist = std::sqrt((float)((c2-c1)*(c2-c1) + (r2-r1)*(r2-r1)));
+                    float dist = score_distance_between(prev, locs[ei]);
+                    if (dist < 0.0f) return reject(ScoreRejectReason::Other);
                     total += distance_score(dist);
                     prev = locs[ei];
                 }
@@ -1794,8 +3130,31 @@ float GameBalanceOptScheduler::base_score_ex(int a_loc, int tid, int step,
     project(a_loc, a_m, a_b);
     if (a_m < 0) return 1.0f;
 
+    if (use_direct_distance_score() && start_idx >= 0 &&
+        start_idx < static_cast<int>(locs.size())) {
+        auto cached = task_static_cache_.find(tid);
+        if (cached != task_static_cache_.end() &&
+            ((cached->second.distance_ready && cached->second.distance_valid &&
+              start_idx < static_cast<int>(cached->second.tail_distance.size())) ||
+             (!cached->second.distance_ready && cached->second.coarse_distance_valid &&
+              start_idx < static_cast<int>(cached->second.coarse_tail_distance.size())))) {
+            const float pickup_dist = score_distance_between(a_loc, locs[start_idx]);
+            if (pickup_dist < 0.0f) return reject(ScoreRejectReason::Other);
+            float total = distance_score(pickup_dist) *
+                std::max(0.0f, cfg().game_pickup_weight);
+            const float internal_dist = cached->second.distance_ready
+                ? cached->second.tail_distance[start_idx]
+                : cached->second.coarse_tail_distance[start_idx];
+            total += distance_score(internal_dist);
+            total -= directional_future_flow_soft_penalty(
+                a_loc, locs, start_idx, tid);
+            return total;
+        }
+    }
+
     float total_score = 0;
     int prev_m = a_m, prev_b = a_b;
+    int prev_loc = a_loc;
 
     for (size_t ei = (size_t)start_idx; ei < locs.size(); ei++) {
         int tm, tb;
@@ -1824,7 +3183,8 @@ float GameBalanceOptScheduler::base_score_ex(int a_loc, int tid, int step,
             }
         }
 
-        float seg_dist = (float)(std::abs(prev_m - tm) + std::abs(prev_b - tb));
+        float seg_dist = score_distance_between(prev_loc, locs[ei]);
+        if (seg_dist < 0.0f) return reject(ScoreRejectReason::Other);
         float seg_score = distance_score(seg_dist);
         if (use_direct_distance_score() && ei == (size_t)start_idx) {
             seg_score *= std::max(0.0f, cfg().game_pickup_weight);
@@ -1836,11 +3196,12 @@ float GameBalanceOptScheduler::base_score_ex(int a_loc, int tid, int step,
         }
 
         total_score += seg_score;
+        prev_loc = locs[ei];
         prev_m = tm; prev_b = tb;
     }
 
     if (use_direct_distance_score()) {
-        total_score -= directional_future_flow_soft_penalty(a_loc, locs, start_idx);
+        total_score -= directional_future_flow_soft_penalty(a_loc, locs, start_idx, tid);
     }
     return total_score;
 }

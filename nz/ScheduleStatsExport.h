@@ -1,4 +1,4 @@
-// nz/ScheduleStatsExport.h — 调度诊断指标导出接口
+// optsvr/ScheduleStatsExport.h — 调度诊断指标导出接口
 // 由 OptRoomScheduler.cpp 实现，saveResults() 调用
 #pragma once
 
@@ -28,6 +28,12 @@ struct GamePrefilterStats {
     int other = 0;
     int blocked_zones = 0;
     std::string blocked_zone_ids;
+    int reassign_replace_attempts = 0;
+    int reassign_replace_accepts = 0;
+    int reassign_attempts = 0;
+    int reassign_accepts = 0;
+    int idle_global_eligible = 0;
+    int idle_global_assigned = 0;
 };
 
 void set_game_prefilter_stats(const GamePrefilterStats& stats);
