@@ -60,23 +60,58 @@ inline void load_for_combined(const MapProfile& profile, const SharedEnvironment
     switch (profile.type) {
 
         case MapType::GAME_DOMAIN:
-            c.skip_test = false;
-            c.schedule_mode = 8; 
-            c.executor_mode = 6;  
-            c.planner_mode  = 16; 
+            c.skip_test = true;
+            c.schedule_mode = 8;  // GameBalanceOptScheduler
+            c.executor_mode = 6;  // GameExecutor
+            c.planner_mode  = 16; // GameDirectionalPlanner
             c.precompute_heuristic = true;
-            c.reassign_enabled = false;
+
             c.game_heuristic_hard_direction = true;
             c.game_idle_highway_relocate = true;
             c.game_skip_channel_errands = false;
-            c.game_skip_longest_pct = 5;
+
+            c.game_bal_assign_ratio = 0.70f;
             c.game_dir_flow_enabled = true;
-            c.game_dir_flow_cap = 9999;
+            c.game_dir_flow_hard_filter = false;
+            c.game_dir_flow_cap = 250;
             c.game_dir_flow_gap = 0;
-            c.game_dir_flow_decay = 0.9f;
-            c.game_dir_flow_max_check_main = 1000;
+            c.game_dir_flow_decay = 0.95f;
+            c.game_dir_flow_zone_horizon = 0;
+            c.game_dir_flow_horizon_exempt_ratio = 0.2f;
+            c.game_dir_flow_dynamic_cap = true;
+            c.game_dir_flow_dynamic_cap_window = 500;
+            c.game_dir_flow_dynamic_cap_interval = 200;
+            c.game_dir_flow_dynamic_cap_low = 0.01f;
+            c.game_dir_flow_dynamic_cap_high = 0.03f;
+            c.game_dir_flow_dynamic_cap_inc = 5.0f;
+            c.game_dir_flow_dynamic_cap_dec = 0.95f;
+            c.game_dir_flow_dynamic_cap_min_ratio = 0.50f;
+            c.game_dir_flow_dynamic_cap_max_ratio = 1.40f;
+            c.game_dir_flow_random_shortest = true;
+
+            c.game_score_exempt_enabled = false;
+            c.game_distance_score_mode = 3;
+            c.game_pickup_weight = 2.0f;
             c.game_region_match = true;
             c.game_region_flow_batch = 64;
+            c.game_search_radius = 3;
+            c.game_global_max_task_scan = 50;
+            c.game_global_cand_topk = 32;
+            c.game_flow_soft_over_cap_growth = 1.20f;
+
+            c.game_short_task_throttle = true;
+            c.game_short_task_test_ticks = 40000;
+            c.game_short_task_final_open_ticks = 12500;
+            c.game_short_task_release_ratio = 0.25f;
+
+            c.game_reassign = true;
+            c.game_lns_pct = 5;
+            c.game_keep_bias = 10.0f;
+            c.game_min_dist = 10;
+
+            c.game_idle_global_match = false;
+            c.game_idle_global_ticks = 500;
+            c.game_idle_global_max_agents = 64;
             break;
 
         default:
