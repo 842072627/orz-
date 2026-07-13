@@ -60,7 +60,7 @@ inline void load_for_combined(const MapProfile& profile, const SharedEnvironment
     switch (profile.type) {
 
         case MapType::GAME_DOMAIN:
-            c.skip_test = true;
+            c.skip_test = false;
             c.schedule_mode = 8;  // GameBalanceOptScheduler
             c.executor_mode = 6;  // GameExecutor
             c.planner_mode  = 16; // GameDirectionalPlanner
@@ -95,6 +95,8 @@ inline void load_for_combined(const MapProfile& profile, const SharedEnvironment
             c.game_region_match = true;
             c.game_region_flow_batch = 64;
             c.game_search_radius = 3;
+            c.game_main_search_radius = 200;
+            c.game_sign_filter = 1;
             c.game_global_max_task_scan = 50;
             c.game_global_cand_topk = 32;
             c.game_flow_soft_over_cap_growth = 1.20f;

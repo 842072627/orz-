@@ -121,6 +121,7 @@ constexpr bool  GAME_SKIP_CHANNEL_ERRANDS = false; // mode16: 任务任一errand
 constexpr bool  GAME_DIR_FLOW_ENABLED = false; // mode16: 开启主线zone双方向future-flow限流
 constexpr int   GAME_DIR_FLOW_CAP  = 64;       // mode16: 每个主线zone单方向future-flow上限
 constexpr int   GAME_DIR_FLOW_GAP  = 24;
+constexpr int   GAME_SIGN_FILTER = 0;            // >0: 按格子 sign 方向过滤任务（1=+main方向,2=-main方向）
 constexpr int   GAME_DIR_FLOW_MAX_CHECK_MAIN = 0;       // >0: future flow 只检查 agent 到 errand 的 main_dist 在此范围内       // mode16: 单方向相对反向超出此差值也限流(0=仅按CAP)
 constexpr float GAME_DIR_FLOW_DECAY = 0.95f;   // mode16: future-flow沿route每前进一个zone的衰减系数
 constexpr bool  GAME_HEURISTIC_HARD_DIRECTION = false; // mode16: 全局HeuristicMatrix BFS按ORZ硬方向删边
@@ -168,6 +169,8 @@ constexpr int   GAME_LATE_ZONE_CAP     = 25;     // 后期zone_hard_cap
 // free_tasks按等待时间排序，优先分配久等task
 constexpr bool  GAME_AGE_SORT         = false;
 constexpr int   GAME_SKIP_LONGEST_PCT = 0;
+constexpr int   GAME_MAIN_SEARCH_RADIUS = 200; // >0: main_dist 搜索半径（替换几何 zh_dist）
+
 // mode16: dynamic cap (game_16000)
 constexpr bool  GAME_DIR_FLOW_DYNAMIC_CAP = false;
 constexpr float GAME_DIR_FLOW_DYNAMIC_CAP_DEC = 0.95f;

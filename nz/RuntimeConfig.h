@@ -107,6 +107,7 @@ struct RuntimeConfig {
     bool  game_dir_flow_enabled;
     int   game_dir_flow_cap;
     int   game_dir_flow_gap;
+    int   game_sign_filter;
     int   game_dir_flow_max_check_main;
     // game_16000 additions
     bool  game_dir_flow_dynamic_cap;
@@ -150,6 +151,7 @@ struct RuntimeConfig {
     int   game_urgency_threshold;
     // ---- 有效自适应策略 ----
     int   game_search_radius;
+    int   game_main_search_radius;
     int   game_skip_longest_pct;
     int   game_late_search_radius;
     bool  game_late_search_enable;
@@ -444,6 +446,7 @@ struct RuntimeConfig {
         OVERRIDE_BOOL("GAME_DIR_FLOW_ENABLED", game_dir_flow_enabled);
         OVERRIDE_INT("GAME_DIR_FLOW_CAP", game_dir_flow_cap);
         OVERRIDE_INT("GAME_DIR_FLOW_GAP", game_dir_flow_gap);
+        OVERRIDE_INT("GAME_SIGN_FILTER", game_sign_filter);
         OVERRIDE_INT("GAME_DIR_FLOW_MAX_CHECK_MAIN", game_dir_flow_max_check_main);
         OVERRIDE_BOOL("GAME_DIR_FLOW_DYNAMIC_CAP", game_dir_flow_dynamic_cap);
         OVERRIDE_FLOAT("GAME_DIR_FLOW_DYNAMIC_CAP_DEC", game_dir_flow_dynamic_cap_dec);
@@ -486,6 +489,7 @@ struct RuntimeConfig {
         OVERRIDE_FLOAT("GAME_URGENCY_WEIGHT", game_urgency_weight);
         OVERRIDE_INT("GAME_URGENCY_THRESHOLD", game_urgency_threshold);
         OVERRIDE_INT("GAME_SEARCH_RADIUS", game_search_radius);
+        OVERRIDE_INT("GAME_MAIN_SEARCH_RADIUS", game_main_search_radius);
         OVERRIDE_INT("GAME_SKIP_LONGEST_PCT", game_skip_longest_pct);
         OVERRIDE_INT("GAME_LATE_SEARCH_RADIUS", game_late_search_radius);
         OVERRIDE_BOOL("GAME_LATE_SEARCH_ENABLE", game_late_search_enable);
@@ -787,6 +791,7 @@ private:
         game_dir_flow_enabled = GAME_DIR_FLOW_ENABLED;
         game_dir_flow_cap = GAME_DIR_FLOW_CAP;
         game_dir_flow_gap = GAME_DIR_FLOW_GAP;
+        game_sign_filter = GAME_SIGN_FILTER;
         game_dir_flow_max_check_main = GAME_DIR_FLOW_MAX_CHECK_MAIN;
         game_dir_flow_dynamic_cap = GAME_DIR_FLOW_DYNAMIC_CAP;
         game_dir_flow_dynamic_cap_dec = GAME_DIR_FLOW_DYNAMIC_CAP_DEC;
@@ -828,6 +833,7 @@ private:
         game_urgency_threshold = GAME_URGENCY_THRESHOLD;
         // 有效自适应策略
         game_search_radius = GAME_SEARCH_RADIUS;
+        game_main_search_radius = GAME_MAIN_SEARCH_RADIUS;
         game_skip_longest_pct = GAME_SKIP_LONGEST_PCT;
         game_late_search_radius = GAME_LATE_SEARCH_RADIUS;
         game_late_search_enable = GAME_LATE_SEARCH_ENABLE;

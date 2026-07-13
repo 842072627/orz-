@@ -2206,9 +2206,41 @@ void GameBalanceOptScheduler::schedule(int time_limit,
         if (diag_on) diag.region_batch_flushes++;
     };
 
+    // sign 方向过滤：不同颜色的 task 和 agent 不允许匹配
+    // + 检查 agent→task1 和 task1→task2→... 全链方向一致
+    auto sign_allows = [&](int a_loc, int tid) -> bool {
+        if (cfg().game_sign_filter <= 0) return true;
+        uint8_t as = ORZ_Highway::get_sign(a_loc);
+        if (as == 0) return true;
+        auto tit = env->task_pool.find(tid);
+        if (tit == env->task_pool.end() || tit->second.locations.empty()) return true;
+        const auto& locs = tit->second.locations;
+        // 颜色匹配：agent 和 task1 的 sign 必须相同
+        uint8_t ts = ORZ_Highway::get_sign(locs.front());
+        if (ts != 0 && as != ts) return false;
+        // 全链方向检查：agent→task1 和 task1→task2→... 方向一致
+        int a_m = -1, a_b = -1, t_m = -1, t_b = -1;
+        project(a_loc, a_m, a_b);
+        project(locs.front(), t_m, t_b);
+        if (a_m < 0 || t_m < 0) return true;
+        if ((as == 1 && t_m < a_m) || (as == 2 && t_m > a_m)) return false;
+        int prev_m = t_m;
+        for (size_t i = 1; i < locs.size(); i++) {
+            project(locs[i], t_m, t_b);
+            if (t_m < 0) break;
+            if ((as == 1 && t_m < prev_m) || (as == 2 && t_m > prev_m)) return false;
+            prev_m = t_m;
+        }
+        return true;
+    };
+
     auto score_candidate = [&](int a_loc, int tid) -> float {
-        if (!diag_on) return base_score_ex(a_loc, tid, step, 0, eff_density_cap);
+        if (!diag_on) {
+            if (!sign_allows(a_loc, tid)) return INVALID_SCORE;
+            return base_score_ex(a_loc, tid, step, 0, eff_density_cap);
+        }
         diag.attempts++;
+        if (!sign_allows(a_loc, tid)) { diag.reject_zone_or_route++; return INVALID_SCORE; }
         auto tit = env->task_pool.find(tid);
         if (tit == env->task_pool.end() || tit->second.locations.empty()) {
             diag.reject_missing++;
@@ -2368,6 +2400,17 @@ void GameBalanceOptScheduler::schedule(int time_limit,
 	                                if (tit == env->task_pool.end() ||
 	                                    tit->second.locations.empty()) continue;
 	                                const auto& locs = tit->second.locations;
+	                                // main_dist 搜索半径过滤
+	                                if (cfg().game_main_search_radius > 0) {
+	                                    int a_m = -1, a_b = -1, t_m = -1, t_b = -1;
+	                                    project(a_loc, a_m, a_b);
+	                                    project(locs.front(), t_m, t_b);
+	                                    if (a_m >= 0 && t_m >= 0 &&
+	                                        std::abs(t_m - a_m) > cfg().game_main_search_radius)
+	                                        continue;
+	                                }
+	                                // sign 方向过滤
+	                                if (!sign_allows(a_loc, tid)) continue;
 	                                auto cached = task_static_cache_.find(tid);
 	                                if (cached == task_static_cache_.end()) continue;
 	                                const float pickup_dist =
@@ -2695,6 +2738,7 @@ void GameBalanceOptScheduler::schedule(int time_limit,
                 return INVALID_SCORE;
             const int a_loc = env->curr_states[a].location;
             if (a_loc < 0) return INVALID_SCORE;
+            if (!sign_allows(a_loc, tid)) return INVALID_SCORE;
             return base_score_ex(a_loc, tid, step, 0, eff_density_cap);
         };
 
