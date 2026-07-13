@@ -180,6 +180,7 @@ constexpr int   GAME_DIR_FLOW_DYNAMIC_CAP_INTERVAL = 200;
 constexpr float GAME_DIR_FLOW_DYNAMIC_CAP_LOW = 0.01f;
 constexpr float GAME_DIR_FLOW_DYNAMIC_CAP_MAX_RATIO = 1.40f;
 constexpr float GAME_DIR_FLOW_DYNAMIC_CAP_MIN_RATIO = 0.50f;
+constexpr float GAME_DIR_FLOW_TARGET_RATIO = 0.69f;   // 动态 cap 目标 busy 比例
 constexpr int   GAME_DIR_FLOW_DYNAMIC_CAP_WINDOW = 500;
 constexpr bool  GAME_DIR_FLOW_HARD_FILTER = true;
 constexpr float GAME_DIR_FLOW_HORIZON_EXEMPT_RATIO = 0.2f;

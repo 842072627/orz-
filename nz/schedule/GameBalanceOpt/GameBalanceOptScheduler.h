@@ -131,6 +131,7 @@ private:
     std::unordered_map<int, TaskStaticCache> task_static_cache_;
 
     int step_ = 0;
+    int dir_flow_cap_ = 300;  // 动态调节的 flow cap
 
     // ---- 中心线初始化 ----
     void build_centerline(const SharedEnvironment* env);

@@ -70,10 +70,10 @@ inline void load_for_combined(const MapProfile& profile, const SharedEnvironment
             c.game_idle_highway_relocate = true;
             c.game_skip_channel_errands = false;
 
-            c.game_bal_assign_ratio = 0.70f;
+            c.game_bal_assign_ratio = 1.0f;
             c.game_dir_flow_enabled = true;
-            c.game_dir_flow_hard_filter = false;
-            c.game_dir_flow_cap = 250;
+            c.game_dir_flow_hard_filter = true;
+            c.game_dir_flow_cap = 300;
             c.game_dir_flow_gap = 0;
             c.game_dir_flow_decay = 0.95f;
             c.game_dir_flow_zone_horizon = 0;
@@ -86,6 +86,7 @@ inline void load_for_combined(const MapProfile& profile, const SharedEnvironment
             c.game_dir_flow_dynamic_cap_inc = 5.0f;
             c.game_dir_flow_dynamic_cap_dec = 0.95f;
             c.game_dir_flow_dynamic_cap_min_ratio = 0.50f;
+            c.game_dir_flow_target_ratio = 0.69f;
             c.game_dir_flow_dynamic_cap_max_ratio = 1.40f;
             c.game_dir_flow_random_shortest = true;
 
@@ -101,7 +102,7 @@ inline void load_for_combined(const MapProfile& profile, const SharedEnvironment
             c.game_global_cand_topk = 32;
             c.game_flow_soft_over_cap_growth = 1.20f;
 
-            c.game_short_task_throttle = true;
+            c.game_short_task_throttle = false;
             c.game_short_task_test_ticks = 40000;
             c.game_short_task_final_open_ticks = 12500;
             c.game_short_task_release_ratio = 0.25f;

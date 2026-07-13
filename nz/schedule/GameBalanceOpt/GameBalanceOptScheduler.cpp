@@ -441,7 +441,7 @@ void GameBalanceOptScheduler::reset_directional_future_flow() {
 
 float GameBalanceOptScheduler::directional_zone_cap(int zid, int intent) const {
     (void)intent;
-    const float base_cap = static_cast<float>(std::max(1, cfg().game_dir_flow_cap));
+    const float base_cap = static_cast<float>(std::max(1, dir_flow_cap_));
     if (!cfg().game_dir_flow_dynamic_cap || zid < 0 ||
         zid >= static_cast<int>(zone_dynamic_cap_.size()))
         return base_cap;
@@ -599,7 +599,7 @@ void GameBalanceOptScheduler::update_dynamic_zone_cap(const SharedEnvironment* e
     dynamic_cap_last_down_ = 0;
     if (covered_ticks < window) return;
 
-    const float base_cap = static_cast<float>(std::max(1, cfg().game_dir_flow_cap));
+    const float base_cap = static_cast<float>(std::max(1, dir_flow_cap_));
     float low = cfg().game_dir_flow_dynamic_cap_low;
     float high = cfg().game_dir_flow_dynamic_cap_high;
     if (!std::isfinite(low)) low = GAME_DIR_FLOW_DYNAMIC_CAP_LOW;
@@ -767,7 +767,7 @@ void GameBalanceOptScheduler::update_dynamic_zone_cap(const SharedEnvironment* e
                   << " top=" << format_zones(saturated_zones, 8)
                   << " down=" << format_zones(decreased_zones, 8)
                   << " low=" << format_zones(low_cap_zones, 8)
-                  << "\n";
+                  << "\n" << std::endl;
     }
 }
 
@@ -995,6 +995,7 @@ bool GameBalanceOptScheduler::directional_future_flow_allows(
 float GameBalanceOptScheduler::directional_future_flow_soft_penalty(
     int agent_loc, const std::vector<int>& locs, int start_idx, int tid) const {
     if (!game_directional_flow_enabled() || !ready_ || locs.empty()) return 0.0f;
+    if (cfg().game_dir_flow_hard_filter) return 0.0f;
     const int nz = n24c_ * n24r_;
     if ((int)zone_future_pos_.size() != nz || (int)zone_future_neg_.size() != nz)
         return 0.0f;
@@ -1861,6 +1862,31 @@ void GameBalanceOptScheduler::schedule(int time_limit,
     }
 
     // ---- Phase 1: 多 errand 续接 + parked task 处理 ----
+    // ---- sign 过滤 lambda（提前定义，后续多处使用） ----
+    auto sign_allows = [&](int a_loc, int tid) -> bool {
+        if (cfg().game_sign_filter <= 0) return true;
+        uint8_t as = ORZ_Highway::get_sign(a_loc);
+        if (as == 0) return true;
+        auto tit = env->task_pool.find(tid);
+        if (tit == env->task_pool.end() || tit->second.locations.empty()) return true;
+        const auto& locs = tit->second.locations;
+        uint8_t ts = ORZ_Highway::get_sign(locs.front());
+        if (ts != 0 && as != ts) return false;
+        int a_m = -1, a_b = -1, t_m = -1, t_b = -1;
+        project(a_loc, a_m, a_b);
+        project(locs.front(), t_m, t_b);
+        if (a_m < 0 || t_m < 0) return true;
+        if ((as == 1 && t_m < a_m) || (as == 2 && t_m > a_m)) return false;
+        int prev_m = t_m;
+        for (size_t i = 1; i < locs.size(); i++) {
+            project(locs[i], t_m, t_b);
+            if (t_m < 0) break;
+            if ((as == 1 && t_m < prev_m) || (as == 2 && t_m > prev_m)) return false;
+            prev_m = t_m;
+        }
+        return true;
+    };
+
     for (auto it = free_agents.begin(); it != free_agents.end(); ) {
         int a = *it;
 
@@ -1899,6 +1925,44 @@ void GameBalanceOptScheduler::schedule(int time_limit,
         }
     }
 
+    // ---- Sign 校验：续接任务 sign 不匹配且未取货则取消 ----
+    if (cfg().game_sign_filter > 0) {
+        for (int a = 0; a < n_agents; a++) {
+            int tid = env->curr_task_schedule[a];
+            if (tid < 0) continue;
+            // 跳过已在 free_agents 的（Phase 1 已处理）
+            if (std::find(free_agents.begin(), free_agents.end(), a) != free_agents.end())
+                continue;
+            // 跳过已续接的（Phase 1 multi-errand 已保留）
+            if (proposed_schedule[a] >= 0) continue;
+            // 跳过已取货的（parked task）
+            int parked = (a < (int)parked_task_.size()) ? parked_task_[a] : -1;
+            if (parked >= 0) continue;
+
+            int a_loc = env->curr_states[a].location;
+            if (!sign_allows(a_loc, tid)) {
+                proposed_schedule[a] = -1;
+                free_agents.push_back(a);
+                free_tasks_set.insert(tid);
+            }
+        }
+    }
+
+
+    // ---- 打印 busy 比例 ----
+    if (step % 10 == 0 && step > 0) {
+        int busy = 0;
+        for (int a = 0; a < n_agents; a++)
+            if (env->curr_task_schedule[a] >= 0) busy++;
+        fprintf(stderr, "[BUSY] step=%d cap=%d busy=%d/%d ratio=%.3f\n", step, dir_flow_cap_, busy, n_agents, (float)busy / (float)n_agents); fflush(stderr);
+        // 动态调节 cap：保持 busy ratio >= 69%
+        float ratio = (float)busy / (float)n_agents;
+        const float target = cfg().game_dir_flow_target_ratio;
+        if (ratio < target && dir_flow_cap_ < 2000) {
+            int delta = std::max(1, (int)((target - ratio) * 50));
+            dir_flow_cap_ = std::min(2000, dir_flow_cap_ + delta);
+        }
+    }
     if (free_agents.empty()) {
         if (diag_on) {
             std::cerr << "[GameSchedDiag] step=" << diag.step
@@ -2204,34 +2268,6 @@ void GameBalanceOptScheduler::schedule(int time_limit,
         region_allow_cache.clear();
         region_flow_since_cache_clear = 0;
         if (diag_on) diag.region_batch_flushes++;
-    };
-
-    // sign 方向过滤：不同颜色的 task 和 agent 不允许匹配
-    // + 检查 agent→task1 和 task1→task2→... 全链方向一致
-    auto sign_allows = [&](int a_loc, int tid) -> bool {
-        if (cfg().game_sign_filter <= 0) return true;
-        uint8_t as = ORZ_Highway::get_sign(a_loc);
-        if (as == 0) return true;
-        auto tit = env->task_pool.find(tid);
-        if (tit == env->task_pool.end() || tit->second.locations.empty()) return true;
-        const auto& locs = tit->second.locations;
-        // 颜色匹配：agent 和 task1 的 sign 必须相同
-        uint8_t ts = ORZ_Highway::get_sign(locs.front());
-        if (ts != 0 && as != ts) return false;
-        // 全链方向检查：agent→task1 和 task1→task2→... 方向一致
-        int a_m = -1, a_b = -1, t_m = -1, t_b = -1;
-        project(a_loc, a_m, a_b);
-        project(locs.front(), t_m, t_b);
-        if (a_m < 0 || t_m < 0) return true;
-        if ((as == 1 && t_m < a_m) || (as == 2 && t_m > a_m)) return false;
-        int prev_m = t_m;
-        for (size_t i = 1; i < locs.size(); i++) {
-            project(locs[i], t_m, t_b);
-            if (t_m < 0) break;
-            if ((as == 1 && t_m < prev_m) || (as == 2 && t_m > prev_m)) return false;
-            prev_m = t_m;
-        }
-        return true;
     };
 
     auto score_candidate = [&](int a_loc, int tid) -> float {
@@ -3032,6 +3068,7 @@ void GameBalanceOptScheduler::schedule(int time_limit,
                   << " blocked_zone_count=" << blocked_zone_count
                   << " blocked_zone_ids=" << blocked_zone_ids.str()
                   << "\n";
+
     }
 }
 

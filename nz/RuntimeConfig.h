@@ -118,6 +118,7 @@ struct RuntimeConfig {
     float game_dir_flow_dynamic_cap_low;
     float game_dir_flow_dynamic_cap_max_ratio;
     float game_dir_flow_dynamic_cap_min_ratio;
+    float game_dir_flow_target_ratio;
     int   game_dir_flow_dynamic_cap_window;
     bool  game_dir_flow_hard_filter;
     float game_dir_flow_horizon_exempt_ratio;
@@ -456,6 +457,7 @@ struct RuntimeConfig {
         OVERRIDE_FLOAT("GAME_DIR_FLOW_DYNAMIC_CAP_LOW", game_dir_flow_dynamic_cap_low);
         OVERRIDE_FLOAT("GAME_DIR_FLOW_DYNAMIC_CAP_MAX_RATIO", game_dir_flow_dynamic_cap_max_ratio);
         OVERRIDE_FLOAT("GAME_DIR_FLOW_DYNAMIC_CAP_MIN_RATIO", game_dir_flow_dynamic_cap_min_ratio);
+        OVERRIDE_FLOAT("GAME_DIR_FLOW_TARGET_RATIO", game_dir_flow_target_ratio);
         OVERRIDE_INT("GAME_DIR_FLOW_DYNAMIC_CAP_WINDOW", game_dir_flow_dynamic_cap_window);
         OVERRIDE_BOOL("GAME_DIR_FLOW_HARD_FILTER", game_dir_flow_hard_filter);
         OVERRIDE_FLOAT("GAME_DIR_FLOW_HORIZON_EXEMPT_RATIO", game_dir_flow_horizon_exempt_ratio);
@@ -801,6 +803,7 @@ private:
         game_dir_flow_dynamic_cap_low = GAME_DIR_FLOW_DYNAMIC_CAP_LOW;
         game_dir_flow_dynamic_cap_max_ratio = GAME_DIR_FLOW_DYNAMIC_CAP_MAX_RATIO;
         game_dir_flow_dynamic_cap_min_ratio = GAME_DIR_FLOW_DYNAMIC_CAP_MIN_RATIO;
+        game_dir_flow_target_ratio = GAME_DIR_FLOW_TARGET_RATIO;
         game_dir_flow_dynamic_cap_window = GAME_DIR_FLOW_DYNAMIC_CAP_WINDOW;
         game_dir_flow_hard_filter = GAME_DIR_FLOW_HARD_FILTER;
         game_dir_flow_horizon_exempt_ratio = GAME_DIR_FLOW_HORIZON_EXEMPT_RATIO;
