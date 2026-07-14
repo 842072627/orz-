@@ -242,11 +242,12 @@ void Entry::compute(int time_limit, Plan & plan, std::vector<int> & proposed_sch
     auto t_now = clk::now();
     auto tick_us = std::chrono::duration_cast<std::chrono::microseconds>(t_now - t_last).count();
     t_last = t_now;
-    if (print_n % 100 == 0) {
+    // 前 5 次必打印 debug
+    if (print_n <= 5 || print_n % 100 == 0) {
         fprintf(stderr, "[PERF] tick=%d sched_ms=%.1f planner_ms=%.1f tick_us=%lld limit=%dms\n",
                 nz::perf().call_count,
-                std::chrono::duration_cast<std::chrono::milliseconds>(t1-t0).count(),
-                std::chrono::duration_cast<std::chrono::milliseconds>(t2-t1).count(),
+                (double)std::chrono::duration_cast<std::chrono::milliseconds>(t1-t0).count(),
+                (double)std::chrono::duration_cast<std::chrono::milliseconds>(t2-t1).count(),
                 (long long)tick_us, time_limit);
         fflush(stderr);
     }
