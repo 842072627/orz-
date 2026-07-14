@@ -107,6 +107,7 @@ struct RuntimeConfig {
     bool  game_dir_flow_enabled;
     int   game_dir_flow_cap;
     int   game_dir_flow_gap;
+    float game_sched_time_ratio;    // >0: scheduler 占 time_limit 比例
     int   game_sign_filter;
     int   game_dir_flow_max_check_main;
     // game_16000 additions
@@ -447,6 +448,7 @@ struct RuntimeConfig {
         OVERRIDE_BOOL("GAME_DIR_FLOW_ENABLED", game_dir_flow_enabled);
         OVERRIDE_INT("GAME_DIR_FLOW_CAP", game_dir_flow_cap);
         OVERRIDE_INT("GAME_DIR_FLOW_GAP", game_dir_flow_gap);
+        OVERRIDE_FLOAT("GAME_SCHED_TIME_RATIO", game_sched_time_ratio);
         OVERRIDE_INT("GAME_SIGN_FILTER", game_sign_filter);
         OVERRIDE_INT("GAME_DIR_FLOW_MAX_CHECK_MAIN", game_dir_flow_max_check_main);
         OVERRIDE_BOOL("GAME_DIR_FLOW_DYNAMIC_CAP", game_dir_flow_dynamic_cap);
@@ -793,6 +795,7 @@ private:
         game_dir_flow_enabled = GAME_DIR_FLOW_ENABLED;
         game_dir_flow_cap = GAME_DIR_FLOW_CAP;
         game_dir_flow_gap = GAME_DIR_FLOW_GAP;
+        game_sched_time_ratio = GAME_SCHED_TIME_RATIO;
         game_sign_filter = GAME_SIGN_FILTER;
         game_dir_flow_max_check_main = GAME_DIR_FLOW_MAX_CHECK_MAIN;
         game_dir_flow_dynamic_cap = GAME_DIR_FLOW_DYNAMIC_CAP;

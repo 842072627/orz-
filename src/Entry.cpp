@@ -103,7 +103,7 @@ int nearby_random_non_highway_goal(SharedEnvironment* env, int start_loc, int ag
         const int cur = cur_node.loc;
         const int depth = cur_node.depth;
 
-        if (!ORZ_Highway::is_highway_cell(cur)) {
+        if (!ORZ_Highway::is_highway_cell(cur) && ORZ_Highway::get_sign(cur) == 0) {
             if (nearest_any < 0) nearest_any = cur;
             const bool free_cell = cur >= static_cast<int>(occupied.size()) || !occupied[cur];
             if (free_cell) {
@@ -156,7 +156,7 @@ void apply_game_directional_idle_relocation(
     for (int i = 0; i < n; ++i) {
         if (proposed_schedule[i] != -1) continue;
         const int loc = env->curr_states[i].location;
-        if (!ORZ_Highway::is_highway_cell(loc)) continue;
+        if (!ORZ_Highway::is_highway_cell(loc) && ORZ_Highway::get_sign(loc) == 0) continue;
 
         const int goal = nearby_random_non_highway_goal(env, loc, i, occupied);
         if (goal < 0) continue;
@@ -211,7 +211,13 @@ void Entry::compute(int time_limit, Plan & plan, std::vector<int> & proposed_sch
     auto t0 = clk::now();
 
     //call the task scheduler to assign tasks to agents
-    scheduler->plan(time_limit,proposed_schedule);
+    {
+        int sched_limit = time_limit;
+        float ratio = nz::cfg().game_sched_time_ratio;
+        if (ratio > 0.0f)
+            sched_limit = (int)((float)time_limit * std::min(ratio, 1.0f));
+        scheduler->plan(sched_limit, proposed_schedule);
+    }
 
     auto t1 = clk::now();
 
@@ -229,6 +235,21 @@ void Entry::compute(int time_limit, Plan & plan, std::vector<int> & proposed_sch
     auto us = [](auto d){ return std::chrono::duration_cast<std::chrono::microseconds>(d).count(); };
     nz::perf().record(us(t1-t0), us(t2-t1), us(t2-t0));
 
+    // 每 100 tick 打印耗时（独立计时，不依赖 OPT_ENABLE_STATS）
+    static auto t_last = clk::now();
+    static int print_n = 0;
+    print_n++;
+    auto t_now = clk::now();
+    auto tick_us = std::chrono::duration_cast<std::chrono::microseconds>(t_now - t_last).count();
+    t_last = t_now;
+    if (print_n % 100 == 0) {
+        fprintf(stderr, "[PERF] tick=%d sched_ms=%.1f planner_ms=%.1f tick_us=%lld limit=%dms\n",
+                nz::perf().call_count,
+                std::chrono::duration_cast<std::chrono::milliseconds>(t1-t0).count(),
+                std::chrono::duration_cast<std::chrono::milliseconds>(t2-t1).count(),
+                (long long)tick_us, time_limit);
+        fflush(stderr);
+    }
 }
 
 // Set the next goal locations for each agent based on the proposed schedule

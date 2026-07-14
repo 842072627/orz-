@@ -86,7 +86,7 @@ inline void load_for_combined(const MapProfile& profile, const SharedEnvironment
             c.game_dir_flow_dynamic_cap_inc = 5.0f;
             c.game_dir_flow_dynamic_cap_dec = 0.95f;
             c.game_dir_flow_dynamic_cap_min_ratio = 0.50f;
-            c.game_dir_flow_target_ratio = 0.69f;
+            c.game_dir_flow_target_ratio = 0.6f;
             c.game_dir_flow_dynamic_cap_max_ratio = 1.40f;
             c.game_dir_flow_random_shortest = true;
 
@@ -95,8 +95,9 @@ inline void load_for_combined(const MapProfile& profile, const SharedEnvironment
             c.game_pickup_weight = 2.0f;
             c.game_region_match = true;
             c.game_region_flow_batch = 64;
-            c.game_search_radius = 3;
-            c.game_main_search_radius = 200;
+            c.game_search_radius = 5;
+            c.game_sched_time_ratio = 0.5f;  // scheduler 最多用 50% 预算
+            c.game_main_search_radius = 500;
             c.game_sign_filter = 1;
             c.game_global_max_task_scan = 50;
             c.game_global_cand_topk = 32;
