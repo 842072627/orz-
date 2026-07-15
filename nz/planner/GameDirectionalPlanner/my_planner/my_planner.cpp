@@ -205,9 +205,11 @@ namespace MyPlanner{
     static void update_guide_paths_once_for_multistep(SharedEnvironment* env, TimePoint flow_end_time)
     {
         // one-time guide-path update for goal-changed agents
+        const int MAX_GUIDE_UPDATES = 50;  // 每 tick 最多更新 N 个 agent
+        int guide_update_count = 0;
         for (int i = 0; i < env->num_of_agents; i++)
         {
-            if (std::chrono::steady_clock::now() > flow_end_time)
+            if (std::chrono::steady_clock::now() > flow_end_time || guide_update_count >= MAX_GUIDE_UPDATES)
                 break;
             if (require_guide_path[i]){
                 if (trajLNS.guide_update_on_cooldown(i)){
@@ -227,6 +229,7 @@ namespace MyPlanner{
                     trajLNS.mark_guide_update_failed(i, GUIDE_UPDATE_FAILURE_COOLDOWN_STEPS);
                     continue;
                 }
+                guide_update_count++;
             }
         }
 
