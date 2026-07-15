@@ -253,8 +253,12 @@ namespace MyPlanner{
         }
 
         // one-time FW optimization in the flow allocation phase
+        auto t_fw = std::chrono::steady_clock::now();
         std::unordered_set<int> updated;
         frank_wolfe(trajLNS, updated, flow_end_time);
+        long long fw_us = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t_fw).count();
+        PIBT_Lock::g_fw_ms = (int)(fw_us/1000);
+        PIBT_Lock::g_guide_update_cnt = guide_update_count;
     }
 
     static void refresh_multistep_step_state(SharedEnvironment* env, std::vector<double>& local_priority)
@@ -448,6 +452,8 @@ namespace MyPlanner{
         PIBT_Lock::g_pibt_max_depth = 0;
         PIBT_Lock::g_pibt_total_chains = 0;
         PIBT_Lock::g_pibt_total_depth_sum = 0;
+        PIBT_Lock::g_fw_ms = 0;
+        PIBT_Lock::g_guide_update_cnt = 0;
 
         const auto episode_start = std::chrono::steady_clock::now();
         const TimePoint episode_deadline = episode_start + std::chrono::milliseconds(std::max(0, time_limit));
@@ -508,8 +514,9 @@ namespace MyPlanner{
             double avg = PIBT_Lock::g_pibt_total_chains > 0
                 ? (double)PIBT_Lock::g_pibt_total_depth_sum / PIBT_Lock::g_pibt_total_chains
                 : 0.0;
-            fprintf(stderr, "[PLAN] guide=%lldms pibt=%lldms total=%lldms chains=%d max_depth=%d avg_depth=%.1f\n",
+            fprintf(stderr, "[PLAN] guide=%lldms pibt=%lldms total=%lldms fw=%d upd=%d chains=%d max_depth=%d avg_depth=%.1f\n",
                     guide_us/1000, pibt_us/1000, total_us/1000,
+                    PIBT_Lock::g_fw_ms, PIBT_Lock::g_guide_update_cnt,
                     PIBT_Lock::g_pibt_total_chains, PIBT_Lock::g_pibt_max_depth, avg);
             fflush(stderr);
         }

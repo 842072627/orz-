@@ -8,6 +8,8 @@ namespace PIBT_Lock {
     inline int g_pibt_max_depth = 0;          // 每 tick 最大 PIBT 链深度
     inline int g_pibt_total_chains = 0;        // 每 tick 总链数（higher_id==-1 的调用）
     inline int64_t g_pibt_total_depth_sum = 0; // 每 tick 深度总和，用于算平均
+    inline int g_fw_ms = 0;                    // Frank-Wolfe 耗时（ms）
+    inline int g_guide_update_cnt = 0;         // guide 更新 agent 数
 } // namespace PIBT_Lock
 
 inline int g_parked_task[PIBT_Lock::MAX_AGENTS] = {0};
