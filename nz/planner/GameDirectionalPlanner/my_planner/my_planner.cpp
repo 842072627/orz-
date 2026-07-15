@@ -21,6 +21,7 @@
 #include "my_flow.h"
 #include "my_const.h"
 #include "../orz_highway.h"
+#include "RuntimeConfig.h"
 #include <chrono>
 #include <iostream>
 
@@ -407,6 +408,18 @@ namespace MyPlanner{
         actions.resize(env->num_of_agents);
         if (num_steps <= 0){
             return;
+        }
+
+        // DIAG: print guide status once
+        static bool diag_printed = false;
+        if (!diag_printed) {
+            diag_printed = true;
+            fprintf(stderr, "[DIAG] guide_enabled=%d highway_enabled=%d flow_enabled=%d target_ratio=%.2f\n",
+                    (int)nz::cfg().game_guide_path_enabled,
+                    (int)nz::cfg().game_highway_enabled,
+                    (int)nz::cfg().game_dir_flow_enabled,
+                    nz::cfg().game_dir_flow_target_ratio);
+            fflush(stderr);
         }
 
         const auto episode_start = std::chrono::steady_clock::now();
