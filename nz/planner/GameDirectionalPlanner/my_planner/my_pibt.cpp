@@ -128,11 +128,12 @@ bool causalMY_PIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
 	// ORZ highway forbid: filter forbidden directions
 	{
 	    uint8_t f = ORZ_Highway::get_forbid(prev_loc);
-	    if (f) {
-	        std::vector<int> filtered;
-	        for (int nb : neighbors) {
-	            if (nb == prev_loc) { filtered.push_back(nb); continue; } // wait is always allowed
-	            int dr = nb / lns.env->cols - prev_loc / lns.env->cols;
+	    	    if (f) {
+	    	        std::vector<int> filtered;
+	    	        bool is_fw = ORZ_Highway::is_task_forbidden(prev_loc);
+	    	        for (int nb : neighbors) {
+	    	            if (nb == prev_loc && !is_fw) { filtered.push_back(nb); continue; } // FW 格子禁止 wait
+	    	            int dr = nb / lns.env->cols - prev_loc / lns.env->cols;
 	            int dc = nb % lns.env->cols - prev_loc % lns.env->cols;
 	            int dd = (dr == -1) ? 3 : (dr == 1) ? 1 : (dc == -1) ? 2 : (dc == 1) ? 0 : -1;
 	            if (dd >= 0 && ((f & 1 && dd == 2) || (f & 2 && dd == 0) || (f & 4 && dd == 3) || (f & 8 && dd == 1))) continue;
