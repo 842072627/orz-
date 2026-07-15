@@ -77,9 +77,22 @@ bool causalMY_PIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
       std::vector<int>& prev_decision, std::vector<int>& decision, 
 	  std::vector<bool>& occupied, TrajLNS& lns
 	  ){
-	// The MY_PIBT works like a causal MY_PIBT when using MAPF-T model. But a normal MY_PIBT when using MAPF model.
-	
-	assert(next_states[curr_id].location == -1);
+	  // The MY_PIBT works like a causal MY_PIBT when using MAPF-T model. But a normal MY_PIBT when using MAPF model.
+
+	  // Depth tracking
+	  static int pibt_rec_depth = 0;
+	  if (higher_id == -1) {
+	      PIBT_Lock::g_pibt_total_chains++;
+	      pibt_rec_depth = 0;
+	      PIBT_Lock::g_pibt_total_depth_sum = 0; // reset sum
+	  } else {
+	      pibt_rec_depth++;
+	  }
+	  if (pibt_rec_depth > PIBT_Lock::g_pibt_max_depth)
+	      PIBT_Lock::g_pibt_max_depth = pibt_rec_depth;
+	  PIBT_Lock::g_pibt_total_depth_sum++;
+
+	  assert(next_states[curr_id].location == -1);
     int prev_loc = prev_states[curr_id].location;
 	int prev_orientation = prev_states[curr_id].orientation;
 	int next[4] = { prev_loc + 1,prev_loc + lns.env->cols, prev_loc - 1, prev_loc - lns.env->cols};

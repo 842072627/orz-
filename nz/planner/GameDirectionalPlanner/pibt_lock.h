@@ -1,24 +1,13 @@
-// Compatibility shim for IDEA/gamePlanner's my_planner sources.
 #pragma once
 
-#include "config.h"
-#include <vector>
+#include <cstdint>
 
 namespace PIBT_Lock {
     static constexpr int MAX_AGENTS = 10000;
-
     inline int g_agent_blocked[MAX_AGENTS] = {0};
-    inline int g_parked_task[MAX_AGENTS] = {0};
-}
+    inline int g_pibt_max_depth = 0;          // 每 tick 最大 PIBT 链深度
+    inline int g_pibt_total_chains = 0;        // 每 tick 总链数（higher_id==-1 的调用）
+    inline int64_t g_pibt_total_depth_sum = 0; // 每 tick 深度总和，用于算平均
+} // namespace PIBT_Lock
 
-namespace CenterlineAccess {
-    inline const std::vector<int>* g_branch_dist = nullptr;
-    inline const std::vector<int>* g_main_dist = nullptr;
-    inline const std::vector<int>* g_zone_is_main = nullptr;
-    inline const std::vector<int>* g_mp_loc = nullptr;
-    inline const std::vector<int>* g_mp_main_dist = nullptr;
-    inline int g_mp_count = 0;
-    inline int g_n24c = 0;
-    inline int g_n24r = 0;
-    inline float active_ratio = 0.0f;
-}
+inline int g_parked_task[PIBT_Lock::MAX_AGENTS] = {0};

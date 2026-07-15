@@ -21,6 +21,7 @@
 #include "my_flow.h"
 #include "my_const.h"
 #include "../orz_highway.h"
+#include "../pibt_lock.h"
 #include "RuntimeConfig.h"
 #include <chrono>
 #include <iostream>
@@ -421,6 +422,10 @@ namespace MyPlanner{
                     nz::cfg().game_dir_flow_target_ratio);
             fflush(stderr);
         }
+        // Reset PIBT depth counters for this tick
+        PIBT_Lock::g_pibt_max_depth = 0;
+        PIBT_Lock::g_pibt_total_chains = 0;
+        PIBT_Lock::g_pibt_total_depth_sum = 0;
 
         const auto episode_start = std::chrono::steady_clock::now();
         const TimePoint episode_deadline = episode_start + std::chrono::milliseconds(std::max(0, time_limit));
@@ -468,5 +473,18 @@ namespace MyPlanner{
         env->start_states = original_states;
         env->curr_timestep = original_timestep;
         decided = original_decided;
+
+        // DIAG: PIBT depth stats every 500 calls
+        static int diag_n = 0;
+        if (++diag_n % 500 == 0) {
+            double avg = PIBT_Lock::g_pibt_total_chains > 0
+                ? (double)PIBT_Lock::g_pibt_total_depth_sum / PIBT_Lock::g_pibt_total_chains
+                : 0.0;
+            fprintf(stderr, "[DEPTH] max=%d avg=%.1f chains=%d sum=%lld\n",
+                    PIBT_Lock::g_pibt_max_depth, avg,
+                    PIBT_Lock::g_pibt_total_chains,
+                    (long long)PIBT_Lock::g_pibt_total_depth_sum);
+            fflush(stderr);
+        }
     }
 }
