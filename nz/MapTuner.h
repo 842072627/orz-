@@ -74,6 +74,8 @@ inline void load_for_combined(const MapProfile& profile, const SharedEnvironment
             c.game_skip_channel_errands = false;
 
             c.game_bal_assign_ratio = 1.0f;
+            c.game_highway_enabled = true;
+            c.game_guide_path_enabled = false; // 关掉 guide 更新加速
             c.game_dir_flow_enabled = true;
             c.game_dir_flow_hard_filter = true;
             c.game_dir_flow_cap = 300;
@@ -89,7 +91,7 @@ inline void load_for_combined(const MapProfile& profile, const SharedEnvironment
             c.game_dir_flow_dynamic_cap_inc = 5.0f;
             c.game_dir_flow_dynamic_cap_dec = 0.95f;
             c.game_dir_flow_dynamic_cap_min_ratio = 0.50f;
-            c.game_dir_flow_target_ratio = 0.78f;
+            c.game_dir_flow_target_ratio = 1.0f; // 快速拥塞
             c.game_dir_flow_dynamic_cap_max_ratio = 1.40f;
             c.game_dir_flow_random_shortest = true;
 

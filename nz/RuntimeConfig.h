@@ -104,6 +104,8 @@ struct RuntimeConfig {
     float game_pickup_weight;
     bool  game_score_exempt_enabled;
     bool  game_skip_channel_errands;
+    bool  game_highway_enabled;      // forbid方向约束生效
+    bool  game_guide_path_enabled;   // guide path A*更新
     bool  game_dir_flow_enabled;
     int   game_dir_flow_cap;
     int   game_dir_flow_gap;
@@ -445,6 +447,8 @@ struct RuntimeConfig {
         OVERRIDE_FLOAT("GAME_PICKUP_WEIGHT", game_pickup_weight);
         OVERRIDE_BOOL("GAME_SCORE_EXEMPT_ENABLED", game_score_exempt_enabled);
         OVERRIDE_BOOL("GAME_SKIP_CHANNEL_ERRANDS", game_skip_channel_errands);
+        OVERRIDE_BOOL("GAME_HIGHWAY_ENABLED", game_highway_enabled);
+        OVERRIDE_BOOL("GAME_GUIDE_PATH_ENABLED", game_guide_path_enabled);
         OVERRIDE_BOOL("GAME_DIR_FLOW_ENABLED", game_dir_flow_enabled);
         OVERRIDE_INT("GAME_DIR_FLOW_CAP", game_dir_flow_cap);
         OVERRIDE_INT("GAME_DIR_FLOW_GAP", game_dir_flow_gap);
@@ -792,6 +796,8 @@ private:
         game_pickup_weight = GAME_PICKUP_WEIGHT;
         game_score_exempt_enabled = GAME_SCORE_EXEMPT_ENABLED;
         game_skip_channel_errands = GAME_SKIP_CHANNEL_ERRANDS;
+        game_highway_enabled = GAME_HIGHWAY_ENABLED;
+        game_guide_path_enabled = GAME_GUIDE_PATH_ENABLED;
         game_dir_flow_enabled = GAME_DIR_FLOW_ENABLED;
         game_dir_flow_cap = GAME_DIR_FLOW_CAP;
         game_dir_flow_gap = GAME_DIR_FLOW_GAP;

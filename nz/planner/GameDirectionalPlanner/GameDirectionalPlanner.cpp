@@ -4,6 +4,7 @@
 #include "GameDirectionalPlanner.h"
 
 #include "config.h"
+#include "RuntimeConfig.h"
 #include "orz_highway.h"
 #include "my_planner/my_planner.h"
 #include "planner.h"
@@ -21,10 +22,14 @@ void GameDirectionalPlanner::initialize(int preprocess_time_limit, SharedEnviron
         return;
     }
 
-    ORZ_Highway::init();
+    if (cfg().game_highway_enabled) ORZ_Highway::init();
     MyPlanner::initialize(preprocess_time_limit, env);
     initialized_ = true;
-    std::cerr << "[GameDirectionalPlanner] initialized with ORZ highway directional constraints\n";
+    std::cerr << "[GameDirectionalPlanner] initialized highway="
+              << (cfg().game_highway_enabled ? "hard" : "off")
+              << " guide="
+              << (cfg().game_guide_path_enabled ? "guide-flow" : "directed")
+              << "\n";
 }
 
 void GameDirectionalPlanner::plan(int time_limit,

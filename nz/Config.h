@@ -118,6 +118,8 @@ constexpr int   GAME_GLOBAL_MAX_TASK_SCAN  = 20000;    // 7.10: 最大扫描任�
 constexpr float GAME_PICKUP_WEIGHT         = 10.0f;    // 7.10: pickup 权重
 constexpr bool  GAME_SCORE_EXEMPT_ENABLED  = true;     // 7.10: 豁免打分开关  // mode=8 分配比例（0.0~1.0, 1.0=不限制）
 constexpr bool  GAME_SKIP_CHANNEL_ERRANDS = false; // mode16: 任务任一errand在ORZ通道标注格上则屏蔽
+constexpr bool  GAME_HIGHWAY_ENABLED = true;   // forbid方向约束生效
+constexpr bool  GAME_GUIDE_PATH_ENABLED = true; // guide path A*更新
 constexpr bool  GAME_DIR_FLOW_ENABLED = false; // mode16: 开启主线zone双方向future-flow限流
 constexpr int   GAME_DIR_FLOW_CAP  = 64;       // mode16: 每个主线zone单方向future-flow上限
 constexpr int   GAME_DIR_FLOW_GAP  = 24;

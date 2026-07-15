@@ -4,6 +4,7 @@
 #include "my_pibt.h"
 #include "../pibt_lock.h"
 #include "../orz_highway.h"
+#include "RuntimeConfig.h"
 #include <cstdint>
 
 namespace MyPlanner{
@@ -37,6 +38,10 @@ static int find_mp_si(int a_m) {
 #endif
 
 int get_gp_h(TrajLNS& lns, int ai, int target){
+    // 关掉 guide path 时直接用曼哈顿
+    if (!nz::cfg().game_guide_path_enabled) {
+        return manhattanDistance(target, lns.tasks.at(ai), lns.env);
+    }
     int min_heuristic;
 
 	if (is_large_map(lns.env)){
