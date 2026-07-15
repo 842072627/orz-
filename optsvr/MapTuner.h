@@ -60,7 +60,7 @@ inline void apply_game_tuning(RuntimeConfig& config) {
     config.game_bal_assign_ratio = 1.00f;
     config.game_dir_flow_enabled = true;
     config.game_dir_flow_hard_filter = true;
-    config.game_dir_flow_cap = 200;
+    config.game_dir_flow_cap = 300;
     config.game_dir_flow_gap = 0;
     config.game_dir_flow_decay = 0.95f;
     config.game_dir_flow_zone_horizon = 0;
