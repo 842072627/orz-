@@ -228,13 +228,9 @@ bool causalMY_PIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
 		std::sort(successors.begin(), successors.end(), 
 			[&](MY_PIBT_C& a, MY_PIBT_C& b)
 			{
-				// 优先级排第一：格子优先级小的优先
-				int pa = ORZ_Highway::get_priority(a.location);
-				int pb = ORZ_Highway::get_priority(b.location);
-				if (pa != pb) return pa < pb;
-			
-				int diff[4] = {1,lns.env->cols,-1,-lns.env->cols};
-				if (a.heuristic == b.heuristic){
+							int diff[4] = {1,lns.env->cols,-1,-lns.env->cols};
+							if (a.heuristic == b.heuristic){
+								// prefer smaller togo (closer to goal along A* path)
 					// prefer smaller togo (closer to goal along A* path)
 					if (a.togo != b.togo)
 					    return a.togo < b.togo;
