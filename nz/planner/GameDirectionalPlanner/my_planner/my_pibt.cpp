@@ -87,7 +87,8 @@ bool causalMY_PIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
 	  	  	  	  } else {
 	  	  	  	      pibt_rec_depth++;
 	  	  	  	  }
-	  	  	  	  if (pibt_rec_depth > 5) {
+	  	  	  	  	  	  	  	  // PIBT 深度暂不限制
+	  	  	  	  	  	  	  	  if (false) {
 	  	  	  	      next_states.at(curr_id) = State(prev_states[curr_id].location, -1, -1);
 	  	  	  	      decision.at(prev_states[curr_id].location) = curr_id;
 	  	  	  	      return false;

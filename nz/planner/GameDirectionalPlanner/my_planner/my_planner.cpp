@@ -204,8 +204,8 @@ namespace MyPlanner{
 
     static void update_guide_paths_once_for_multistep(SharedEnvironment* env, TimePoint flow_end_time)
     {
-        // 每 tick 最多更新 50 个 agent 的 guide path
-        const int MAX_GUIDE_UPDATES = 50;
+        // 不限制 guide 更新数量
+        const int MAX_GUIDE_UPDATES = 4000;
         int guide_update_count = 0;
 
         // 第一遍：新任务优先（traj_dists 为空）
