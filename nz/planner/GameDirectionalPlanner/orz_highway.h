@@ -49,6 +49,9 @@ inline static bool is_task_forbidden(int loc) {
     for(int i=0;i<NUM_TASK;i++)if(kTask[i]==loc)return true;
     return false;
 }
+inline static uint8_t get_priority(int loc) {
+    (void)loc; return 0;
+}
 inline static uint8_t get_sign(int loc) {
     int lo=0,hi=NUM_SIGN-1;
     while(lo<=hi){int mid=(lo+hi)/2;if(kSign[mid].loc<loc)lo=mid+1;else if(kSign[mid].loc>loc)hi=mid-1;else return kSign[mid].sign;}
