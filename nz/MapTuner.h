@@ -91,7 +91,7 @@ inline void load_for_combined(const MapProfile& profile, const SharedEnvironment
             c.game_dir_flow_dynamic_cap_inc = 5.0f;
             c.game_dir_flow_dynamic_cap_dec = 0.95f;
             c.game_dir_flow_dynamic_cap_min_ratio = 0.50f;
-            c.game_dir_flow_target_ratio = 0.78f; // 中等拥塞
+            c.game_dir_flow_target_ratio = 1.0f; // 满拥塞测试
             c.game_dir_flow_dynamic_cap_max_ratio = 1.40f;
             c.game_dir_flow_random_shortest = true;
 
