@@ -478,7 +478,8 @@ namespace MyPlanner{
         auto t_setup = std::chrono::steady_clock::now();
         initialize_dummy_goals_if_needed(env);
         setup_multistep_episode_state(env, flow_end_time, local_priority);
-        update_guide_paths_once_for_multistep(env, flow_end_time);
+        // 纯 PIBT 模式：跳过 guide path 更新和 Frank-Wolfe
+        // update_guide_paths_once_for_multistep(env, flow_end_time);
         auto t_pibt = std::chrono::steady_clock::now();
         long long guide_us = std::chrono::duration_cast<std::chrono::microseconds>(t_pibt - t_setup).count();
 
