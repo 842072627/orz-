@@ -1845,7 +1845,11 @@ void GameBalanceOptScheduler::schedule(int time_limit,
     for (auto it = free_tasks_set.begin(); it != free_tasks_set.end(); ) {
         auto tit = env->task_pool.find(*it);
         if (tit != env->task_pool.end() && !tit->second.locations.empty()) {
-            if (ORZ_Highway::is_task_forbidden(tit->second.locations[0])) {
+            bool skip = false;
+            for (int loc : tit->second.locations) {
+                if (ORZ_Highway::is_task_forbidden(loc)) { skip = true; break; }
+            }
+            if (skip) {
                 it = free_tasks_set.erase(it);
                 continue;
             }
