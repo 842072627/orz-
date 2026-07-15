@@ -27,7 +27,7 @@ namespace MyPlanner{
     void initialize(int preprocess_time_limit, SharedEnvironment* env);
 
     void plan(int time_limit, std::vector<std::vector<Action>> & actions,
-                        SharedEnvironment* env, int num_steps=10);
+                        SharedEnvironment* env, int num_steps=5);
     
 }
 #endif

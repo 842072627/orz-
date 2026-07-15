@@ -476,7 +476,7 @@ namespace MyPlanner{
 
         // DIAG: PIBT depth stats every 500 calls
         static int diag_n = 0;
-        if (++diag_n % 500 == 0) {
+        if (++diag_n % 50 == 0) {
             double avg = PIBT_Lock::g_pibt_total_chains > 0
                 ? (double)PIBT_Lock::g_pibt_total_depth_sum / PIBT_Lock::g_pibt_total_chains
                 : 0.0;

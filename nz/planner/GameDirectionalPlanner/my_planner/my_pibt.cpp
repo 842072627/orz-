@@ -79,18 +79,17 @@ bool causalMY_PIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
 	  ){
 	  // The MY_PIBT works like a causal MY_PIBT when using MAPF-T model. But a normal MY_PIBT when using MAPF model.
 
-	  // Depth tracking
-	  static int pibt_rec_depth = 0;
-	  if (higher_id == -1) {
-	      PIBT_Lock::g_pibt_total_chains++;
-	      pibt_rec_depth = 0;
-	      PIBT_Lock::g_pibt_total_depth_sum = 0; // reset sum
-	  } else {
-	      pibt_rec_depth++;
-	  }
-	  if (pibt_rec_depth > PIBT_Lock::g_pibt_max_depth)
-	      PIBT_Lock::g_pibt_max_depth = pibt_rec_depth;
-	  PIBT_Lock::g_pibt_total_depth_sum++;
+	  	  // Depth tracking
+	  	  static int pibt_rec_depth = 0;
+	  	  if (higher_id == -1) {
+	  	      PIBT_Lock::g_pibt_total_chains++;
+	  	      pibt_rec_depth = 0;
+	  	  } else {
+	  	      pibt_rec_depth++;
+	  	  }
+	  	  if (pibt_rec_depth > PIBT_Lock::g_pibt_max_depth)
+	  	      PIBT_Lock::g_pibt_max_depth = pibt_rec_depth;
+	  	  PIBT_Lock::g_pibt_total_depth_sum++;
 
 	  assert(next_states[curr_id].location == -1);
     int prev_loc = prev_states[curr_id].location;
