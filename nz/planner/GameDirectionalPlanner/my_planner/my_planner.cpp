@@ -447,9 +447,12 @@ namespace MyPlanner{
         decided.assign(env->num_of_agents, DCR({-1, DONE::DONE}));
 
         // --- One-time setup for this planning episode ---
+        auto t_setup = std::chrono::steady_clock::now();
         initialize_dummy_goals_if_needed(env);
         setup_multistep_episode_state(env, flow_end_time, local_priority);
         update_guide_paths_once_for_multistep(env, flow_end_time);
+        auto t_pibt = std::chrono::steady_clock::now();
+        long long guide_us = std::chrono::duration_cast<std::chrono::microseconds>(t_pibt - t_setup).count();
 
         const auto after_setup = std::chrono::steady_clock::now();
         const auto setup_elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(after_setup - episode_start).count();
@@ -474,16 +477,18 @@ namespace MyPlanner{
         env->curr_timestep = original_timestep;
         decided = original_decided;
 
-        // DIAG: PIBT depth stats every 500 calls
+        // DIAG: PIBT depth stats every 50 calls
         static int diag_n = 0;
         if (++diag_n % 50 == 0) {
+            // PIBT time = total - guide time
+            long long total_us = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t_setup).count();
+            long long pibt_us = total_us - guide_us;
             double avg = PIBT_Lock::g_pibt_total_chains > 0
                 ? (double)PIBT_Lock::g_pibt_total_depth_sum / PIBT_Lock::g_pibt_total_chains
                 : 0.0;
-            fprintf(stderr, "[DEPTH] max=%d avg=%.1f chains=%d sum=%lld\n",
-                    PIBT_Lock::g_pibt_max_depth, avg,
-                    PIBT_Lock::g_pibt_total_chains,
-                    (long long)PIBT_Lock::g_pibt_total_depth_sum);
+            fprintf(stderr, "[PLAN] guide=%lldms pibt=%lldms total=%lldms chains=%d max_depth=%d avg_depth=%.1f\n",
+                    guide_us/1000, pibt_us/1000, total_us/1000,
+                    PIBT_Lock::g_pibt_total_chains, PIBT_Lock::g_pibt_max_depth, avg);
             fflush(stderr);
         }
     }
