@@ -16,7 +16,7 @@ namespace keywords = boost::log::keywords;
 class Logger
 {
 public:
-    Logger(std::string filename, int severity=logging::trivial::info);
+    Logger(std::string filename, int severity=logging::trivial::info, bool skip_warning=false);
     ~Logger(){};
 
     void log_info(std::string input);

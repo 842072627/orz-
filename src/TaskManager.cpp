@@ -78,11 +78,12 @@ bool TaskManager::validate_task_assignment(vector<int>& assignment)
  */
 bool TaskManager::set_task_assignment(vector< int>& assignment, int timestep)
 {
+    curr_timestep = timestep;
     for (int a = 0; a < assignment.size(); a++)
     {
         if (planner_schedule[a].empty() || assignment[a] != planner_schedule[a].back().second)
         {
-            planner_schedule[a].push_back(make_pair(curr_timestep,assignment[a]));
+            planner_schedule[a].push_back(make_pair(timestep,assignment[a]));
         }
     }
     if (!validate_task_assignment(assignment)) //if the assignment is not valid, we will not update the current assignment and just return false
@@ -114,7 +115,7 @@ bool TaskManager::set_task_assignment(vector< int>& assignment, int timestep)
     {
         if (actual_schedule[a].empty() || current_assignment[a] != actual_schedule[a].back().second)
         {
-            actual_schedule[a].push_back(make_pair(curr_timestep,current_assignment[a]));
+            actual_schedule[a].push_back(make_pair(timestep,current_assignment[a]));
         }
     }
 
@@ -149,8 +150,6 @@ list<int> TaskManager::check_finished_tasks(vector<State>& states, int timestep)
                 finished_tasks[task->agent_assigned].emplace_back(task);
                 num_of_task_finish++;
                 new_freeagents.push_back(k); // record the new free agent
-                logger->log_info("Agent " + std::to_string(task->agent_assigned) + " finishes task " + std::to_string(task->task_id), timestep);
-                logger->flush();
             }
             events.push_back(make_tuple(timestep,k,task->task_id,task->idx_next_loc));
             // cout<<"open or finished"<<endl;
@@ -195,7 +194,6 @@ void TaskManager::reveal_tasks(int timestep)
         ongoing_tasks[task->task_id] = task;
         all_tasks.push_back(task);
         new_tasks.push_back(task->task_id);         // record the new tasks
-        logger->log_info("Task " + std::to_string(task_id) + " is revealed");
         task_id++;
     }
 }

@@ -4,8 +4,6 @@
 #include "ActionModel.h"
 #include "Plan.h"
 
-namespace optsvr { class OptPlanner; }
-
 class MAPFPlanner
 {
 public:
@@ -21,6 +19,4 @@ public:
     // return next states for all agents
     virtual void plan(int time_limit, Plan & plan);
 
-private:
-    optsvr::OptPlanner* opt_planner_ = nullptr;
 };

@@ -19,7 +19,7 @@ public:
 
     list<int> check_finished_tasks(vector<State>& states, int timestep);
 
-    int curr_timestep;
+    int curr_timestep = 0;
 
 
     // reveal new task

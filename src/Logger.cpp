@@ -1,19 +1,41 @@
 #include "Logger.h"
+#include <boost/log/utility/setup/console.hpp>
+#include <boost/log/expressions.hpp>
+#include <boost/log/support/date_time.hpp>
 
 namespace logging = boost::log;
 namespace keywords = boost::log::keywords;
 namespace src = boost::log::sources;
 namespace sinks = boost::log::sinks;
+namespace expr = boost::log::expressions;
 using namespace logging::trivial;
 src::severity_logger< severity_level > lg;
 
 
-Logger::Logger(std::string filename, int severity){
+Logger::Logger(std::string filename, int severity, bool skip_warning){
     this->core = logging::core::get();
     logging::add_common_attributes();
-    logging::core::get()->set_filter
-    (
-        logging::trivial::severity >= severity
+    if (skip_warning) {
+        // Show info and fatal only, skip warning
+        logging::core::get()->set_filter(
+            logging::trivial::severity >= severity &&
+            logging::trivial::severity != logging::trivial::warning
+        );
+    } else {
+        logging::core::get()->set_filter(
+            logging::trivial::severity >= severity
+        );
+    }
+
+    // Set console output format (without thread ID)
+    logging::add_console_log(
+        std::clog,
+        keywords::format = (
+            expr::stream
+                << "[" << expr::format_date_time<boost::posix_time::ptime>("TimeStamp", "%Y-%m-%d %H:%M:%S.%f") << "]"
+                << " [" << logging::trivial::severity << "]"
+                << "    " << expr::smessage
+        )
     );
 
     if (filename != "")

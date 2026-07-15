@@ -3,9 +3,14 @@
 #include <boost/tokenizer.hpp>
 #include "SharedEnv.h"
 #include "nlohmann/json.hpp"
+#include "ScheduleStatsExport.h"
 #include <functional>
 #include <Logger.h>
 #include <fstream>
+#include <exception>
+#include <iomanip>
+#include <sstream>
+#include <deque>
 
 using json = nlohmann::ordered_json;
 
@@ -68,14 +73,46 @@ void BaseSystem::sync_shared_env_executor()
 
 bool BaseSystem::planner_wrapper()
 {
-    planner->compute(min_comm_time, proposed_plan, proposed_schedule);
-    return true;
+    try
+    {
+        planner->compute(min_comm_time, proposed_plan, proposed_schedule);
+        return true;
+    }
+    catch (const std::exception& error)
+    {
+        if (logger != nullptr)
+            logger->log_warning(std::string("planner exception: ") + error.what(), simulator.get_curr_timestep());
+    }
+    catch (...)
+    {
+        if (logger != nullptr)
+            logger->log_warning("planner unknown exception", simulator.get_curr_timestep());
+    }
+    proposed_plan.actions.assign(num_of_agents, {});
+    proposed_schedule = env->curr_task_schedule;
+    return false;
 }
 
 bool BaseSystem::planner_wrapper_init()
 {
-    planner->compute(initial_plan_time_limit, proposed_plan, proposed_schedule);
-    return true;
+    try
+    {
+        planner->compute(initial_plan_time_limit, proposed_plan, proposed_schedule);
+        return true;
+    }
+    catch (const std::exception& error)
+    {
+        if (logger != nullptr)
+            logger->log_warning(std::string("planner init exception: ") + error.what(), simulator.get_curr_timestep());
+    }
+    catch (...)
+    {
+        if (logger != nullptr)
+            logger->log_warning("planner init unknown exception", simulator.get_curr_timestep());
+    }
+    proposed_plan.actions.assign(num_of_agents, {});
+    proposed_schedule = env->curr_task_schedule;
+    return false;
 }
 
 
@@ -123,6 +160,135 @@ void BaseSystem::simulate(int simulation_time, int chunk_size)
 
     vector<State> curr_states = simulator.get_current_state();
 
+    int timestep = simulator.get_curr_timestep();
+    int last_logged_finished_tasks = task_manager.num_of_task_finish;
+    std::deque<std::pair<int, int>> rolling_task_history;
+    auto record_rolling_task_history = [&](int tick) {
+        const int finished = task_manager.num_of_task_finish;
+        if (!rolling_task_history.empty() && rolling_task_history.back().first == tick)
+        {
+            rolling_task_history.back().second = finished;
+        }
+        else
+        {
+            rolling_task_history.emplace_back(tick, finished);
+        }
+        while (rolling_task_history.size() > 1 &&
+               rolling_task_history[1].first <= tick - 500)
+        {
+            rolling_task_history.pop_front();
+        }
+    };
+    auto finished_in_recent_500 = [&](int tick, int total_finished) {
+        const int base_tick = tick - 500;
+        int base_finished = 0;
+        if (!rolling_task_history.empty())
+        {
+            base_finished = rolling_task_history.front().second;
+            for (const auto& [sample_tick, sample_finished] : rolling_task_history)
+            {
+                if (sample_tick > base_tick) break;
+                base_finished = sample_finished;
+            }
+        }
+        return std::max(0, total_finished - base_finished);
+    };
+    record_rolling_task_history(timestep);
+    auto log_planner_return_summary = [&](int log_timestep)
+    {
+        record_rolling_task_history(log_timestep);
+        const int total_finished = task_manager.num_of_task_finish;
+        const int finished_since_last_plan = total_finished - last_logged_finished_tasks;
+        const int finished_recent_500 = finished_in_recent_500(log_timestep, total_finished);
+        int busy = 0;
+        long long active_task_len_sum = 0;
+        long long active_task_rem_len_sum = 0;
+        long long all_task_len_sum = 0;
+        int active_task_len_count = 0;
+        int all_task_len_count = 0;
+        auto task_segment_len = [&](const std::vector<int>& locs, int first_idx) {
+            long long len = 0;
+            const int start = std::max(1, first_idx);
+            for (int i = start; i < (int)locs.size(); ++i)
+            {
+                const int a = locs[i - 1];
+                const int b = locs[i];
+                len += std::abs(a / env->cols - b / env->cols) +
+                       std::abs(a % env->cols - b % env->cols);
+            }
+            return len;
+        };
+        auto task_remaining_len = [&](int agent_loc, const std::vector<int>& locs, int next_idx) {
+            if (locs.empty() || next_idx >= (int)locs.size()) return 0LL;
+            const int start = std::max(0, next_idx);
+            long long len = std::abs(agent_loc / env->cols - locs[start] / env->cols) +
+                            std::abs(agent_loc % env->cols - locs[start] % env->cols);
+            for (int i = start + 1; i < (int)locs.size(); ++i)
+            {
+                const int a = locs[i - 1];
+                const int b = locs[i];
+                len += std::abs(a / env->cols - b / env->cols) +
+                       std::abs(a % env->cols - b % env->cols);
+            }
+            return len;
+        };
+        for (const auto& task_entry : env->task_pool)
+        {
+            all_task_len_sum += task_segment_len(task_entry.second.locations, 1);
+            ++all_task_len_count;
+        }
+        for (int i = 0; i < num_of_agents; i++)
+        {
+            const int tid = env->curr_task_schedule[i];
+            if (tid < 0) continue;
+            ++busy;
+            auto task_it = env->task_pool.find(tid);
+            if (task_it == env->task_pool.end()) continue;
+            const auto& task = task_it->second;
+            active_task_len_sum += task_segment_len(task.locations, 1);
+            const int agent_loc = (i < (int)curr_states.size()) ? curr_states[i].location :
+                                  (i < (int)env->curr_states.size() ? env->curr_states[i].location : -1);
+            if (agent_loc >= 0)
+                active_task_rem_len_sum += task_remaining_len(agent_loc, task.locations, task.idx_next_loc);
+            ++active_task_len_count;
+        }
+        int pct = num_of_agents > 0 ? (busy * 100 / num_of_agents) : 0;
+        const auto prefilter_stats = optsvr::get_game_prefilter_stats();
+        std::ostringstream active_task_stats;
+        active_task_stats << std::fixed << std::setprecision(1)
+                          << " | actLen="
+                          << (active_task_len_count > 0
+                              ? (double)active_task_len_sum / active_task_len_count : 0.0)
+                          << " | remLen="
+                          << (active_task_len_count > 0
+                              ? (double)active_task_rem_len_sum / active_task_len_count : 0.0)
+                          << " | poolLen="
+                          << (all_task_len_count > 0
+                              ? (double)all_task_len_sum / all_task_len_count : 0.0)
+                          << " | pfRej=" << prefilter_stats.rejected
+                          << " | pfTot=" << prefilter_stats.total
+                          << " | pfKeep=" << prefilter_stats.kept
+                          << " | pfChan=" << prefilter_stats.channel
+                          << " | pfCap=" << prefilter_stats.capacity
+                          << " | pfFlow=" << prefilter_stats.flow
+                          << " | rrTry=" << prefilter_stats.reassign_replace_attempts
+                          << " | rrAcc=" << prefilter_stats.reassign_replace_accepts
+                          << " | rsTry=" << prefilter_stats.reassign_attempts
+                          << " | rsAcc=" << prefilter_stats.reassign_accepts
+                          << " | idleG=" << prefilter_stats.idle_global_eligible
+                          << "/" << prefilter_stats.idle_global_assigned
+                          << " | blockZ=" << prefilter_stats.blocked_zones
+                          << " | blockZIds=" << prefilter_stats.blocked_zone_ids;
+        logger->log_info(
+            "planner returns | tasks_all=" + std::to_string(total_finished) +
+            " | tasks_now=" + std::to_string(finished_since_last_plan) +
+            " | t500=" + std::to_string(finished_recent_500) +
+            " | busy=" + std::to_string(busy) + "/" + std::to_string(num_of_agents) +
+            "(" + std::to_string(pct) + "%)" + active_task_stats.str(),
+            log_timestep);
+        last_logged_finished_tasks = total_finished;
+    };
+
     //start initial planning
     plan_time_limit = initial_plan_time_limit;
     std::packaged_task<bool()> task(std::bind(&BaseSystem::planner_wrapper_init, this));
@@ -134,10 +300,12 @@ void BaseSystem::simulate(int simulation_time, int chunk_size)
 
     if (future.wait_for(std::chrono::milliseconds(initial_plan_time_limit)) == std::future_status::ready)
     {
-        task_td.join();
+        if (task_td.joinable()) task_td.join();
         started = false;
         auto res = future.get();
-        logger->log_info("planner returns", simulator.get_curr_timestep());
+        if (!res && logger != nullptr)
+            logger->log_warning("planner init returned failure", timestep);
+        log_planner_return_summary(timestep);
     }
     else
     {
@@ -161,13 +329,15 @@ void BaseSystem::simulate(int simulation_time, int chunk_size)
         // wait until deadline OR planner finishes early
         const auto st = future.wait_until(deadline);
 
-        if (st == std::future_status::ready) 
+        if (st == std::future_status::ready)
         {
-            task_td.join();
+            if (task_td.joinable()) task_td.join();
             started = false;
             auto res = future.get();
-            logger->log_info("planner (initilal planning) returns", simulator.get_curr_timestep());
-        } 
+            if (!res && logger != nullptr)
+                logger->log_warning("planner init returned failure", timestep);
+            log_planner_return_summary(timestep);
+        }
         else 
         {
             logger->log_info("planner (initilal planning) timeout", simulator.get_curr_timestep());
@@ -180,18 +350,21 @@ void BaseSystem::simulate(int simulation_time, int chunk_size)
 
     while (simulator.get_curr_timestep() < simulation_time)
     {
+        timestep = simulator.get_curr_timestep();
         //check if planenr finished
         if (remain_communication_time <= 0 && started)
         {
             auto deadline = plan_start + std::chrono::milliseconds(min_comm_time - remain_communication_time);
             const auto st = future.wait_until(deadline);
-            if (st == std::future_status::ready) 
+            if (st == std::future_status::ready)
             {
-                task_td.join();
+                if (task_td.joinable()) task_td.join();
                 started = false;
                 auto res = future.get();
-                logger->log_info("planner returns", simulator.get_curr_timestep());
-            } 
+                if (!res && logger != nullptr)
+                    logger->log_warning("planner returned failure", timestep);
+                log_planner_return_summary(timestep);
+            }
             else 
             {
                 logger->log_info("planner timeout", simulator.get_curr_timestep());
@@ -233,6 +406,9 @@ void BaseSystem::simulate(int simulation_time, int chunk_size)
 
         //update tasks
         task_manager.update_tasks(curr_states, proposed_schedule, simulator.get_curr_timestep());
+        record_rolling_task_history(simulator.get_curr_timestep());
+        optsvr::record_schedule_task_progress(simulator.get_curr_timestep(),
+                                              task_manager.num_of_task_finish);
         write_task_trend_snapshot(simulator.get_curr_timestep());
     }
 
@@ -479,6 +655,11 @@ void BaseSystem::saveResults(const string &fileName, int screen, bool pretty_pri
 
         js["scheduleErrors"] = schedule_errors;
     }
+
+    // 写入调度诊断指标
+    optsvr::set_schedule_result_summary(task_manager.num_of_task_finish, simulation_time);
+    auto sched_json = optsvr::get_schedule_stats_json();
+    if (!sched_json.is_null()) js["schedStats"] = sched_json;
 
     std::ofstream f(fileName,std::ios_base::trunc |std::ios_base::out);
     if (pretty_print)

@@ -10,23 +10,13 @@ python/__pycache__
 output.json
 *-build/
 cmake-build-*/
-__pycache__
+build*
 proposal/
 viz_ticks.ndjson
-build*
 log*
-test*.json
-test.py
-test.txt
-test_output.txt
-test.json
-test_run_log.txt
-test_stdout.txt
+__pycache__
 task_trend.png
 task_trend.txt
 test*.json
 cmake-build-*/
 .codex
-
-# Hermes temp files
-.hermes-tmp.*

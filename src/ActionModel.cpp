@@ -776,7 +776,7 @@ vector<State> ActionModelWithRotate::step(const vector<State>& prev, vector<Acti
         {
             _wait_agents[i] = 1;
             string reason = requested_fail_reasons[i].empty() ? "requested motion rejected by recursive dependency resolution" : requested_fail_reasons[i];
-            std::cout << "Agent " << i << "'s state: " << prev[i] << ", requested action: " << requested_actions[i] << ", reason for waiting: " << reason << std::endl;
+            // std::cout << "Agent " << i << "'s state: " << prev[i] << ", requested action: " << requested_actions[i] << ", reason for waiting: " << reason << std::endl;
             errors.push_back(std::make_tuple(
                 "Agent waits instead of " + action_to_string(requested_actions[i]) + ": " + reason,
                 i,

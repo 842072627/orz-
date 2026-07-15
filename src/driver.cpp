@@ -10,8 +10,13 @@
 #include <stdexcept>
 
 
+#if defined(MAPF_PYTHON_BINDINGS) && __has_include(<pybind11/embed.h>)
+#define MAPF_PYTHON_BINDINGS_AVAILABLE 1
 #include <pybind11/embed.h>
 #include "pyEntry.hpp"
+#else
+#define MAPF_PYTHON_BINDINGS_AVAILABLE 0
+#endif
 
 namespace po = boost::program_options;
 using json = nlohmann::json;
@@ -32,20 +37,22 @@ void sigint_handler(int a)
 
 int main(int argc, char **argv)
 {
+#if MAPF_PYTHON_BINDINGS_AVAILABLE
     pybind11::initialize_interpreter();
+#endif
     // Declare the supported options.
     po::options_description desc("Allowed options");
     desc.add_options()("help", "produce help message")
         ("actionMoveTimeLimit,a", po::value<int>()->default_value(100), "the  time limit for move one action in milliseconds")
         ("outputScreen,c", po::value<int>()->default_value(1), "the level of details in the output file, 1--showing all the output, 2--only actual plans, task completion and summary, 3--only summary")
-        ("logDetailLevel,d", po::value<int>()->default_value(1), "the minimum severity level of log messages to display, 1--showing all the messages, 2--showing warnings and fatal errors, 3--showing fatal errors only")
+("logDetailLevel,d", po::value<int>()->default_value(1), "the minimum severity level of log messages to display, 1--showing all the messages, 2--showing warnings and fatal errors, 3--showing fatal errors only, 4--showing info and fatal errors only (skip warnings)")
         ("fileStoragePath,f", po::value<std::string>()->default_value(""), "the large file storage path")
         ("inputFile,i", po::value<std::string>()->required(), "input file name")
         ("logFile,l", po::value<std::string>()->default_value(""), "redirect stdout messages into the specified log file")
-        ("initialPlanTimeLimit,n", po::value<int>()->default_value(1000), "the initial time limit for planner in milliseconds")
+        ("initialPlanTimeLimit,n", po::value<int>()->default_value(1500), "the initial time limit for planner in milliseconds")
         ("output,o", po::value<std::string>()->default_value("./output.json"), "output results from the evaluation into a JSON formated file. If no file specified, the default name is 'output.json'")
         ("prettyPrintJson", po::bool_switch()->default_value(false), "pretty-print the output JSON instead of writing it on one line")
-        ("preprocessTimeLimit,p", po::value<int>()->default_value(30000), "the time limit for preprocessing in milliseconds")
+        ("preprocessTimeLimit,p", po::value<int>()->default_value(100000), "the time limit for preprocessing in milliseconds")
         ("disableStagedActionValidation", po::bool_switch()->default_value(false), "disable validation that executor staged actions remain a prefix of the previous staged actions plus the new plan")
         ("simulationTime,s", po::value<int>()->default_value(5000), "run simulation")
         ("taskTrendFile", po::value<std::string>()->default_value(""), "write task-finish trend snapshots to a text file")
@@ -77,14 +84,18 @@ int main(int argc, char **argv)
     }
 
     int log_level = vm["logDetailLevel"].as<int>();
-    if (log_level <= 1)
+    bool skip_warning = false;
+    if (log_level == 4) {
+        skip_warning = true;
+        log_level = 2; //info + fatal, skip warning
+    } else if (log_level <= 1)
         log_level = 2; //info
     else if (log_level == 2)
         log_level = 3; //warning
     else
         log_level = 5; //fatal
 
-    Logger *logger = new Logger(vm["logFile"].as<std::string>(),log_level);
+    Logger *logger = new Logger(vm["logFile"].as<std::string>(), log_level, skip_warning);
 
     std::filesystem::path filepath(vm["output"].as<std::string>());
     if (filepath.parent_path().string().size() > 0 && !std::filesystem::is_directory(filepath.parent_path()))
@@ -101,6 +112,7 @@ int main(int argc, char **argv)
     bool use_py_scheduler = vm["schedulerPython"].as<bool>();
     bool use_py_executor  = vm["executorPython"].as<bool>();
 
+#if MAPF_PYTHON_BINDINGS_AVAILABLE
     if (use_py_planner || use_py_scheduler || use_py_executor) {
         auto *pe = new pyEntry(use_py_planner, use_py_scheduler, use_py_executor);
         executor = pe->get_executor();
@@ -109,6 +121,13 @@ int main(int argc, char **argv)
         planner = new Entry();
         executor = new Executor();
     }
+#else
+    if (use_py_planner || use_py_scheduler || use_py_executor) {
+        throw std::invalid_argument("Python components requested, but this binary was built without pybind11 support");
+    }
+    planner = new Entry();
+    executor = new Executor();
+#endif
 
     auto input_json_file = vm["inputFile"].as<std::string>();
     json data;
@@ -217,10 +236,14 @@ int main(int argc, char **argv)
     signal(SIGINT, sigint_handler);
 
     // Release GIL so worker threads in simulate() can acquire it for Python calls
+#if MAPF_PYTHON_BINDINGS_AVAILABLE
     {
         pybind11::gil_scoped_release release;
         system_ptr->simulate(vm["simulationTime"].as<int>(),100);
     }
+#else
+    system_ptr->simulate(vm["simulationTime"].as<int>(),100);
+#endif
 
     system_ptr->saveResults(
         vm["output"].as<std::string>(),

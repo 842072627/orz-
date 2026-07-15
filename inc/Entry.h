@@ -25,7 +25,7 @@ public:
         scheduler = new TaskScheduler(env);
 
     };
-	virtual ~Entry(){delete env;};
+	virtual ~Entry() = default;
 
 
     virtual void initialize(int preprocess_time_limit);

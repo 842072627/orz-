@@ -1,53 +1,35 @@
-// MAPFPlanner.cpp — ORZ-only: only uses GameDirectionalPlanner
-#include <Entry.h>
-#include "Plan.h"
-#include "planner.h"
-#include "const.h"
-#include "../nz/planner/GameDirectionalPlanner/GameDirectionalPlanner.h"
+#include "MAPFPlanner.h"
+#include "GameDirectionalPlanner.h"
 #include "RuntimeConfig.h"
+#include "const.h"
+#include "planner.h"
 
+#include <algorithm>
 #include <chrono>
 
-using namespace std::chrono;
-
-static nz::GameDirectionalPlanner* g_game_directional_planner_ = nullptr;
-static bool g_game_directional_planner_initialized_ = false;
-
-MAPFPlanner::~MAPFPlanner()
-{
-    delete g_game_directional_planner_;
+namespace {
+optsvr::GameDirectionalPlanner game_planner;
 }
 
-void MAPFPlanner::initialize(int preprocess_time_limit)
-{
-    if (nz::cfg().skip_test) return;
+MAPFPlanner::~MAPFPlanner() = default;
 
-    int limit = preprocess_time_limit - duration_cast<milliseconds>(
-        steady_clock::now() - env->plan_start_time).count()
-        - DefaultPlanner::PLANNER_TIMELIMIT_TOLERANCE;
-
-    if (nz::cfg().planner_mode == 16) {
-        if (g_game_directional_planner_) {
-            delete g_game_directional_planner_;
-            g_game_directional_planner_ = nullptr;
-        }
-        g_game_directional_planner_ = new nz::GameDirectionalPlanner();
-        g_game_directional_planner_->initialize(limit, env);
-        g_game_directional_planner_initialized_ = true;
-    }
+void MAPFPlanner::initialize(int preprocess_time_limit) {
+    if (optsvr::cfg().skip_test) return;
+    const int limit = preprocess_time_limit -
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - env->plan_start_time).count() -
+        DefaultPlanner::PLANNER_TIMELIMIT_TOLERANCE;
+    DefaultPlanner::initialize(limit, env);
+    game_planner.initialize(limit, env);
 }
 
-void MAPFPlanner::plan(int time_limit, Plan& plan)
-{
-    if (nz::cfg().skip_test) return;
-
-    int limit = time_limit - duration_cast<milliseconds>(
-        steady_clock::now() - env->plan_start_time).count()
-        - DefaultPlanner::PLANNER_TIMELIMIT_TOLERANCE;
-
-    int min_plan_steps = (int)(env->min_planner_communication_time / (env->action_time * env->max_counter)) + 1;
-
-    if (g_game_directional_planner_ && nz::cfg().planner_mode == 16) {
-        g_game_directional_planner_->plan(limit, plan.actions, env, min_plan_steps);
-    }
+void MAPFPlanner::plan(int time_limit, Plan& plan) {
+    if (optsvr::cfg().skip_test) return;
+    const int limit = time_limit -
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - env->plan_start_time).count() -
+        DefaultPlanner::PLANNER_TIMELIMIT_TOLERANCE;
+    const int action_ticks = std::max(1, env->action_time * env->max_counter);
+    const int num_steps = env->min_planner_communication_time / action_ticks + 1;
+    game_planner.plan(limit, plan.actions, env, num_steps);
 }

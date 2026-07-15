@@ -14,6 +14,7 @@
 #include "Simulator.h"
 #include <memory>
 #include <string>
+#include <thread>
 
 class BaseSystem
 {
@@ -39,13 +40,20 @@ public:
     };
 
 	virtual ~BaseSystem()
-    {
-        //safely exit: wait for join the thread then delete planner and exit
-        if (started)
+	{
+        // Safely exit: wait for the planner worker unless destruction is
+        // triggered from that worker itself, e.g. by a fatal planner path.
+        const bool in_planner_thread =
+            task_td.joinable() && task_td.get_id() == std::this_thread::get_id();
+        if (task_td.joinable())
         {
-            task_td.join();
+            if (in_planner_thread)
+                task_td.detach();
+            else
+                task_td.join();
         }
-        if (planner != nullptr)
+        started = false;
+        if (planner != nullptr && !in_planner_thread)
         {
             delete planner;
         }
