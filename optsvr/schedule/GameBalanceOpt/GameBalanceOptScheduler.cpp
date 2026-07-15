@@ -1845,6 +1845,22 @@ void GameBalanceOptScheduler::schedule(int time_limit,
         }
     }
 
+    // ---- 过滤 goal 在 forbidden 格子上的任务 ----
+    for (auto it = free_tasks_set.begin(); it != free_tasks_set.end(); ) {
+        auto tit = env->task_pool.find(*it);
+        if (tit != env->task_pool.end() && !tit->second.locations.empty()) {
+            bool skip = false;
+            for (int loc : tit->second.locations) {
+                if (ORZ_Highway::is_task_forbidden(loc)) { skip = true; break; }
+            }
+            if (skip) {
+                it = free_tasks_set.erase(it);
+                continue;
+            }
+        }
+        ++it;
+    }
+
     // Tasks are unavailable during initialize. Cache their immutable geometry
     // incrementally within a small slice of the online schedule budget.
     std::vector<int> uncached_tasks;
