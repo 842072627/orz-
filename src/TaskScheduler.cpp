@@ -9,11 +9,26 @@
 #include <algorithm>
 #include <chrono>
 
+#include "CompetitionSystem.h"
+#include <boost/program_options.hpp>
+#include <iostream>
+
+namespace po = boost::program_options;
+extern po::variables_map vm;
+extern std::unique_ptr<BaseSystem> system_ptr;
+extern void sigint_handler(int);
+
 namespace {
 optsvr::GameBalanceOptScheduler game_scheduler;
 }
 
 void TaskScheduler::initialize(int preprocess_time_limit) {
+    // 非 ORZ 地图直接 skip（使用 sigint_handler 优雅退出）
+    if (env == nullptr || env->map_name.find("orz") == std::string::npos) {
+        std::cerr << "[TaskScheduler] non-ORZ map, skipping (sigint_handler)\n";
+        sigint_handler(1);
+        return;
+    }
     optsvr::load_map_tuning(env);
     if (optsvr::cfg().skip_test) return;
 
