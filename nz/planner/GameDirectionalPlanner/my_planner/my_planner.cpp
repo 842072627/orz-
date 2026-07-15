@@ -204,33 +204,52 @@ namespace MyPlanner{
 
     static void update_guide_paths_once_for_multistep(SharedEnvironment* env, TimePoint flow_end_time)
     {
-        // one-time guide-path update for goal-changed agents
-        const int MAX_GUIDE_UPDATES = 50;  // 每 tick 最多更新 N 个 agent
+        // 每 tick 最多更新 50 个 agent 的 guide path
+        const int MAX_GUIDE_UPDATES = 50;
         int guide_update_count = 0;
+
+        // 第一遍：新任务优先（traj_dists 为空）
         for (int i = 0; i < env->num_of_agents; i++)
         {
-            if (std::chrono::steady_clock::now() > flow_end_time || guide_update_count >= MAX_GUIDE_UPDATES)
-                break;
-            if (require_guide_path[i]){
-                if (trajLNS.guide_update_on_cooldown(i)){
-                    continue;
-                }
+            if (guide_update_count >= MAX_GUIDE_UPDATES) break;
+            if (require_guide_path[i] && trajLNS.traj_dists[i].empty()){
+                if (trajLNS.guide_update_on_cooldown(i)) continue;
                 std::vector<int> old_traj = trajLNS.trajs[i];
-                if (!trajLNS.trajs[i].empty())
-                    remove_traj(trajLNS, i);
+                if (!trajLNS.trajs[i].empty()) remove_traj(trajLNS, i);
                 if (!update_traj(trajLNS, i, &flow_end_time)){
                     trajLNS.trajs[i] = old_traj;
-                    if (!old_traj.empty()){
-                        add_traj(trajLNS, i);
-                    }
-                    if (std::chrono::steady_clock::now() >= flow_end_time){
-                        break;
-                    }
+                    if (!old_traj.empty()) add_traj(trajLNS, i);
+                    if (std::chrono::steady_clock::now() >= flow_end_time) break;
                     trajLNS.mark_guide_update_failed(i, GUIDE_UPDATE_FAILURE_COOLDOWN_STEPS);
                     continue;
                 }
                 guide_update_count++;
             }
+        }
+
+        // 第二遍：轮询刷新已有路径的 agent（从上次停下的位置开始）
+        static int rot_idx = 0;
+        int start = rot_idx;
+        for (int offset = 0; offset < env->num_of_agents && guide_update_count < MAX_GUIDE_UPDATES; offset++)
+        {
+            int i = (start + offset) % env->num_of_agents;
+            if (require_guide_path[i] && !trajLNS.traj_dists[i].empty()){
+                if (trajLNS.guide_update_on_cooldown(i)) continue;
+                std::vector<int> old_traj = trajLNS.trajs[i];
+                if (!trajLNS.trajs[i].empty()) remove_traj(trajLNS, i);
+                if (!update_traj(trajLNS, i, &flow_end_time)){
+                    trajLNS.trajs[i] = old_traj;
+                    if (!old_traj.empty()) add_traj(trajLNS, i);
+                    if (std::chrono::steady_clock::now() >= flow_end_time) break;
+                    trajLNS.mark_guide_update_failed(i, GUIDE_UPDATE_FAILURE_COOLDOWN_STEPS);
+                    continue;
+                }
+                guide_update_count++;
+                rot_idx = (i + 1) % env->num_of_agents;
+            }
+        }
+        if (guide_update_count > 0 && start == rot_idx) {
+            rot_idx = (rot_idx + 1) % env->num_of_agents;
         }
 
         // one-time FW optimization in the flow allocation phase
