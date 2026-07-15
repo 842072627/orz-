@@ -255,7 +255,8 @@ namespace MyPlanner{
         // one-time FW optimization in the flow allocation phase
         auto t_fw = std::chrono::steady_clock::now();
         std::unordered_set<int> updated;
-        frank_wolfe(trajLNS, updated, flow_end_time);
+        // 关掉 Frank-Wolfe（只保留 guide A* 更新减少耗时）
+        // frank_wolfe(trajLNS, updated, flow_end_time);
         long long fw_us = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t_fw).count();
         PIBT_Lock::g_fw_ms = (int)(fw_us/1000);
         PIBT_Lock::g_guide_update_cnt = guide_update_count;
@@ -478,8 +479,7 @@ namespace MyPlanner{
         auto t_setup = std::chrono::steady_clock::now();
         initialize_dummy_goals_if_needed(env);
         setup_multistep_episode_state(env, flow_end_time, local_priority);
-        // 纯 PIBT 模式：跳过 guide path 更新和 Frank-Wolfe
-        // update_guide_paths_once_for_multistep(env, flow_end_time);
+        update_guide_paths_once_for_multistep(env, flow_end_time);
         auto t_pibt = std::chrono::steady_clock::now();
         long long guide_us = std::chrono::duration_cast<std::chrono::microseconds>(t_pibt - t_setup).count();
 

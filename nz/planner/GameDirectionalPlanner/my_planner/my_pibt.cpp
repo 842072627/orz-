@@ -140,23 +140,33 @@ bool causalMY_PIBT(int curr_id, int higher_id,std::vector<State>& prev_states,
 	        neighbors.swap(filtered);
 	    }
 	}
-	for (auto& neighbor: neighbors){
+		for (auto& neighbor: neighbors){
 
-		assert(validateMove(prev_loc, neighbor, lns.env));
+			assert(validateMove(prev_loc, neighbor, lns.env));
 
-		auto _res = get_source_2_path(lns.traj_dists[curr_id], lns.env, neighbor, &(lns.neighbors));
-		int min_heuristic = _res.first;
-		int nh_togo = _res.second;
+			auto _res = get_source_2_path(lns.traj_dists[curr_id], lns.env, neighbor, &(lns.neighbors));
+			int min_heuristic = _res.first;
+			int nh_togo = _res.second;
+						// fallback: traj_dists 为空时用启发式表或曼哈顿
+						if (min_heuristic >= MAX_TIMESTEP && lns.tasks.at(curr_id) >= 0) {
+						    int goal = lns.tasks.at(curr_id);
+						    min_heuristic = get_heuristic(lns.heuristics[goal], lns.env, neighbor, &(lns.neighbors));
+						    if (min_heuristic >= MAX_TIMESTEP)
+						        min_heuristic = manhattanDistance(neighbor, goal, lns.env);
+						}
 
 		successors.emplace_back(neighbor, min_heuristic, nh_togo, -1, rand());
 	}
 
-	int wait_heuristic = get_gp_h(lns, curr_id, prev_loc);
-	int wait_togo = -1;
-	{
-	    auto _wr = get_source_2_path(lns.traj_dists[curr_id], lns.env, prev_loc, &(lns.neighbors));
-	    wait_togo = _wr.second;
-	}
+		int wait_heuristic = get_gp_h(lns, curr_id, prev_loc);
+		int wait_togo = -1;
+		{
+		    auto _wr = get_source_2_path(lns.traj_dists[curr_id], lns.env, prev_loc, &(lns.neighbors));
+		    wait_togo = _wr.second;
+		    if (_wr.first >= MAX_TIMESTEP && lns.tasks.at(curr_id) >= 0) {
+		        wait_togo = -1; // togo 不可用时置 -1
+		    }
+		}
 
 	successors.emplace_back(prev_loc, wait_heuristic, wait_togo, -1, rand());
 
