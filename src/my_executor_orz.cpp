@@ -366,34 +366,23 @@ namespace MyExecutorOrz{
             return false;
         }
 
-        // flow control: block agents close to capped segment, not on labeled cell
+        // flow control: block agents within 300 of capped segment, not on labeled cell
         if (cj_ready && cj_any_capped) {
-            int nm = nloc, cm = loc;
-            if (nm < 0 || nm >= (int)cj_branch_dist.size() || cm < 0 || cm >= (int)cj_branch_dist.size()) return true;
-            int nb = cj_branch_dist[nm];
-            if (nb < 0) return true;
-            nm = cj_main_dist[nm];
-            int cb = cj_branch_dist[cm];
-            if (cb < 0) { cm = -1; } else { cm = cj_main_dist[cm]; }
-            if (cm < 0) return true;
-            int si = nm / SEG_STEP;
-            if (si >= 0 && si < (int)cj_segments.size() && cj_segments[si].capped) {
-                // agent on labeled cell → free
-                if (orz_sign[loc]) {
-                    agent_command[agent_id] = ExecutionCommand::GO;
-                    return true;
-                }
-                // check distance to segment
-                int seg_center = (cj_segments[si].min_m + cj_segments[si].max_m) / 2;
-                int dist = std::abs(cm - seg_center) + cb;
-                if (dist <= 300) {
-                    agent_command[agent_id] = ExecutionCommand::STOP;
-                    return false;
+            int si = (nloc >= 0 && nloc < cj_total && cj_branch_dist[nloc] >= 0) ? cj_main_dist[nloc] / SEG_STEP : -1;
+            if (si >= 0 && si < (int)cj_segments.size() && cj_segments[si].labeled_cells > 0 && cj_segments[si].capped) {
+                if (orz_sign[loc]) { agent_command[agent_id] = ExecutionCommand::GO; return true; }
+                // distance check (only when agent has valid project data)
+                { int cm = cj_main_dist[loc]; int cb = cj_branch_dist[loc];
+                  if (cb >= 0 && cm >= 0) {
+                      int sc = (cj_segments[si].min_m + cj_segments[si].max_m) / 2;
+                      if (std::abs(cm - sc) + cb <= 300) {
+                          agent_command[agent_id] = ExecutionCommand::STOP;
+                          return false;
+                      }
+                  }
                 }
             }
         }
-
-        // TPG check
         if (tpg[nloc].empty() || tpg[nloc].front() == agent_id) {
             agent_command[agent_id] = ExecutionCommand::GO;
             return true;
