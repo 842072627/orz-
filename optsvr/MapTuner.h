@@ -75,7 +75,7 @@ inline void apply_game_tuning(RuntimeConfig& config) {
     config.game_dir_flow_dynamic_cap_min_ratio = 0.20f;     // 0.5
     config.game_dir_flow_dynamic_cap_max_ratio = 2.00f;     // 1.4
     config.game_dir_flow_random_shortest = true;
-    config.game_score_exempt_enabled = true;
+    config.game_score_exempt_enabled = false;
     config.game_exempt_main = 23;       // 仅 score_exempt=true 时生效
     config.game_distance_score_mode = 3;
     config.game_pickup_weight = 2.0f;
