@@ -5,6 +5,7 @@
 
 #include "my_executor_orz.h"
 #include "executor_heat_lock.h"
+#include "orz_highway.h"
 #include <queue>
 #include <cmath>
 #include <unordered_set>
@@ -29,12 +30,23 @@ namespace MyExecutorOrz{
     // ── segment data ──
     struct CjSegment {
         int min_m, max_m;
-        float east_flow, west_flow;
-        int lock_dir;   // +1=east, -1=west, 0=none
+        int labeled_cells;  // number of labeled cells in this segment (constant)
+        int agents_inside;   // agent count on labeled cells in segment
+        bool capped;         // over capacity
     };
     std::vector<CjSegment> cj_segments;
     constexpr int SEG_STEP = 100;
-    constexpr int BLOCK_RADIUS = 200;
+    constexpr int CAP_DIST = 300; // block agents this far outside segment
+    constexpr int SEG_CAPACITY = 5; // agents per segment before capping
+
+    // ── highway sign data ──
+    std::vector<unsigned char> orz_sign; // [loc] → 1 if labeled
+    
+    // ── zone flow control ──
+    std::vector<int> cell_zone; // [loc] → zone id (0=not in any zone)
+    std::vector<int> zone_capacity;
+    std::vector<int> zone_agent_count; // per-tick
+    int num_zones = 0;
 
     // ── per-agent intent from plan ──
     std::vector<int> agent_intent; // +1=east, -1=west, 0=unknown/not on corridor
@@ -164,7 +176,31 @@ namespace MyExecutorOrz{
         for (int i=0; i<nseg; i++) {
             cj_segments[i].min_m = i*SEG_STEP;
             cj_segments[i].max_m = (i+1)*SEG_STEP;
+            cj_segments[i].labeled_cells = 0;
+            cj_segments[i].agents_inside = 0;
+            cj_segments[i].capped = false;
         }
+
+        // load highway sign data (labeled narrow corridors)
+        orz_sign.assign(cj_total, 0);
+        int sign_cnt = 0;
+        for (int i=0; i<cj_total; i++) {
+            uint8_t s = ORZ_Highway::get_sign(i);
+            if (s != 0) { orz_sign[i] = 1; sign_cnt++; }
+        }
+        fprintf(stderr, "[DBG] orz_sign loaded: %d cells\n", sign_cnt);
+
+        // count labeled cells per segment (constant)
+        cj_ready = true; // temporarily enable project()
+        for (int i=0; i<cj_total; i++) {
+            if (!orz_sign[i]) continue;
+            int m,b; project(i, m, b);
+            if (m < 0) continue;
+            int si = m / SEG_STEP;
+            if (si >= 0 && si < nseg) cj_segments[si].labeled_cells++;
+        }
+        cj_ready = false;
+
         cj_ready = true;
     }
 
@@ -292,84 +328,39 @@ namespace MyExecutorOrz{
                 agent_trail[i].pop_front();
         }
 
-        // ── compute flow per segment from agent_intent ──
+        // ── flow control: cap segments with >10 agents on labeled cells ──
         if (cj_ready) {
-            { static int last_p=-1; if (env->system_timestep%200==0 && env->system_timestep!=last_p) { last_p=env->system_timestep;
-                int e=0,w=0; for (int i=0; i<(int)agent_intent.size(); i++) { if(agent_intent[i]>0)e++; else if(agent_intent[i]<0)w++; }
-                fprintf(stderr, "[DBG] t=%d intent=%d e=%d w=%d\n", env->system_timestep, e+w, e, w);
-            }}
-            for (auto& seg : cj_segments) seg.east_flow=0, seg.west_flow=0;
+            for (auto& seg : cj_segments) seg.agents_inside = 0, seg.capped = false;
             for (int i=0; i<env->system_states.size(); i++) {
-                int cm, cb; project(env->system_states[i].location, cm, cb);
-                if (cm<0 || agent_intent[i]==0) continue;
+                int loc = env->system_states[i].location;
+                if (loc < 0 || loc >= cj_total || !orz_sign[loc]) continue;
+                int cm, cb; project(loc, cm, cb);
+                if (cm < 0) continue;
                 int si = cm / SEG_STEP;
-                if (si>=0 && si<(int)cj_segments.size()) {
-                    if (agent_intent[i]>0) cj_segments[si].east_flow += 1.0f;
-                    else cj_segments[si].west_flow += 1.0f;
-                }
+                if (si >= 0 && si < (int)cj_segments.size())
+                    cj_segments[si].agents_inside++;
             }
+            constexpr int CAP_THRESH = 10;
+            for (auto& seg : cj_segments)
+                if (seg.labeled_cells > 0 && seg.agents_inside > CAP_THRESH)
+                    seg.capped = true;
 
-            // lock decision + propagation
-            const int PROPAGATE_DIST = 300;
-            const float MIN_FLOW = 1.0f;
-            
-            // first pass: keep existing locks until locked direction clears
-            for (auto& seg : cj_segments) {
-                if (seg.lock_dir != 0) {
-                    float locked_flow = (seg.lock_dir > 0) ? seg.east_flow : seg.west_flow;
-                    if (locked_flow >= 1.0f) {
-                        continue; // keep existing lock
-                    }
-                }
-                // no lock or locked direction cleared → judge fresh
-                if (seg.east_flow >= 1.0f && seg.west_flow >= 1.0f) {
-                    seg.lock_dir = (seg.east_flow >= seg.west_flow) ? -1 : 1;
-                } else {
-                    seg.lock_dir = 0;
-                }
-            }
-            
-            // second pass: propagate lock_dir both ways (overwrite all within range)
-            for (int si=0; si<(int)cj_segments.size(); si++) {
-                if (cj_segments[si].lock_dir == 0) continue;
-                int ld = cj_segments[si].lock_dir;
-                for (int sj=si+1; sj<(int)cj_segments.size(); sj++) {
-                    int d = cj_segments[sj].max_m - cj_segments[si].min_m;
-                    if (d > PROPAGATE_DIST) break;
-                    cj_segments[sj].lock_dir = ld;
-                }
-                for (int sj=si-1; sj>=0; sj--) {
-                    int d = cj_segments[si].max_m - cj_segments[sj].min_m;
-                    if (d > PROPAGATE_DIST) break;
-                    cj_segments[sj].lock_dir = ld;
-                }
-            }
-
-            // dump
-            if (env->system_timestep % 500 == 0) {
-                char lf[256];
-                snprintf(lf, sizeof(lf), "C:\\Users\\Administrator\\Desktop\\test-studio-mapf\\big-final-test\\executor-data\\seglock_%d.csv", env->system_timestep);
-                FILE* lfp = fopen(lf, "w");
-                if (lfp) {
-                    fprintf(lfp, "seg_id,min_m,max_m,east_flow,west_flow,lock_dir\n");
-                    for (int si=0; si<(int)cj_segments.size(); si++) {
-                        auto& s=cj_segments[si];
-                        fprintf(lfp, "%d,%d,%d,%.4f,%.4f,%d\n", si, s.min_m, s.max_m, s.east_flow, s.west_flow, s.lock_dir);
-                    }
-                    fclose(lfp);
-                }
-            }
+            // diagnostics
+            { static int last_p=-1; if (env->system_timestep%200==0 && env->system_timestep!=last_p) { last_p=env->system_timestep;
+                int nc=0, max_a=0, max_l=0;
+                for (auto& s:cj_segments) { if(s.capped)nc++; if(s.agents_inside>max_a)max_a=s.agents_inside; if(s.labeled_cells>max_l)max_l=s.labeled_cells; }
+                fprintf(stderr,"[DBG] t=%d capped=%d/%d max_agents=%d max_labeled=%d\n", env->system_timestep, nc, (int)cj_segments.size(), max_a, max_l);
+            }}
         }
 
         // ── mcp ──
         for (int i=0; i<env->system_states.size(); i++)
             mcp(i, agent_command, env);
 
-        // lock dist diagnostics
+        // diagnostics (capped segments)
         { static int last_s=-1; if (env->system_timestep%200==0 && env->system_timestep!=last_s) { last_s=env->system_timestep;
-            int n1=0,n_1=0,n0=0;
-            for (auto& s:cj_segments){if(s.lock_dir==1)n1++;else if(s.lock_dir==-1)n_1++;else n0++;}
-            fprintf(stderr,"[DBG] t=%d lock:+1=%d -1=%d 0=%d\n", env->system_timestep, n1, n_1, n0);
+            int nc=0; for (auto& s:cj_segments) if(s.capped)nc++;
+            fprintf(stderr,"[DBG] t=%d capped=%d/%d\n", env->system_timestep, nc, (int)cj_segments.size());
         }}
     }
     // ── diagnostics ──
@@ -395,22 +386,21 @@ namespace MyExecutorOrz{
             return false;
         }
 
-        // direction lock check (only block agents OUTSIDE the locked segment)
+        // flow control: block agents close to capped segment, not on labeled cell
         if (cj_ready) {
-            int cm, cb; project(loc, cm, cb);
             int nm, nb; project(nloc, nm, nb);
-            if (cm >= 0 && nm >= 0 && agent_intent[agent_id] != 0) {
-                int si = nm / SEG_STEP;
-                if (si >= 0 && si < (int)cj_segments.size() && cj_segments[si].lock_dir != 0
-                    && agent_intent[agent_id] == cj_segments[si].lock_dir) {
-                    // agent moving in locked direction
-                    bool inside_seg = (cm >= cj_segments[si].min_m && cm <= cj_segments[si].max_m);
-                    if (!inside_seg) {
-                        // agent is outside the segment → STOP
-                        agent_command[agent_id] = ExecutionCommand::STOP;
-                        return false;
-                    }
-                    // agent is inside the segment → let it exit (will clear the lock)
+            int cm, cb; project(loc, cm, cb);
+            if (cm < 0 || nm < 0) return true;
+            int si = nm / SEG_STEP;
+            if (si >= 0 && si < (int)cj_segments.size() && cj_segments[si].capped) {
+                // agent on labeled cell → free
+                if (orz_sign[loc]) return true;
+                // check distance to segment
+                int seg_center = (cj_segments[si].min_m + cj_segments[si].max_m) / 2;
+                int dist = std::abs(cm - seg_center) + cb;
+                if (dist <= 300) {
+                    agent_command[agent_id] = ExecutionCommand::STOP;
+                    return false;
                 }
             }
         }
