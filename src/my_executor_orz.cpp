@@ -357,8 +357,18 @@ namespace MyExecutorOrz{
         // ── mcp ──
         for (int i=0; i<env->system_states.size(); i++)
             mcp(i, agent_command, env);
-    }
 
+        // lock dist diagnostics
+        { static int last_s=-1; if (env->system_timestep%200==0 && env->system_timestep!=last_s) { last_s=env->system_timestep;
+            int n1=0,n_1=0,n0=0;
+            for (auto& s:cj_segments){if(s.lock_dir==1)n1++;else if(s.lock_dir==-1)n_1++;else n0++;}
+            fprintf(stderr,"[DBG] t=%d lock:+1=%d -1=%d 0=%d\n", env->system_timestep, n1, n_1, n0);
+        }}
+    }
+    // ── diagnostics ──
+    int dir_stop_count = 0;
+
+    // ── mcp ──
     bool mcp(int agent_id, std::vector<ExecutionCommand>& agent_command, SharedEnvironment* env) {
         if (env->staged_actions[agent_id].empty()) {
             agent_command[agent_id] = ExecutionCommand::STOP;
@@ -385,7 +395,13 @@ namespace MyExecutorOrz{
                 int si = nm / SEG_STEP;
                 if (si >= 0 && si < (int)cj_segments.size() && cj_segments[si].lock_dir != 0
                     && agent_intent[agent_id] == cj_segments[si].lock_dir) {
-                    // heading into a locked segment → STOP
+                    // heading into a locked segment → STOP; remove from TPG queue so others can pass
+                    auto tit=tpg.find(nloc);
+                    if (tit!=tpg.end() && !tit->second.empty()) {
+                        for (auto it=tit->second.begin(); it!=tit->second.end(); ++it) {
+                            if (*it==agent_id) { tit->second.erase(it); break; }
+                        }
+                    }
                     agent_command[agent_id] = ExecutionCommand::STOP;
                     return false;
                 }
