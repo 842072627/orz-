@@ -36,24 +36,13 @@ namespace MyExecutorOrz{
     };
     std::vector<CjSegment> cj_segments;
     constexpr int SEG_STEP = 100;
-    constexpr int CAP_DIST = 300; // block agents this far outside segment
-    constexpr int SEG_CAPACITY = 5; // agents per segment before capping
+    constexpr int CAP_DIST = 300; // block agents this far from segment (used in mcp)
 
     // ── highway sign data ──
-    std::vector<unsigned char> orz_sign; // [loc] → 1 if labeled
-    
-    // ── zone flow control ──
-    std::vector<int> cell_zone; // [loc] → zone id (0=not in any zone)
-    std::vector<int> zone_capacity;
-    std::vector<int> zone_agent_count; // per-tick
-    int num_zones = 0;
+    std::vector<char> orz_sign; // [loc] → 1 if labeled
 
-    // ── per-agent intent from plan ──
+    // ── per-agent intent from plan (debug only) ──
     std::vector<int> agent_intent; // +1=east, -1=west, 0=unknown/not on corridor
-    // ── historical trail for intent correction ──
-    std::vector<std::deque<int>> agent_trail; // last N locations per agent
-    constexpr int TRAIL_LEN = 200;
-    constexpr int MIN_TRAIL = 50;
 
     // ── project ──
     static void project(int loc, int &m, int &b) {
@@ -69,7 +58,6 @@ namespace MyExecutorOrz{
         window_size = (int)env->min_planner_communication_time / (env->action_time*env->max_counter) + 1;
         previous_locations.resize(env->num_of_agents, -1);
         agent_intent.assign(env->num_of_agents, 0);
-        agent_trail.resize(env->num_of_agents);
 
         // ---- build centerline (from optsvr/GameBalanceOptScheduler) ----
         cj_rows = env->rows; cj_cols = env->cols; cj_total = cj_rows * cj_cols;
@@ -181,25 +169,28 @@ namespace MyExecutorOrz{
             cj_segments[i].capped = false;
         }
 
-        // load highway sign data (labeled narrow corridors)
-        orz_sign.assign(cj_total, 0);
-        int sign_cnt = 0;
-        for (int i=0; i<cj_total; i++) {
-            uint8_t s = ORZ_Highway::get_sign(i);
-            if (s != 0) { orz_sign[i] = 1; sign_cnt++; }
+        // load highway sign data into fast array
+// orz_sign: fast O(1) lookup for labeled cells
+        std::vector<char> orz_signed(cj_total, 0);
+        for (int i=0; i<ORZ_Highway::NUM_SIGN; i++) {
+            int loc = ORZ_Highway::kSign[i].loc;
+            if (loc >= 0 && loc < cj_total) orz_signed[loc] = 1;
         }
-        fprintf(stderr, "[DBG] orz_sign loaded: %d cells\n", sign_cnt);
 
         // count labeled cells per segment (constant)
-        cj_ready = true; // temporarily enable project()
-        for (int i=0; i<cj_total; i++) {
-            if (!orz_sign[i]) continue;
-            int m,b; project(i, m, b);
+        cj_ready = true;
+        for (int i=0; i<ORZ_Highway::NUM_SIGN; i++) {
+            int loc = ORZ_Highway::kSign[i].loc;
+            if (loc < 0 || loc >= cj_total) continue;
+            int m,b; project(loc, m, b);
             if (m < 0) continue;
             int si = m / SEG_STEP;
             if (si >= 0 && si < nseg) cj_segments[si].labeled_cells++;
         }
         cj_ready = false;
+
+        // store in global for per-tick use
+        orz_sign = std::move(orz_signed);
 
         cj_ready = true;
     }
@@ -321,21 +312,15 @@ namespace MyExecutorOrz{
             }
         }
 
-        // ── update agent trail ──
-        for (int i=0; i<env->system_states.size(); i++) {
-            agent_trail[i].push_back(env->system_states[i].location);
-            if ((int)agent_trail[i].size() > TRAIL_LEN)
-                agent_trail[i].pop_front();
-        }
-
-        // ── flow control: cap segments with >10 agents on labeled cells ──
-        if (cj_ready) {
+        // ── flow control: cap segments with >10 agents on labeled cells (every 10 ticks) ──
+        if (cj_ready && (env->system_timestep % 10 == 0)) {
             for (auto& seg : cj_segments) seg.agents_inside = 0, seg.capped = false;
             for (int i=0; i<env->system_states.size(); i++) {
                 int loc = env->system_states[i].location;
                 if (loc < 0 || loc >= cj_total || !orz_sign[loc]) continue;
-                int cm, cb; project(loc, cm, cb);
-                if (cm < 0) continue;
+                int b = cj_branch_dist[loc];
+                if (b < 0) continue;
+                int cm = cj_main_dist[loc];
                 int si = cm / SEG_STEP;
                 if (si >= 0 && si < (int)cj_segments.size())
                     cj_segments[si].agents_inside++;
@@ -356,15 +341,7 @@ namespace MyExecutorOrz{
         // ── mcp ──
         for (int i=0; i<env->system_states.size(); i++)
             mcp(i, agent_command, env);
-
-        // diagnostics (capped segments)
-        { static int last_s=-1; if (env->system_timestep%200==0 && env->system_timestep!=last_s) { last_s=env->system_timestep;
-            int nc=0; for (auto& s:cj_segments) if(s.capped)nc++;
-            fprintf(stderr,"[DBG] t=%d capped=%d/%d\n", env->system_timestep, nc, (int)cj_segments.size());
-        }}
     }
-    // ── diagnostics ──
-    int dir_stop_count = 0;
 
     // ── mcp ──
     bool mcp(int agent_id, std::vector<ExecutionCommand>& agent_command, SharedEnvironment* env) {
@@ -388,13 +365,21 @@ namespace MyExecutorOrz{
 
         // flow control: block agents close to capped segment, not on labeled cell
         if (cj_ready) {
-            int nm, nb; project(nloc, nm, nb);
-            int cm, cb; project(loc, cm, cb);
-            if (cm < 0 || nm < 0) return true;
+            int nm = nloc, cm = loc;
+            if (nm < 0 || nm >= (int)cj_branch_dist.size() || cm < 0 || cm >= (int)cj_branch_dist.size()) return true;
+            int nb = cj_branch_dist[nm];
+            if (nb < 0) return true;
+            nm = cj_main_dist[nm];
+            int cb = cj_branch_dist[cm];
+            if (cb < 0) { cm = -1; } else { cm = cj_main_dist[cm]; }
+            if (cm < 0) return true;
             int si = nm / SEG_STEP;
             if (si >= 0 && si < (int)cj_segments.size() && cj_segments[si].capped) {
                 // agent on labeled cell → free
-                if (orz_sign[loc]) return true;
+                if (orz_sign[loc]) {
+                    agent_command[agent_id] = ExecutionCommand::GO;
+                    return true;
+                }
                 // check distance to segment
                 int seg_center = (cj_segments[si].min_m + cj_segments[si].max_m) / 2;
                 int dist = std::abs(cm - seg_center) + cb;
