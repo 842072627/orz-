@@ -38,6 +38,10 @@ namespace MyExecutorOrz{
 
     // ── per-agent intent from plan ──
     std::vector<int> agent_intent; // +1=east, -1=west, 0=unknown/not on corridor
+    // ── historical trail for intent correction ──
+    std::vector<std::deque<int>> agent_trail; // last N locations per agent
+    constexpr int TRAIL_LEN = 200;
+    constexpr int MIN_TRAIL = 50;
 
     // ── project ──
     static void project(int loc, int &m, int &b) {
@@ -53,6 +57,7 @@ namespace MyExecutorOrz{
         window_size = (int)env->min_planner_communication_time / (env->action_time*env->max_counter) + 1;
         previous_locations.resize(env->num_of_agents, -1);
         agent_intent.assign(env->num_of_agents, 0);
+        agent_trail.resize(env->num_of_agents);
 
         // ---- build centerline (from optsvr/GameBalanceOptScheduler) ----
         cj_rows = env->rows; cj_cols = env->cols; cj_total = cj_rows * cj_cols;
@@ -163,18 +168,18 @@ namespace MyExecutorOrz{
         cj_ready = true;
     }
 
-    // ── simulate plan steps forward to get intended direction ──
-    static int compute_plan_intent(int agent_id, const vector<Action>& actions, const State& start, SharedEnvironment* env) {
+    // ── compute plan intent (simulate staged actions → main_dist diff) ──
+    static int compute_plan_intent(const vector<Action>& actions, int start_loc, int start_ori, SharedEnvironment* env) {
+        if (actions.empty()) return 0;
         int moves[4] = {1, env->cols, -1, -env->cols};
-        int loc = start.location;
-        int ori = start.orientation;
+        int loc = start_loc;
+        int ori = start_ori;
         for (size_t t=0; t<actions.size(); t++) {
             if (actions[t]==Action::FW) loc += moves[ori];
             else if (actions[t]==Action::CR) ori = (ori+1)%4;
-            else if (actions[t]==Action::CCR) ori = (ori-1+4)%4;
+            else if (actions[t]==Action::CCR) { ori--; if(ori<0)ori=3; }
         }
-        // compare projected main_dist of final vs start
-        int sm=-1,sb=-1; project(start.location,sm,sb);
+        int sm=-1,sb=-1; project(start_loc,sm,sb);
         int em=-1,eb=-1; project(loc,em,eb);
         if (sm<0 || em<0) return 0;
         return (em > sm) ? 1 : (em < sm) ? -1 : 0;
@@ -212,10 +217,10 @@ namespace MyExecutorOrz{
 
         heat_lock_update(env, staged_actions);
 
-        // ── compute agent intent from raw plan (15 steps, conflict-free) ──
+        // intent from plan (15 steps)
         agent_intent.assign(env->num_of_agents, 0);
-        for (int i=0; i<env->num_of_agents; i++) {
-            agent_intent[i] = compute_plan_intent(i, staged_actions[i], env->system_states[i], env);
+        for (int i=0; i<env->num_of_agents && i<(int)staged_actions.size(); i++) {
+            agent_intent[i] = compute_plan_intent(staged_actions[i], env->system_states[i].location, env->system_states[i].orientation, env);
         }
 
         // MCP simulation
@@ -260,7 +265,7 @@ namespace MyExecutorOrz{
           static int last_d=-100;
           if (sys_ts-last_d>=100) { last_d=sys_ts;
               int e=0,w=0; for (int i=0; i<(int)agent_intent.size(); i++) { if(agent_intent[i]>0)e++; else if(agent_intent[i]<0)w++; }
-              fprintf(stderr, "[DBG] t=%d intent-e=%d intent-w=%d/%d\n", sys_ts, e, w, (int)agent_intent.size());
+              fprintf(stderr, "[DBG] plan_intent t=%d e=%d w=%d/%d\n", sys_ts, e, w, (int)agent_intent.size());
           }
         }
 
@@ -280,8 +285,19 @@ namespace MyExecutorOrz{
             }
         }
 
+        // ── update agent trail ──
+        for (int i=0; i<env->system_states.size(); i++) {
+            agent_trail[i].push_back(env->system_states[i].location);
+            if ((int)agent_trail[i].size() > TRAIL_LEN)
+                agent_trail[i].pop_front();
+        }
+
         // ── compute flow per segment from agent_intent ──
         if (cj_ready) {
+            { static int last_p=-1; if (env->system_timestep%200==0 && env->system_timestep!=last_p) { last_p=env->system_timestep;
+                int e=0,w=0; for (int i=0; i<(int)agent_intent.size(); i++) { if(agent_intent[i]>0)e++; else if(agent_intent[i]<0)w++; }
+                fprintf(stderr, "[DBG] t=%d intent=%d e=%d w=%d\n", env->system_timestep, e+w, e, w);
+            }}
             for (auto& seg : cj_segments) seg.east_flow=0, seg.west_flow=0;
             for (int i=0; i<env->system_states.size(); i++) {
                 int cm, cb; project(env->system_states[i].location, cm, cb);
@@ -306,27 +322,19 @@ namespace MyExecutorOrz{
                 }
             }
             
-            // second pass: propagate lock_dir both ways
+            // second pass: propagate lock_dir both ways (overwrite all within range)
             for (int si=0; si<(int)cj_segments.size(); si++) {
                 if (cj_segments[si].lock_dir == 0) continue;
                 int ld = cj_segments[si].lock_dir;
-                // propagate east (higher main_dist)
                 for (int sj=si+1; sj<(int)cj_segments.size(); sj++) {
                     int d = cj_segments[sj].max_m - cj_segments[si].min_m;
                     if (d > PROPAGATE_DIST) break;
-                    if (cj_segments[sj].lock_dir == 0 || cj_segments[sj].lock_dir == ld)
-                        cj_segments[sj].lock_dir = ld;
-                    else
-                        break; // opposite direction lock encountered → stop
+                    cj_segments[sj].lock_dir = ld;
                 }
-                // propagate west (lower main_dist)
                 for (int sj=si-1; sj>=0; sj--) {
                     int d = cj_segments[si].max_m - cj_segments[sj].min_m;
                     if (d > PROPAGATE_DIST) break;
-                    if (cj_segments[sj].lock_dir == 0 || cj_segments[sj].lock_dir == ld)
-                        cj_segments[sj].lock_dir = ld;
-                    else
-                        break;
+                    cj_segments[sj].lock_dir = ld;
                 }
             }
 
@@ -372,22 +380,14 @@ namespace MyExecutorOrz{
 
         // direction lock check
         if (cj_ready) {
-            int cm, cb; project(loc, cm, cb);
-            if (cm >= 0 && agent_intent[agent_id] != 0) {
-                int si = cm / SEG_STEP;
-                if (si>=0 && si<(int)cj_segments.size() && cj_segments[si].lock_dir != 0) {
-                    if (agent_intent[agent_id] == cj_segments[si].lock_dir) {
-                        // agent is going IN the locked direction
-                        // block if agent is NOT yet inside the segment and within radius
-                        bool inside = (cm >= cj_segments[si].min_m && cm <= cj_segments[si].max_m);
-                        int seg_boundary = (cj_segments[si].lock_dir > 0) 
-                            ? cj_segments[si].min_m : cj_segments[si].max_m;
-                        int dist = std::abs(cm - seg_boundary);
-                        if (!inside && dist <= BLOCK_RADIUS) {
-                            agent_command[agent_id] = ExecutionCommand::STOP;
-                            return false;
-                        }
-                    }
+            int nm, nb; project(nloc, nm, nb);
+            if (nm >= 0 && agent_intent[agent_id] != 0) {
+                int si = nm / SEG_STEP;
+                if (si >= 0 && si < (int)cj_segments.size() && cj_segments[si].lock_dir != 0
+                    && agent_intent[agent_id] == cj_segments[si].lock_dir) {
+                    // heading into a locked segment → STOP
+                    agent_command[agent_id] = ExecutionCommand::STOP;
+                    return false;
                 }
             }
         }
