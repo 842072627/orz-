@@ -795,7 +795,8 @@ namespace MyPlanner{
         // commit only cross-episode priority update (internal rollout keeps using local_priority only)
         p = local_priority;
 
-        for (int step = 0; step < num_steps; step++){
+        int step;
+        for (step = 0; step < num_steps; step++){
             if (std::chrono::steady_clock::now() >= episode_deadline){
                 break;
             }
@@ -812,5 +813,9 @@ namespace MyPlanner{
         env->start_states = original_states;
         env->curr_timestep = original_timestep;
         decided = original_decided;
+        static int step_count = 0;
+        int completed_steps = step + 1;
+        if (++step_count <= 5)
+            std::cerr << "[DIAG] plan() completed " << completed_steps << " steps (num_steps=" << num_steps << ")\n";
     }
 }

@@ -49,7 +49,7 @@ inline void apply_game_tuning(RuntimeConfig& config) {
     config.precompute_heuristic = true;
     config.game_platoon_scope = 3;
     config.game_planner_multistep_auto = false;
-    config.game_planner_multistep_auto_count = 25; // 两边都能跑满的值
+    config.game_planner_multistep_auto_count = 8;
     config.game_guide_path_enabled = false;
     config.dist2path_prewarm_enabled = true;
     config.dist2path_prewarm_radius = 3;
