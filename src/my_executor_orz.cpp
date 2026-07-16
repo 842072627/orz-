@@ -1,8 +1,13 @@
-// Default executor baseline implementation.
-// (auto-generated clean copy)
+// Default executor baseline implementation with ORZ direction lock.
+//
+// Direction lock: segment corridor by main_dist, detect E/W flow from
+// planner's 15-step intended final position, lock minority direction.
 
 #include "my_executor_orz.h"
 #include "executor_heat_lock.h"
+#include <queue>
+#include <cmath>
+#include <unordered_set>
 
 namespace MyExecutorOrz{
 
@@ -15,278 +20,385 @@ namespace MyExecutorOrz{
     int window_size;
     bool first_execution = true;
 
-    std::unordered_map<int, int> cell_chain_len;
+    // ── centerline data ──
+    std::vector<int> cj_main_dist;   // [loc] → main axis position or -1
+    std::vector<int> cj_branch_dist; // [loc] → dist from centerline or -1
+    int cj_rows = 0, cj_cols = 0, cj_total = 0;
+    bool cj_ready = false;
 
-void execute_initialize(int preprocess_time_limit, SharedEnvironment* env)
-{
-    window_size = (int)env->min_planner_communication_time / (env->action_time*env->max_counter) + 1;
-    previous_locations.resize(env->num_of_agents, -1);
-}
+    // ── segment data ──
+    struct CjSegment {
+        int min_m, max_m;
+        float east_flow, west_flow;
+        int lock_dir;   // +1=east, -1=west, 0=none
+    };
+    std::vector<CjSegment> cj_segments;
+    constexpr int SEG_STEP = 100;
+    constexpr int BLOCK_RADIUS = 200;
 
-vector<State> execute_process_new_plan(int sync_time_limit, Plan& plan_struct, vector<vector<Action>> & staged_actions, SharedEnvironment* env)
-{
-    if (predicted_states.size() != env->num_of_agents)
-    {
-        predicted_states = env->system_states;
-    }
+    // ── per-agent intent from plan ──
+    std::vector<int> agent_intent; // +1=east, -1=west, 0=unknown/not on corridor
 
-    if (first_execution)
-    {
-        for (int i = 0; i < env->num_of_agents; i++)
-        {
-            if (tpg.find(env->curr_states[i].location) == tpg.end())
-            {
-                tpg[env->curr_states[i].location].push_back(i);
-            }
+    // ── project ──
+    static void project(int loc, int &m, int &b) {
+        if (!cj_ready || loc < 0 || loc >= (int)cj_branch_dist.size()) {
+            m = -1; b = -1; return;
         }
-        first_execution = false;
+        b = cj_branch_dist[loc];
+        m = (b >= 0) ? cj_main_dist[loc] : -1;
     }
 
-    for (int i = 0; i < env->num_of_agents; i++)
-    {
-        previous_locations[i] = env->system_states[i].location;
-    }
+    // ── initialize: compute centerline ──
+    void execute_initialize(int preprocess_time_limit, SharedEnvironment* env) {
+        window_size = (int)env->min_planner_communication_time / (env->action_time*env->max_counter) + 1;
+        previous_locations.resize(env->num_of_agents, -1);
+        agent_intent.assign(env->num_of_agents, 0);
 
-    auto curr_states = predicted_states;
+        // ---- build centerline (from optsvr/GameBalanceOptScheduler) ----
+        cj_rows = env->rows; cj_cols = env->cols; cj_total = cj_rows * cj_cols;
+        cj_main_dist.assign(cj_total, -1);
+        cj_branch_dist.assign(cj_total, -1);
 
-    int moves[4] = {1, env->cols, -1, -env->cols};
-    std::vector<std::vector<Action>> plan = plan_struct.actions;
-
-    for (int timestep = 0; timestep < plan[0].size() && timestep < window_size; timestep++)
-    {
-        for (int i = 0; i < plan.size(); i++)
-        {
-            int new_location = curr_states[i].location;
-            int new_orientation = curr_states[i].orientation;
-
-            if (plan[i][timestep] == Action::FW)
-            {
-                new_location = new_location + moves[curr_states[i].orientation];
-                tpg[new_location].push_back(i);
-            }
-            else if (plan[i][timestep] == Action::CR)
-            {
-                new_orientation = (curr_states[i].orientation + 1) % 4;
-            }
-            else if (plan[i][timestep] == Action::CCR)
-            {
-                new_orientation = (curr_states[i].orientation - 1) % 4;
-                if (new_orientation == -1)
-                    new_orientation = 3;
-            }
-            curr_states[i].location = new_location;
-            curr_states[i].orientation = new_orientation;   
-            curr_states[i].timestep+=1;
-
-            if (plan[i][timestep] != Action::NA && plan[i][timestep] != Action::W)
-            {
-                staged_actions[i].push_back(plan[i][timestep]);
-            }
+        // DTW (distance transform)
+        std::vector<int> dtw(cj_total, INT_MAX/2);
+        { std::queue<int> q;
+          for (int i=0; i<cj_total; i++)
+              if (env->map[i] != 0) { dtw[i]=0; q.push(i); }
+          while (!q.empty()) {
+              int cur=q.front(); q.pop();
+              int nd=dtw[cur]+1;
+              int nb[4]={cur-cj_cols, cur+cj_cols, cur-1, cur+1};
+              for (int n : nb)
+                  if (n>=0 && n<cj_total && env->map[n]==0 && nd<dtw[n])
+                      { dtw[n]=nd; q.push(n); }
+          }
         }
-    }
 
-    //now run a mcp simulation assuming no delays for a windowed size, and obtain the actions
-    heat_lock_update(env, staged_actions);
-    // lock_dir.clear();  // 保留heat lock的方向锁
-
-    // TPG链长dump：每100tick输出
-    {
-        int sys_ts = env->system_timestep;
-        static int last_tpg_dump = -100;
-        if (sys_ts - last_tpg_dump >= 100) {
-            last_tpg_dump = sys_ts;
-            char tfname[256];
-            snprintf(tfname, sizeof(tfname),
-                "C:\\Users\\Administrator\\Desktop\\test-studio-mapf\\big-final-test\\executor-data\\tpg_chain_%d.csv", sys_ts);
-            FILE* tfp = fopen(tfname, "w");
-            if (tfp) {
-                fprintf(tfp, "cell,row,col,chain_len\n");
-                int cols = env->cols;
-                for (auto& kv : cell_chain_len) {
-                    int r = kv.first / cols, c = kv.first % cols;
-                    fprintf(tfp, "%d,%d,%d,%d\n", kv.first, r, c, kv.second);
-                }
-                fclose(tfp);
-            }
+        // find leftmost/rightmost walkable cell
+        int start_loc=-1, goal_loc=-1, best_sc=-1, best_gc=-1, min_x=cj_cols, max_x=0;
+        for (int i=0; i<cj_total; i++) {
+            if (env->map[i]!=0) continue;
+            int c=i%cj_cols;
+            if (c<min_x || (c==min_x && dtw[i]>best_sc))
+                { min_x=c; start_loc=i; best_sc=dtw[i]; }
+            if (c>max_x || (c==max_x && dtw[i]>best_gc))
+                { max_x=c; goal_loc=i; best_gc=dtw[i]; }
         }
-    }
+        if (start_loc<0 || goal_loc<0) { cj_ready=true; return; }
 
-    cell_chain_len.clear();
-    vector<int> action_index(env->num_of_agents,0);
-    curr_states = env->system_states;
-    temp_tpg.clear();
+        // BFS shortest path
+        std::vector<int> came_from(cj_total, -1);
+        { std::queue<int> q; q.push(start_loc); came_from[start_loc]=start_loc;
+          int found=-1;
+          while (!q.empty()) {
+              int cur=q.front(); q.pop();
+              if (cur==goal_loc) { found=cur; break; }
+              int nb[4]={cur-cj_cols, cur+cj_cols, cur-1, cur+1};
+              for (int n : nb)
+                  if (n>=0 && n<cj_total && env->map[n]==0 && came_from[n]==-1)
+                      { came_from[n]=cur; q.push(n); }
+          }
+        }
 
-    for (int t = 0; t < window_size; t++)
-    {
-        auto pre_states = curr_states;
-        for (int i = 0; i < env->num_of_agents; i++)
-        {
-            if (staged_actions[i].size() <= action_index[i])
-            {
-                curr_states[i].timestep++;
-                continue;
-            }
+        // reconstruct path
+        std::vector<int> base_path;
+        { int cur=goal_loc;
+          while (cur!=start_loc) { base_path.push_back(cur); cur=came_from[cur]; }
+          base_path.push_back(start_loc);
+          std::reverse(base_path.begin(), base_path.end());
+        }
 
-            Action curr_action = staged_actions[i][action_index[i]];
-            int curr_location = curr_states[i].location;
-            int curr_orientation = curr_states[i].orientation;
-            int new_location = curr_location;
-            int new_orientation = curr_orientation;
+        // accumulate main_dist along centerline
+        std::unordered_map<int,int> cl_main;
+        int cumul=0;
+        cl_main[base_path[0]]=0;
+        for (size_t i=1; i<base_path.size(); i++) {
+            int r1=base_path[i-1]/cj_cols, c1=base_path[i-1]%cj_cols;
+            int r2=base_path[i]/cj_cols,   c2=base_path[i]%cj_cols;
+            cumul += (int)std::round(std::sqrt((double)((c2-c1)*(c2-c1)+(r2-r1)*(r2-r1))));
+            cl_main[base_path[i]] = cumul;
+        }
 
-            assert(tpg[curr_location].front() == i);
-
-            if (curr_action == Action::FW)
-            {
-                new_location = curr_location + moves[curr_orientation];
-                assert(!tpg[new_location].empty());
-                if (tpg[new_location].front() == i)
-                {
-                    action_index[i]++;
-                }
-                else
-                {
-                    new_location = curr_location;
+        // BFS outward → propagate main_dist & branch_dist
+        std::queue<int> sq;
+        for (size_t i=0; i<base_path.size(); i++) {
+            int loc=base_path[i];
+            cj_branch_dist[loc]=0;
+            cj_main_dist[loc]=cl_main[loc];
+            sq.push(loc);
+            if (i+1 < base_path.size()) {
+                int nloc=base_path[i+1];
+                int r1=loc/cj_cols, c1=loc%cj_cols;
+                int r2=nloc/cj_cols, c2=nloc%cj_cols;
+                int m1=cl_main[loc], m2=cl_main[nloc];
+                for (int k=1; k<20; k++) {
+                    float t=(float)k/20.0f;
+                    int ir=(int)std::round(r1+(r2-r1)*t);
+                    int ic=(int)std::round(c1+(c2-c1)*t);
+                    int iloc=ir*cj_cols+ic;
+                    if (iloc>=0 && iloc<cj_total && env->map[iloc]==0 && cj_branch_dist[iloc]==-1) {
+                        cj_branch_dist[iloc]=0;
+                        cj_main_dist[iloc]=(int)std::round(m1+(m2-m1)*t);
+                        sq.push(iloc);
+                    }
                 }
             }
-            else if (curr_action == Action::CR)
-            {
-                new_orientation = (curr_orientation + 1) % 4;
-                action_index[i]++;
-            }
-            else if (curr_action == Action::CCR)
-            {
-                new_orientation = (curr_orientation - 1) % 4;
-                if (new_orientation == -1)
-                    new_orientation = 3;
-                action_index[i]++;
-            }
-            curr_states[i].location = new_location;
-            curr_states[i].orientation = new_orientation;   
         }
-        for (int i = 0; i < env->num_of_agents; i++)
-        {
-            if (t == 0)
-            {
-                temp_tpg[pre_states[i].location].push_back(i);
-            }
-            if (pre_states[i].location != curr_states[i].location)
-            {
-                assert(tpg[pre_states[i].location].front() == i);
-                tpg[pre_states[i].location].pop_front();
-                temp_tpg[curr_states[i].location].push_back(i);
-            }
+        while (!sq.empty()) {
+            int cur=sq.front(); sq.pop();
+            int nd=cj_branch_dist[cur]+1, nm=cj_main_dist[cur];
+            int nb[4]={cur-cj_cols, cur+cj_cols, cur-1, cur+1};
+            for (int n : nb)
+                if (n>=0 && n<cj_total && env->map[n]==0 && cj_branch_dist[n]==-1)
+                    { cj_branch_dist[n]=nd; cj_main_dist[n]=nm; sq.push(n); }
         }
-    }
-    for (int i = 0; i < env->num_of_agents; i++)
-    {
-        if (action_index[i] < staged_actions[i].size())
-        {
-            staged_actions[i].resize(action_index[i]);
-        }
-    }
-    predicted_states = curr_states;
-    tpg = temp_tpg;
-    return predicted_states;
-}
 
-void execute_next_command(int exec_time_limit, std::vector<ExecutionCommand> & agent_command, SharedEnvironment* env)
-{
-    for (int i = 0; i < env->system_states.size(); i++)
-    {
-        int prev_location = previous_locations[i];
-        int curr_location = env->system_states[i].location;
-        assert(tpg[prev_location].front() == i);
-        if (prev_location != curr_location && tpg[prev_location].front() == i)
-        {
-            tpg[prev_location].pop_front();
-            previous_locations[i] = curr_location;
+        // init segments
+        int nseg = cumul / SEG_STEP + 1;
+        cj_segments.resize(nseg);
+        for (int i=0; i<nseg; i++) {
+            cj_segments[i].min_m = i*SEG_STEP;
+            cj_segments[i].max_m = (i+1)*SEG_STEP;
         }
+        cj_ready = true;
     }
 
-    for (int i = 0; i < env->system_states.size(); i++)
-    {
-        mcp(i, agent_command, env);
-    }
-}
-
-bool mcp(int agent_id, std::vector<ExecutionCommand> & agent_command, SharedEnvironment* env)
-{
-    if (env->staged_actions[agent_id].empty())
-    {
-        agent_command[agent_id] = ExecutionCommand::STOP;
-        return false;
-    }
-    else if (env->staged_actions[agent_id].front() != Action::FW) 
-    {
-        agent_command[agent_id] = ExecutionCommand::GO;
-        return false;
-    }
-    else
-    {
+    // ── simulate plan steps forward to get intended direction ──
+    static int compute_plan_intent(int agent_id, const vector<Action>& actions, const State& start, SharedEnvironment* env) {
         int moves[4] = {1, env->cols, -1, -env->cols};
-        int curr_location = env->system_states[agent_id].location;
-        int curr_orientation = env->system_states[agent_id].orientation;
-        int next_location = curr_location + moves[curr_orientation];
+        int loc = start.location;
+        int ori = start.orientation;
+        for (size_t t=0; t<actions.size(); t++) {
+            if (actions[t]==Action::FW) loc += moves[ori];
+            else if (actions[t]==Action::CR) ori = (ori+1)%4;
+            else if (actions[t]==Action::CCR) ori = (ori-1+4)%4;
+        }
+        // compare projected main_dist of final vs start
+        int sm=-1,sb=-1; project(start.location,sm,sb);
+        int em=-1,eb=-1; project(loc,em,eb);
+        if (sm<0 || em<0) return 0;
+        return (em > sm) ? 1 : (em < sm) ? -1 : 0;
+    }
 
-        // 先查TPG：队首直接放行（避免锁死队头）
-        bool tpg_clear = tpg[next_location].empty() || tpg[next_location].front() == agent_id;
+    // ── process_new_plan ──
+    vector<State> execute_process_new_plan(int sync_time_limit, Plan& plan_struct, vector<vector<Action>>& staged_actions, SharedEnvironment* env) {
+        if (predicted_states.size() != env->num_of_agents)
+            predicted_states = env->system_states;
+        if (first_execution) {
+            for (int i=0; i<env->num_of_agents; i++)
+                if (tpg.find(env->curr_states[i].location)==tpg.end())
+                    tpg[env->curr_states[i].location].push_back(i);
+            first_execution = false;
+        }
+        for (int i=0; i<env->num_of_agents; i++)
+            previous_locations[i] = env->system_states[i].location;
 
-        // 方向锁检查：只拦非队首的逆行agent
-        if (!tpg_clear) {
-            auto lock_it = lock_dir.find(next_location);
-            if (lock_it != lock_dir.end() && lock_it->second != -1) {
-                int entering_dir = (curr_orientation + 2) % 4;
-                if (entering_dir != lock_it->second) {
-                    // 逆行 → STOP
-                    agent_command[agent_id] = ExecutionCommand::STOP;
-                    return false;
+        auto curr_states = predicted_states;
+        int moves[4] = {1, env->cols, -1, -env->cols};
+        std::vector<std::vector<Action>> plan = plan_struct.actions;
+        for (int timestep=0; timestep<(int)plan[0].size() && timestep<window_size; timestep++) {
+            for (size_t i=0; i<plan.size(); i++) {
+                int nl=curr_states[i].location, no=curr_states[i].orientation;
+                if (plan[i][timestep]==Action::FW) {
+                    nl += moves[curr_states[i].orientation];
+                    tpg[nl].push_back(i);
+                } else if (plan[i][timestep]==Action::CR) no=(curr_states[i].orientation+1)%4;
+                else if (plan[i][timestep]==Action::CCR) { no=(curr_states[i].orientation-1)%4; if(no==-1)no=3; }
+                curr_states[i].location=nl; curr_states[i].orientation=no; curr_states[i].timestep++;
+                if (plan[i][timestep]!=Action::NA && plan[i][timestep]!=Action::W)
+                    staged_actions[i].push_back(plan[i][timestep]);
+            }
+        }
+
+        heat_lock_update(env, staged_actions);
+
+        // ── compute agent intent from raw plan (15 steps, conflict-free) ──
+        agent_intent.assign(env->num_of_agents, 0);
+        for (int i=0; i<env->num_of_agents; i++) {
+            agent_intent[i] = compute_plan_intent(i, staged_actions[i], env->system_states[i], env);
+        }
+
+        // MCP simulation
+        vector<int> action_index(env->num_of_agents,0);
+        curr_states = env->system_states; temp_tpg.clear();
+        for (int t=0; t<window_size; t++) {
+            auto pre_states = curr_states;
+            for (int i=0; i<env->num_of_agents; i++) {
+                if (staged_actions[i].size() <= action_index[i]) { curr_states[i].timestep++; continue; }
+                Action ca = staged_actions[i][action_index[i]];
+                int cl=curr_states[i].location, co=curr_states[i].orientation;
+                int nl=cl, no=co;
+                auto tpg_it=tpg.find(cl);
+                if (tpg_it==tpg.end() || tpg_it->second.empty() || tpg_it->second.front()!=i) { curr_states[i].timestep++; continue; }
+                if (ca==Action::FW) {
+                    nl=cl+moves[co];
+                    auto tit=tpg.find(nl);
+                    if (tit!=tpg.end() && !tit->second.empty() && tit->second.front()==i) action_index[i]++; else nl=cl;
+                } else if (ca==Action::CR) { no=(co+1)%4; action_index[i]++; }
+                else if (ca==Action::CCR) { no=(co-1+4)%4; action_index[i]++; }
+                curr_states[i].location=nl; curr_states[i].orientation=no;
+            }
+            for (int i=0; i<env->num_of_agents; i++) {
+                if (t==0) temp_tpg[pre_states[i].location].push_back(i);
+                if (pre_states[i].location!=curr_states[i].location) {
+                    auto tpg_it2=tpg.find(pre_states[i].location);
+                    if (tpg_it2!=tpg.end() && !tpg_it2->second.empty() && tpg_it2->second.front()==i) {
+                        tpg_it2->second.pop_front();
+                        temp_tpg[curr_states[i].location].push_back(i);
+                    }
+                }
+            }
+        }
+        for (int i=0; i<env->num_of_agents; i++)
+            if (action_index[i] < (int)staged_actions[i].size())
+                staged_actions[i].resize(action_index[i]);
+        predicted_states = curr_states;
+        tpg = temp_tpg;
+
+        // dump intent
+        { int sys_ts=env->system_timestep;
+          static int last_d=-100;
+          if (sys_ts-last_d>=100) { last_d=sys_ts;
+              int e=0,w=0; for (int i=0; i<(int)agent_intent.size(); i++) { if(agent_intent[i]>0)e++; else if(agent_intent[i]<0)w++; }
+              fprintf(stderr, "[DBG] t=%d intent-e=%d intent-w=%d/%d\n", sys_ts, e, w, (int)agent_intent.size());
+          }
+        }
+
+        return predicted_states;
+    }
+
+    // ── every tick ──
+    void execute_next_command(int exec_time_limit, std::vector<ExecutionCommand>& agent_command, SharedEnvironment* env) {
+        // update TPG
+        if (env->system_timestep > 0) {
+            for (int i=0; i<env->system_states.size(); i++) {
+                int pl=previous_locations[i], cl=env->system_states[i].location;
+                auto it=tpg.find(pl);
+                if (it!=tpg.end() && !it->second.empty() && it->second.front()==i) {
+                    if (pl!=cl) { it->second.pop_front(); previous_locations[i]=cl; }
+                } else { previous_locations[i]=cl; }
+            }
+        }
+
+        // ── compute flow per segment from agent_intent ──
+        if (cj_ready) {
+            for (auto& seg : cj_segments) seg.east_flow=0, seg.west_flow=0;
+            for (int i=0; i<env->system_states.size(); i++) {
+                int cm, cb; project(env->system_states[i].location, cm, cb);
+                if (cm<0 || agent_intent[i]==0) continue;
+                int si = cm / SEG_STEP;
+                if (si>=0 && si<(int)cj_segments.size()) {
+                    if (agent_intent[i]>0) cj_segments[si].east_flow += 1.0f;
+                    else cj_segments[si].west_flow += 1.0f;
+                }
+            }
+
+            // lock decision + propagation
+            const int PROPAGATE_DIST = 300;
+            const float MIN_FLOW = 1.0f;
+            
+            // first pass: each segment judges independently
+            for (auto& seg : cj_segments) {
+                if (seg.east_flow >= MIN_FLOW && seg.west_flow >= MIN_FLOW) {
+                    seg.lock_dir = (seg.east_flow >= seg.west_flow) ? -1 : 1;
+                } else {
+                    seg.lock_dir = 0;
+                }
+            }
+            
+            // second pass: propagate lock_dir both ways
+            for (int si=0; si<(int)cj_segments.size(); si++) {
+                if (cj_segments[si].lock_dir == 0) continue;
+                int ld = cj_segments[si].lock_dir;
+                // propagate east (higher main_dist)
+                for (int sj=si+1; sj<(int)cj_segments.size(); sj++) {
+                    int d = cj_segments[sj].max_m - cj_segments[si].min_m;
+                    if (d > PROPAGATE_DIST) break;
+                    if (cj_segments[sj].lock_dir == 0 || cj_segments[sj].lock_dir == ld)
+                        cj_segments[sj].lock_dir = ld;
+                    else
+                        break; // opposite direction lock encountered → stop
+                }
+                // propagate west (lower main_dist)
+                for (int sj=si-1; sj>=0; sj--) {
+                    int d = cj_segments[si].max_m - cj_segments[sj].min_m;
+                    if (d > PROPAGATE_DIST) break;
+                    if (cj_segments[sj].lock_dir == 0 || cj_segments[sj].lock_dir == ld)
+                        cj_segments[sj].lock_dir = ld;
+                    else
+                        break;
+                }
+            }
+
+            // dump
+            if (env->system_timestep % 500 == 0) {
+                char lf[256];
+                snprintf(lf, sizeof(lf), "C:\\Users\\Administrator\\Desktop\\test-studio-mapf\\big-final-test\\executor-data\\seglock_%d.csv", env->system_timestep);
+                FILE* lfp = fopen(lf, "w");
+                if (lfp) {
+                    fprintf(lfp, "seg_id,min_m,max_m,east_flow,west_flow,lock_dir\n");
+                    for (int si=0; si<(int)cj_segments.size(); si++) {
+                        auto& s=cj_segments[si];
+                        fprintf(lfp, "%d,%d,%d,%.4f,%.4f,%d\n", si, s.min_m, s.max_m, s.east_flow, s.west_flow, s.lock_dir);
+                    }
+                    fclose(lfp);
                 }
             }
         }
 
-        if (tpg_clear)
-        {
+        // ── mcp ──
+        for (int i=0; i<env->system_states.size(); i++)
+            mcp(i, agent_command, env);
+    }
+
+    bool mcp(int agent_id, std::vector<ExecutionCommand>& agent_command, SharedEnvironment* env) {
+        if (env->staged_actions[agent_id].empty()) {
+            agent_command[agent_id] = ExecutionCommand::STOP;
+            return false;
+        }
+        if (env->staged_actions[agent_id].front() != Action::FW) {
+            agent_command[agent_id] = ExecutionCommand::GO;
+            return false;
+        }
+
+        int moves[4] = {1, env->cols, -1, -env->cols};
+        int loc = env->system_states[agent_id].location;
+        int ori = env->system_states[agent_id].orientation;
+        int nloc = loc + moves[ori];
+        if (nloc < 0 || nloc >= cj_total || env->map[nloc]) {
+            agent_command[agent_id] = ExecutionCommand::STOP;
+            return false;
+        }
+
+        // direction lock check
+        if (cj_ready) {
+            int cm, cb; project(loc, cm, cb);
+            if (cm >= 0 && agent_intent[agent_id] != 0) {
+                int si = cm / SEG_STEP;
+                if (si>=0 && si<(int)cj_segments.size() && cj_segments[si].lock_dir != 0) {
+                    if (agent_intent[agent_id] == cj_segments[si].lock_dir) {
+                        // agent is going IN the locked direction
+                        // block if agent is NOT yet inside the segment and within radius
+                        bool inside = (cm >= cj_segments[si].min_m && cm <= cj_segments[si].max_m);
+                        int seg_boundary = (cj_segments[si].lock_dir > 0) 
+                            ? cj_segments[si].min_m : cj_segments[si].max_m;
+                        int dist = std::abs(cm - seg_boundary);
+                        if (!inside && dist <= BLOCK_RADIUS) {
+                            agent_command[agent_id] = ExecutionCommand::STOP;
+                            return false;
+                        }
+                    }
+                }
+            }
+        }
+
+        // TPG check
+        if (tpg[nloc].empty() || tpg[nloc].front() == agent_id) {
             agent_command[agent_id] = ExecutionCommand::GO;
             return true;
         }
-        else
-        {
-            agent_command[agent_id] = ExecutionCommand::STOP;
-            // TPG链追踪
-            {
-                int chain = 1;
-                int blocker = tpg[next_location].front();
-                int cur_blk = blocker;
-                int visited[20000] = {0};
-                int visited_count = 0;
-                visited[visited_count++] = agent_id;
-                visited[visited_count++] = cur_blk;
-                while (chain < 20 && cur_blk >= 0 && cur_blk < (int)env->system_states.size()) {
-                    int blk_loc = env->system_states[cur_blk].location;
-                    int blk_ori = env->system_states[cur_blk].orientation;
-                    int blk_next = blk_loc + moves[blk_ori];
-                    if (blk_next >= 0 && blk_next < env->rows * env->cols && !env->map[blk_next]) {
-                        auto it = tpg.find(blk_next);
-                        if (it != tpg.end() && !it->second.empty() && it->second.front() != cur_blk) {
-                            cur_blk = it->second.front();
-                            bool seen = false;
-                            for (int v = 0; v < visited_count; v++) {
-                                if (visited[v] == cur_blk) { seen = true; break; }
-                            }
-                            if (seen) break;
-                            visited[visited_count++] = cur_blk;
-                            chain++;
-                            continue;
-                        }
-                    }
-                    break;
-                }
-                if (chain > cell_chain_len[next_location])
-                    cell_chain_len[next_location] = chain;
-            }
-            return false;
-        }
+        agent_command[agent_id] = ExecutionCommand::STOP;
+        return false;
     }
-}
 
-}
+}  // namespace MyExecutorOrz
