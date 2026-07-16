@@ -87,15 +87,18 @@ vector<State> execute_process_new_plan(int sync_time_limit, Plan& plan_struct, v
 
     //now run a mcp simulation assuming no delays for a windowed size, and obtain the actions
     heat_lock_update(env, staged_actions);
-    lock_dir.clear();
+    // lock_dir.clear();  // 保留heat lock的方向锁
 
-    // TPG链长dump
+    // TPG链长dump：每100tick输出
     {
         int sys_ts = env->system_timestep;
-        static int tpg_dumped = 0;
-        if (sys_ts > 1900 && !tpg_dumped) {
-            tpg_dumped = 1;
-            FILE* tfp = fopen("C:\\Users\\Administrator\\Desktop\\test-studio-mapf\\big-final-test\\executor-data\\tpg_chain_2000.csv", "w");
+        static int last_tpg_dump = -100;
+        if (sys_ts - last_tpg_dump >= 100) {
+            last_tpg_dump = sys_ts;
+            char tfname[256];
+            snprintf(tfname, sizeof(tfname),
+                "C:\\Users\\Administrator\\Desktop\\test-studio-mapf\\big-final-test\\executor-data\\tpg_chain_%d.csv", sys_ts);
+            FILE* tfp = fopen(tfname, "w");
             if (tfp) {
                 fprintf(tfp, "cell,row,col,chain_len\n");
                 int cols = env->cols;
@@ -225,7 +228,23 @@ bool mcp(int agent_id, std::vector<ExecutionCommand> & agent_command, SharedEnvi
         int curr_orientation = env->system_states[agent_id].orientation;
         int next_location = curr_location + moves[curr_orientation];
 
-        if (tpg[next_location].empty() || tpg[next_location].front() == agent_id)
+        // 先查TPG：队首直接放行（避免锁死队头）
+        bool tpg_clear = tpg[next_location].empty() || tpg[next_location].front() == agent_id;
+
+        // 方向锁检查：只拦非队首的逆行agent
+        if (!tpg_clear) {
+            auto lock_it = lock_dir.find(next_location);
+            if (lock_it != lock_dir.end() && lock_it->second != -1) {
+                int entering_dir = (curr_orientation + 2) % 4;
+                if (entering_dir != lock_it->second) {
+                    // 逆行 → STOP
+                    agent_command[agent_id] = ExecutionCommand::STOP;
+                    return false;
+                }
+            }
+        }
+
+        if (tpg_clear)
         {
             agent_command[agent_id] = ExecutionCommand::GO;
             return true;

@@ -69,11 +69,14 @@ void heat_lock_update(SharedEnvironment* env, const std::vector<std::vector<Acti
     // ---- 诊断：逐timestep重叠检测 ----
     {
         int sys_ts = env->system_timestep;
-        // 全图格子预定数dump
-        static int dir_dumped = 0;
-        if (sys_ts > 1900 && !dir_dumped) {
-            dir_dumped = 1;
-            FILE* dfp = fopen("C:\\\\Users\\\\Administrator\\\\Desktop\\\\test-studio-mapf\\\\big-final-test\\\\executor-data\\\\cell_flow_2000.csv", "w");
+        // 全图格子预定数dump：每100tick输出
+        static int last_dump_tick = -100;
+        if (sys_ts - last_dump_tick >= 100) {
+            last_dump_tick = sys_ts;
+            char fname[256];
+            snprintf(fname, sizeof(fname),
+                "C:\\Users\\Administrator\\Desktop\\test-studio-mapf\\big-final-test\\executor-data\\cell_flow_%d.csv", sys_ts);
+            FILE* dfp = fopen(fname, "w");
             if (dfp) {
                 fprintf(dfp, "cell,row,col,flow_e,flow_s,flow_w,flow_n,total\n");
                 int cols = env->cols;

@@ -19,7 +19,7 @@ inline HeatLockParams get_executor_params(const std::string& map_name) {
     
     // orz：长路图，12步预判+衰减，提前识别远端拥堵
     if (map_name.find("orz") != std::string::npos) {
-        return {12, 0.85f, 999.0f, false, true, false, 999.0f};
+        return {12, 0.85f, 3.0f, true, true, false, 0.0f};
     }
     
     // iron harvest：超大图，12步+衰减，远距离分流
