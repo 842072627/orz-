@@ -313,9 +313,16 @@ namespace MyExecutorOrz{
             const int PROPAGATE_DIST = 300;
             const float MIN_FLOW = 1.0f;
             
-            // first pass: each segment judges independently
+            // first pass: keep existing locks until locked direction clears
             for (auto& seg : cj_segments) {
-                if (seg.east_flow >= MIN_FLOW && seg.west_flow >= MIN_FLOW) {
+                if (seg.lock_dir != 0) {
+                    float locked_flow = (seg.lock_dir > 0) ? seg.east_flow : seg.west_flow;
+                    if (locked_flow >= 1.0f) {
+                        continue; // keep existing lock
+                    }
+                }
+                // no lock or locked direction cleared → judge fresh
+                if (seg.east_flow >= 1.0f && seg.west_flow >= 1.0f) {
                     seg.lock_dir = (seg.east_flow >= seg.west_flow) ? -1 : 1;
                 } else {
                     seg.lock_dir = 0;
@@ -388,22 +395,22 @@ namespace MyExecutorOrz{
             return false;
         }
 
-        // direction lock check
+        // direction lock check (only block agents OUTSIDE the locked segment)
         if (cj_ready) {
+            int cm, cb; project(loc, cm, cb);
             int nm, nb; project(nloc, nm, nb);
-            if (nm >= 0 && agent_intent[agent_id] != 0) {
+            if (cm >= 0 && nm >= 0 && agent_intent[agent_id] != 0) {
                 int si = nm / SEG_STEP;
                 if (si >= 0 && si < (int)cj_segments.size() && cj_segments[si].lock_dir != 0
                     && agent_intent[agent_id] == cj_segments[si].lock_dir) {
-                    // heading into a locked segment → STOP; remove from TPG queue so others can pass
-                    auto tit=tpg.find(nloc);
-                    if (tit!=tpg.end() && !tit->second.empty()) {
-                        for (auto it=tit->second.begin(); it!=tit->second.end(); ++it) {
-                            if (*it==agent_id) { tit->second.erase(it); break; }
-                        }
+                    // agent moving in locked direction
+                    bool inside_seg = (cm >= cj_segments[si].min_m && cm <= cj_segments[si].max_m);
+                    if (!inside_seg) {
+                        // agent is outside the segment → STOP
+                        agent_command[agent_id] = ExecutionCommand::STOP;
+                        return false;
                     }
-                    agent_command[agent_id] = ExecutionCommand::STOP;
-                    return false;
+                    // agent is inside the segment → let it exit (will clear the lock)
                 }
             }
         }
