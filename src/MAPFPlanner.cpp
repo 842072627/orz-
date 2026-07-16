@@ -29,7 +29,8 @@ void MAPFPlanner::plan(int time_limit, Plan& plan) {
         std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - env->plan_start_time).count() -
         DefaultPlanner::PLANNER_TIMELIMIT_TOLERANCE;
-    const int action_ticks = std::max(1, env->action_time * env->max_counter);
-    const int num_steps = env->min_planner_communication_time / action_ticks + 1;
+    const int num_steps = optsvr::cfg().game_planner_multistep_auto
+        ? (env->min_planner_communication_time / std::max(1, env->action_time * env->max_counter) + 1)
+        : optsvr::cfg().game_planner_multistep_auto_count;
     game_planner.plan(limit, plan.actions, env, num_steps);
 }

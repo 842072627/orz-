@@ -42,6 +42,8 @@ struct RuntimeConfig {
     int game_distance_score_mode = 3;
     float game_pickup_weight = 2.0f;
     bool game_use_bfs_distance = true;
+    bool game_planner_multistep_auto = false;
+    int game_planner_multistep_auto_count = 25;
     bool game_require_bfs_matrix = true;   // true=矩阵未就绪时终止
     float game_flow_soft_penalty_base = 10.0f;
     int game_global_cand_topk = 32;
@@ -138,6 +140,8 @@ struct RuntimeConfig {
         OVERRIDE_INT("GAME_DISTANCE_SCORE_MODE", game_distance_score_mode);
         OVERRIDE_FLOAT("GAME_PICKUP_WEIGHT", game_pickup_weight);
         OVERRIDE_BOOL("GAME_USE_BFS_DISTANCE", game_use_bfs_distance);
+        OVERRIDE_BOOL("GAME_PLANNER_MULTISTEP_AUTO", game_planner_multistep_auto);
+        OVERRIDE_INT("GAME_PLANNER_MULTISTEP_COUNT", game_planner_multistep_auto_count);
         OVERRIDE_BOOL("GAME_REQUIRE_BFS_MATRIX", game_require_bfs_matrix);
         OVERRIDE_FLOAT("GAME_FLOW_SOFT_PENALTY_BASE", game_flow_soft_penalty_base);
         OVERRIDE_INT("GAME_GLOBAL_CAND_TOPK", game_global_cand_topk);
