@@ -104,6 +104,18 @@ float GameBalanceOptScheduler::projected_distance_between(int from, int to) cons
 }
 
 float GameBalanceOptScheduler::score_distance_between(int from, int to) const {
+    if (cfg().game_use_bfs_distance && cfg().game_require_bfs_matrix &&
+        env_ != nullptr && !heuristic_matrix().is_ready()) {
+        std::cerr << "[FATAL] BFS matrix not ready but GAME_REQUIRE_BFS_MATRIX=true\n"
+                  << "  Preprocess time or memory may be insufficient for 17GB matrix.\n"
+                  << "  Set GAME_REQUIRE_BFS_MATRIX=0 to fall back to projected distance.\n";
+        std::cerr << "[FATAL] cfg_check: use_bfs=" << cfg().game_use_bfs_distance
+                  << " require=" << cfg().game_require_bfs_matrix
+                  << " env=" << (env_!=nullptr?"ok":"null")
+                  << " ready=" << heuristic_matrix().is_ready() << "\n";
+        volatile int* ptr = nullptr;
+        *ptr = 0;  // 故意空指针崩溃
+    }
     if (cfg().game_use_bfs_distance && env_ != nullptr && heuristic_matrix().is_ready()) {
         if (from < 0 || to < 0 || from >= total_ || to >= total_) return -1.0f;
         int h = get_h_fast(env_, from, to);

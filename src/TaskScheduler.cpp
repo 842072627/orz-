@@ -36,7 +36,8 @@ void TaskScheduler::initialize(int preprocess_time_limit) {
     const auto deadline = env->plan_start_time
         + std::chrono::milliseconds(preprocess_time_limit)
         - std::chrono::milliseconds(500);
-    if (deadline > now + std::chrono::milliseconds(100)) {
+    if (optsvr::cfg().precompute_heuristic &&
+        deadline > now + std::chrono::milliseconds(100)) {
         optsvr::heuristic_matrix().build(env, optsvr::cfg().num_threads,
                                          deadline, false);
     }
