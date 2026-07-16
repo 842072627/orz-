@@ -43,6 +43,7 @@ namespace MyExecutorOrz{
 
     // ── per-agent intent from plan (debug only) ──
     std::vector<int> agent_intent; // +1=east, -1=west, 0=unknown/not on corridor
+    bool cj_any_capped = false; // true if any segment is capped (optimization)
 
     // ── project ──
     static void project(int loc, int &m, int &b) {
@@ -329,6 +330,8 @@ namespace MyExecutorOrz{
             for (auto& seg : cj_segments)
                 if (seg.labeled_cells > 0 && seg.agents_inside > CAP_THRESH)
                     seg.capped = true;
+            cj_any_capped = false;
+            for (auto& seg : cj_segments) if (seg.capped) { cj_any_capped = true; break; }
 
             // diagnostics
             { static int last_p=-1; if (env->system_timestep%200==0 && env->system_timestep!=last_p) { last_p=env->system_timestep;
@@ -364,7 +367,7 @@ namespace MyExecutorOrz{
         }
 
         // flow control: block agents close to capped segment, not on labeled cell
-        if (cj_ready) {
+        if (cj_ready && cj_any_capped) {
             int nm = nloc, cm = loc;
             if (nm < 0 || nm >= (int)cj_branch_dist.size() || cm < 0 || cm >= (int)cj_branch_dist.size()) return true;
             int nb = cj_branch_dist[nm];
