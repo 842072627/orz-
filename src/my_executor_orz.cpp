@@ -390,11 +390,13 @@ namespace MyExecutorOrz{
         if (cj_ready && cj_any_capped) {
             int si = (nloc >= 0 && nloc < cj_total) ? cell_seg[nloc] : -1;
             if (si >= 0 && si < (int)cj_segments.size() && cj_segments[si].capped) {
-                if (orz_sign[loc]) { agent_command[agent_id] = ExecutionCommand::GO; return true; }
-                int cm = cj_main_dist[loc];
-                if (cm >= 0 && cm >= cj_segments[si].block_min && cm <= cj_segments[si].block_max) {
-                    agent_command[agent_id] = ExecutionCommand::STOP;
-                    return false;
+                if (orz_sign[loc]) { agent_command[agent_id] = ExecutionCommand::GO; }
+                // block agents outside labeled cells within interception range
+                else { int cm = cj_main_dist[loc];
+                    if (cm >= 0 && cm >= cj_segments[si].block_min && cm <= cj_segments[si].block_max) {
+                        agent_command[agent_id] = ExecutionCommand::STOP;
+                        return false;
+                    }
                 }
             }
         }
