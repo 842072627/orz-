@@ -33,6 +33,7 @@ namespace MyExecutorOrz{
         int labeled_cells;  // number of labeled cells in this segment (constant)
         int agents_inside;   // agent count on labeled cells in segment
         bool capped;         // over capacity
+        int block_min, block_max; // precomputed interception range (main_dist)
     };
     std::vector<CjSegment> cj_segments;
     constexpr int SEG_STEP = 100;
@@ -44,6 +45,7 @@ namespace MyExecutorOrz{
     // ── per-agent intent from plan (debug only) ──
     std::vector<int> agent_intent; // +1=east, -1=west, 0=unknown/not on corridor
     bool cj_any_capped = false; // true if any segment is capped (optimization)
+    std::vector<int> cell_seg; // [loc] → segment id for ALL walkable cells
 
     // ── project ──
     static void project(int loc, int &m, int &b) {
@@ -193,6 +195,20 @@ namespace MyExecutorOrz{
         // store in global for per-tick use
         orz_sign = std::move(orz_signed);
 
+        // propagate segment IDs to ALL walkable cells (not just corridor-connected)
+        cell_seg.assign(cj_total, -1);
+        { std::queue<int> q;
+          for (int i=0; i<cj_total; i++)
+              if (cj_branch_dist[i] >= 0) { cell_seg[i]=cj_main_dist[i]/SEG_STEP; q.push(i); }
+          while (!q.empty()) {
+              int cur=q.front(); q.pop();
+              int nb[4]={cur-cj_cols, cur+cj_cols, cur-1, cur+1};
+              for (int n : nb)
+                  if (n>=0 && n<cj_total && env->map[n]==0 && cell_seg[n]==-1)
+                      { cell_seg[n]=cell_seg[cur]; q.push(n); }
+          }
+        }
+
         cj_ready = true;
     }
 
@@ -327,9 +343,13 @@ namespace MyExecutorOrz{
                     cj_segments[si].agents_inside++;
             }
             constexpr int CAP_THRESH = 10;
+            constexpr int CAP_DIST = 500;
             for (auto& seg : cj_segments)
-                if (seg.labeled_cells > 0 && seg.agents_inside > CAP_THRESH)
+                if (seg.labeled_cells > 0 && seg.agents_inside > CAP_THRESH) {
                     seg.capped = true;
+                    seg.block_min = seg.min_m - CAP_DIST;
+                    seg.block_max = seg.max_m + CAP_DIST;
+                } else { seg.capped = false; }
             cj_any_capped = false;
             for (auto& seg : cj_segments) if (seg.capped) { cj_any_capped = true; break; }
 
@@ -366,20 +386,15 @@ namespace MyExecutorOrz{
             return false;
         }
 
-        // flow control: block agents within 300 of capped segment, not on labeled cell
+        // flow control: block agents outside capped segment's precomputed range
         if (cj_ready && cj_any_capped) {
-            int si = (nloc >= 0 && nloc < cj_total && cj_branch_dist[nloc] >= 0) ? cj_main_dist[nloc] / SEG_STEP : -1;
-            if (si >= 0 && si < (int)cj_segments.size() && cj_segments[si].labeled_cells > 0 && cj_segments[si].capped) {
+            int si = (nloc >= 0 && nloc < cj_total) ? cell_seg[nloc] : -1;
+            if (si >= 0 && si < (int)cj_segments.size() && cj_segments[si].capped) {
                 if (orz_sign[loc]) { agent_command[agent_id] = ExecutionCommand::GO; return true; }
-                // distance check
-                { int cm = cj_main_dist[loc]; int cb = cj_branch_dist[loc];
-                  if (cb >= 0 && cm >= 0) {
-                      int sc = (cj_segments[si].min_m + cj_segments[si].max_m) / 2;
-                      if (std::abs(cm - sc) + cb <= 300) {
-                          agent_command[agent_id] = ExecutionCommand::STOP;
-                          return false;
-                      }
-                  }
+                int cm = cj_main_dist[loc];
+                if (cm >= 0 && cm >= cj_segments[si].block_min && cm <= cj_segments[si].block_max) {
+                    agent_command[agent_id] = ExecutionCommand::STOP;
+                    return false;
                 }
             }
         }
