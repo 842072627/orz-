@@ -371,7 +371,7 @@ namespace MyExecutorOrz{
             int si = (nloc >= 0 && nloc < cj_total && cj_branch_dist[nloc] >= 0) ? cj_main_dist[nloc] / SEG_STEP : -1;
             if (si >= 0 && si < (int)cj_segments.size() && cj_segments[si].labeled_cells > 0 && cj_segments[si].capped) {
                 if (orz_sign[loc]) { agent_command[agent_id] = ExecutionCommand::GO; return true; }
-                // distance check (only when agent has valid project data)
+                // distance check
                 { int cm = cj_main_dist[loc]; int cb = cj_branch_dist[loc];
                   if (cb >= 0 && cm >= 0) {
                       int sc = (cj_segments[si].min_m + cj_segments[si].max_m) / 2;
