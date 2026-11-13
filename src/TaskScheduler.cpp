@@ -5,6 +5,14 @@
 #include "const.h"
 #include "config.h"
 #include "strategy_centerline.h"
+#include <cstdlib>
+// PAPER-ONLY: runtime switch to the official default scheduler in the SAME binary.
+// ORZ_SCHEDULER_DEFAULT=1  -> use DefaultPlanner::schedule_* (official baseline)
+static inline bool paper_use_default_sched() {
+    static const char* e = std::getenv("ORZ_SCHEDULER_DEFAULT");
+    return e != nullptr && *e != '\0' && std::atoi(e) != 0;
+}
+
 #include "pibt_lock.h"
 
 
@@ -62,7 +70,7 @@ void TaskScheduler::initialize(int preprocess_time_limit)
     //     return;
     // }
 
-    if (has_custom_strategy(env))
+    if (has_custom_strategy(env) && !paper_use_default_sched())
     {
         std::string strat = get_orz_strategy();
         if (strat == "centerline")
@@ -90,7 +98,7 @@ void TaskScheduler::plan(int time_limit, std::vector<int> &proposed_schedule)
         DefaultPlanner::schedule_plan(limit, proposed_schedule, env);
         return;
     }
-    if (has_custom_strategy(env))
+    if (has_custom_strategy(env) && !paper_use_default_sched())
     {
         std::string strat = get_orz_strategy();
         if (strat == "centerline")

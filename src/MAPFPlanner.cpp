@@ -19,7 +19,7 @@ void MAPFPlanner::initialize(int preprocess_time_limit)
     // use the remaining entry time limit (after task scheduling) for path planning, -PLANNER_TIMELIMIT_TOLERANCE for timing error tolerance;
     int limit = preprocess_time_limit - std::chrono::duration_cast<milliseconds>(std::chrono::steady_clock::now() - env->plan_start_time).count() - DefaultPlanner::PLANNER_TIMELIMIT_TOLERANCE;
     if (is_ORZ(env))
-        MyPlanner::initialize(limit, env);
+        DefaultPlanner::initialize(limit, env);
     else
         DefaultPlanner::initialize(limit, env);
     return;
@@ -47,6 +47,6 @@ void MAPFPlanner::plan(int time_limit, Plan &plan)
     int limit = time_limit - std::chrono::duration_cast<milliseconds>(std::chrono::steady_clock::now() - env->plan_start_time).count() - DefaultPlanner::PLANNER_TIMELIMIT_TOLERANCE;
 
     int min_plan_steps = (int)(env->min_planner_communication_time / (env->action_time * env->max_counter)) + 1;
-    MyPlanner::plan(limit, plan.actions, env, min_plan_steps);
+    DefaultPlanner::plan(limit, plan.actions, env, min_plan_steps);
     return;
 }
