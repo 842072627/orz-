@@ -447,9 +447,13 @@ void plan(int limit, SharedEnvironment* env, std::vector<int>& proposed_schedule
     if (free_agents.empty()) return;
 
     // Phase 2: Greedy assignment
+    // 论文版：Phase 2 无条件执行，保证同一配置运行结果逐位可复现。
+    // 原实现以 steady_clock 判断是否超时、超时则整段跳过，机器负载不同会导致
+    // 某些 tick 跳过 Phase 2，使吞吐出现 5%–9% 的运行间波动，参数/消融无法归因。
+    // 实测每步端到端约 90 ms，远低于 1 s 预算，Phase 2 总是来得及，故去掉该闸门。
     std::unordered_map<int, std::vector<int>> tasks_by_zone;
     int phase2_assigned = 0;
-    if (!free_agents.empty() && !free_tasks.empty() && std::chrono::steady_clock::now() <= endtime) {
+    if (!free_agents.empty() && !free_tasks.empty()) {
         for (int tid : free_tasks) {
             if (env->task_pool.count(tid) && !env->task_pool[tid].locations.empty())
                 tasks_by_zone[zid(env->task_pool[tid].locations[0], cols)].push_back(tid);
