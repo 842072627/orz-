@@ -56,7 +56,9 @@ inline bool has_custom_strategy(SharedEnvironment* env) {
 #define USE_DENSITY_EXCLUDE_IDLE  false    // 排除无任务/被截停agent的密度贡献
 
 // ========== Hot zone exemption ==========
-#define USE_HOT_ZONE_EXEMPT  true   // 热区豁免：热区agent不设block，PIBT正常执行
+// 论文版恒为 false：该开关只写 PIBT_Lock::g_agent_blocked，而官方 DefaultPlanner 不读该标志
+//（读取方仅在 src/my_planner/，本论文不用自写规划器），故在本配置下是死代码，关闭以保持干净。
+#define USE_HOT_ZONE_EXEMPT  false
 
 // ========== Wall-hugging in corridors (PIBT tie-breaker + A* guide path) ==========
 #define USE_WALL_HUGGING        true    // master switch for all wall-hugging features
